@@ -58,11 +58,13 @@ Drop any you do not use and delete the matching steps from the brief skill. Your
 
 - **Chat**: message yourself. Replies are formatted with Signal's native styles (bold, italic, strikethrough, monospace).
 - **Approve**: reply `yes` / `no`, a sentence, or react 👍 / 👎 on the question.
-- `npm run doctor`: health check (tooling, permissions, Signal, Mailbird, login, launchd, skills, recent errors).
-- `npm run report [hours]`: what the heartbeat archived, alerted and queued.
+- `npm run doctor`: health check (tooling, permissions, Signal, Mailbird, login, launchd, skills, heartbeat liveness, spend, recent errors).
+- `npm run report [hours]`: what the heartbeat archived, alerted and queued (local times).
+- `npm run triage-check [n]`: how the heartbeat would classify your newest `n` emails and what it would do, without acting or changing anything. A safe way to check the classifier on real mail.
 - `npm run restore <conversationId>`: put an archived conversation back in the inbox.
 - `npm test` / `npm run typecheck` / `npm run check:secrets`.
-- Logs: `state/agent.log` (rotated). Audit trail: `state/audit.jsonl`.
-- Tuning: every knob is an env var, listed in `.env.example` (heartbeat interval, quiet hours, brief start hour, archive cap, spend limit, model).
+- Logs: `state/agent.log` (local time, redacted, rotated). Audit trail: `state/audit.jsonl`. Raw crash output, if any: `state/launchd-stderr.log`.
+- Tuning: every knob is an env var, listed in `.env.example` (heartbeat interval, quiet hours, brief start hour, archive cap, spend limit, model). They are validated at startup: a typo stops the agent with a clear message in the log.
+- Pause: `touch state/paused` (or write a date into it to resume on that day). The heartbeat idles at night by itself (22:00 to 07:00 by default) and catches up in the morning.
 
 Back to the [README](../README.md) · [Architecture](ARCHITECTURE.md) · [Safety](SAFETY.md) · [Adapting](ADAPTING.md)

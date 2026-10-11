@@ -5,15 +5,25 @@ import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { isTriage, readAudit, type AuditEntry } from "./audit.ts";
 import { spentToday } from "./budget.ts";
+import { triageCheck } from "./heartbeat.ts";
+import { inQuietHours } from "./actions.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
-import { readText, statePath } from "./state.ts";
+import { readJson, readText, statePath } from "./state.ts";
 
 // Small operator tools:
 //   npm run report [hours]        what the heartbeat archived / alerted / queued (default 24h)
 //   npm run restore <id>          put an archived conversation back in the inbox
 //   npm run doctor                is everything the agent depends on in place?
+//   npm run triage-check [n]      how the heartbeat would classify the newest n emails (acts on nothing)
+
+// Local wall time, like the agent's own log.
+const local = (iso: string) => {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
@@ -28,7 +38,7 @@ async function report(hours: number) {
     if (set.length === 0) continue;
     console.log(`\n${decision} (${set.length})`);
     for (const e of set) {
-      console.log(`  ${e.ts.slice(5, 16).replace("T", " ")}  ${(e.meta?.from ?? "").slice(0, 28).padEnd(28)} ${(e.meta?.subject ?? "").slice(0, 60).padEnd(60)} [${e.meta?.kind}] ${decision === "archived" ? e.meta?.id : ""}`);
+      console.log(`  ${local(e.ts)}  ${(e.meta?.from ?? "").slice(0, 28).padEnd(28)} ${(e.meta?.subject ?? "").slice(0, 60).padEnd(60)} [${e.meta?.kind}] ${decision === "archived" ? e.meta?.id : ""}`);
     }
   }
 }
@@ -124,6 +134,15 @@ async function doctor() {
     line(loose.length === 0 ? true : "warn", "state files are owner-only", loose.length ? `group/world-readable: ${loose.join(", ")}` : "");
   }
 
+  const beat = readJson<{ lastTickAt?: string; lastNewMailAt?: string }>("heartbeat.json", {});
+  const ageMin = beat.lastTickAt ? (Date.now() - Date.parse(beat.lastTickAt)) / 60_000 : Infinity;
+  const quiet = inQuietHours(new Date(), settings.quietStartHour, settings.quietEndHour);
+  line(
+    ageMin <= 2 * settings.heartbeatMinutes + 1 || quiet ? true : "warn",
+    "heartbeat is ticking",
+    beat.lastTickAt ? `last tick ${Math.round(ageMin)} min ago${quiet ? ", night idle now" : ""}; last new mail ${beat.lastNewMailAt ? local(beat.lastNewMailAt) : "none yet"}` : "no tick recorded yet",
+  );
+
   const spent = spentToday();
   line(spent < settings.dailyBudgetUsd, "daily spend guard", `$${spent.toFixed(2)} of $${settings.dailyBudgetUsd} today (notional)`);
   line(isPaused() ? "warn" : true, "not paused", isPaused() ? `${statePath("paused")} exists` : "");
@@ -141,5 +160,9 @@ const [cmd, arg] = process.argv.slice(2);
 if (cmd === "report") await report(Number(arg ?? 24));
 else if (cmd === "restore" && arg) await restore(arg);
 else if (cmd === "doctor") await doctor();
-else console.log("usage: npm run report [hours] | npm run restore <conversationId> | npm run doctor");
+else if (cmd === "triage-check") {
+  const rows = await triageCheck(new Mailbird(), Number(arg ?? 10));
+  for (const r of rows) console.log(`${r.action.padEnd(8)} ${r.label.padEnd(10)} ${r.kind.padEnd(16)} ${r.from.slice(0, 24).padEnd(24)} ${r.subject.slice(0, 50).padEnd(50)} ${r.reason}`);
+}
+else console.log("usage: npm run report [hours] | npm run restore <conversationId> | npm run doctor | npm run triage-check [n]");
 process.exit(0);

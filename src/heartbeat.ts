@@ -12,6 +12,7 @@ import { triageBatch, type MailInput } from "./triage.ts";
 // pure rules in actions.ts decide what to archive, alert on or hand to the handler.
 
 const SEEN = "seen.json";
+const LIVENESS = "heartbeat.json"; // last tick, for `npm run doctor`
 const SEEN_TTL_MS = 14 * 24 * 3600_000;
 export const BRIEF_SUBJECT = /^\s*[☀🌙]/u; // our own briefs: never triaged
 const FETCH_CONCURRENCY = 4;
@@ -25,7 +26,7 @@ interface Row {
   conversationId: string;
   subject: string;
   lastSender: string;
-  receivedAtUtc: string;
+  receivedAtUtc: string; // despite the name, Mailbird reports local time (only used for ordering)
   lastMessageId: number;
 }
 
@@ -109,13 +110,8 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 
 const short = (res: unknown) => String(typeof res === "string" ? res : JSON.stringify(res)).replace(/\s+/g, " ").slice(0, 120);
 
-// Classify all new mail in one batch, act on the plan, record every decision.
-// Returns mail that should be retried next tick. Once the batch is classified nothing here
-// throws: every side effect is guarded, so a failure can never cause a repeat alert.
-async function processNewMail(mb: Mailbird, fresh: NewMail[], hooks: HeartbeatHooks): Promise<NewMail[]> {
-  console.log(`heartbeat: ${fresh.length} new conversation(s)`);
-
-  const inputs = await mapLimit(fresh, FETCH_CONCURRENCY, async (m): Promise<MailInput> => {
+async function fetchInputs(mb: Mailbird, mails: NewMail[]): Promise<MailInput[]> {
+  return mapLimit(mails, FETCH_CONCURRENCY, async (m): Promise<MailInput> => {
     const msg = await mb.call<{ body?: string; from?: { displayName?: string; email?: string } }>("get_message", { messageId: m.messageId });
     return {
       account: m.accountEmail,
@@ -126,8 +122,15 @@ async function processNewMail(mb: Mailbird, fresh: NewMail[], hooks: HeartbeatHo
       body: msg.body ?? "",
     };
   });
+}
 
-  const results = await triageBatch(inputs);
+// Classify all new mail in one batch, act on the plan, record every decision.
+// Returns mail that should be retried next tick. Once the batch is classified nothing here
+// throws: every side effect is guarded, so a failure can never cause a repeat alert.
+async function processNewMail(mb: Mailbird, fresh: NewMail[], hooks: HeartbeatHooks): Promise<NewMail[]> {
+  console.log(`heartbeat: ${fresh.length} new conversation(s)`);
+
+  const results = await triageBatch(await fetchInputs(mb, fresh));
   const plan = planActions(results, { maxArchives: settings.maxArchivesPerTick });
   const decision: string[] = results.map((t) => (settings.heartbeatLive ? "kept" : `would-${t.label}`));
   const extra: Record<number, Record<string, unknown>> = {};
@@ -229,6 +232,8 @@ export function startHeartbeat(hooks: HeartbeatHooks) {
         if (settings.heartbeatLive && mail.staleBriefs.length > 0) await archiveStaleBriefs(mb, mail.staleBriefs);
       }
       mail.commit(); // only now are these messages "seen"
+      const prev = readJson<{ lastNewMailAt?: string }>(LIVENESS, {});
+      writeJson(LIVENESS, { lastTickAt: new Date().toISOString(), lastNewMailAt: mail.fresh.length ? new Date().toISOString() : prev.lastNewMailAt });
     } catch (e) {
       if (!failing) console.error("heartbeat error:", (e as Error).message); // once per outage
       failing = true;
@@ -244,4 +249,23 @@ export function startHeartbeat(hooks: HeartbeatHooks) {
   console.log(
     `heartbeat: every ${settings.heartbeatMinutes} min, idle ${settings.quietStartHour}:00-${settings.quietEndHour}:00, actions ${settings.heartbeatLive ? "LIVE" : "log-only"}`,
   );
+}
+
+// `npm run triage-check`: classify the newest inbox mail exactly as the heartbeat would, and
+// show what it would do. Acts on nothing, writes nothing: a safe way to check the classifier.
+export async function triageCheck(mb: Mailbird, count: number) {
+  const mails: NewMail[] = [];
+  for (const inbox of await mb.inboxes()) {
+    const rows = await mb.call<Row[]>("list_conversations", { folderId: inbox.folderId, limit: count });
+    for (const r of rows) {
+      if (BRIEF_SUBJECT.test(r.subject)) continue;
+      mails.push({ accountEmail: inbox.email, conversationId: r.conversationId, messageId: r.lastMessageId, from: r.lastSender, subject: r.subject, receivedAtUtc: r.receivedAtUtc });
+    }
+  }
+  mails.sort((a, b) => b.receivedAtUtc.localeCompare(a.receivedAtUtc)).splice(count);
+  const results = await triageBatch(await fetchInputs(mb, mails));
+  const plan = planActions(results, { maxArchives: settings.maxArchivesPerTick });
+  const action = (i: number) =>
+    plan.archive.includes(i) ? "archive" : plan.alert.includes(i) ? "alert" : plan.handle.includes(i) ? "handler" : plan.deferred.includes(i) ? "defer" : "keep";
+  return mails.map((m, i) => ({ ...m, ...results[i]!, action: action(i) }));
 }

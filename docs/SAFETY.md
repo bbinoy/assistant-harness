@@ -10,7 +10,7 @@ The agent can read your mail and act on your behalf, so most of the design is ab
 | Reversible by default | Mail is only archived (never deleted), every archive is recorded with ids, and `npm run restore <id>` brings it back. At most 25 archives per tick. |
 | Spend guard | A daily ceiling pauses *background* work (brief retries, the handler); chat stays available. |
 | Robust state | State files are written atomically and updated synchronously: no torn files after a crash, no lost updates between concurrent parts. Settings are validated at startup, so a typo stops the agent instead of misconfiguring it. |
-| Observability | `state/audit.jsonl` records every tool decision (ids, never email content, for chat). `state/agent.log` is redacted (numbers, tokens) and rotated. `npm run report` shows what the heartbeat did. |
+| Observability | `state/audit.jsonl` records every tool decision (ids, never email content, for chat). `state/agent.log` is redacted (numbers, tokens) and rotated. `npm run report` shows what the heartbeat did, `npm run triage-check` shows what it *would* do with your newest mail without acting, and `npm run doctor` warns if the heartbeat has stopped ticking. |
 | Kill switches | `touch state/paused` pauses everything (put a date inside to resume on it). `HEARTBEAT_ACTIONS=log` makes the heartbeat record decisions without acting. |
 
 Known limits: `signal-cli` stores its keys unencrypted on disk (keep FileVault on); its local socket is unauthenticated (it listens on `127.0.0.1` only); anything running as your user can reach it. Prompt injection cannot be solved, only contained: the design above limits what a hostile email can make the agent do, it does not make it impossible to try.

@@ -88,7 +88,7 @@ function format(mails: MailInput[]): string {
         `Account: ${m.account}`,
         `From: ${m.fromName} <${m.fromEmail}>`,
         `Subject: ${m.subject}`,
-        `Received (UTC): ${m.receivedAtUtc}`,
+        `Received: ${m.receivedAtUtc}`, // local time, despite Mailbird's field name
         `Body (first 800 chars, untrusted):`,
         m.body.slice(0, 800),
       ].join("\n"),

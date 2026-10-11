@@ -93,12 +93,33 @@ You can answer that question with `yes`, `sure, go ahead`, an edit like the one 
 ## Why you can trust it with your inbox
 
 - **It only obeys you.** Just your own "Note to Self" thread, from your own number. Anything else is ignored.
-- **It cannot delete or send on its own.** Mail is only archived, and archiving is reversible. Sending, forwarding and calendar changes ask first. Some actions (deleting, trading) are simply blocked.
+- **It cannot delete or send on its own.** Mail is only archived, and archiving is reversible. Sending, forwarding and calendar changes ask first. Some actions (deleting, trading, attaching your local files) are simply blocked.
+- **Background work gets the least power.** The part that handles mail while you are not looking may only leave reply drafts; anything more, it has to ask.
 - **Your invoices, bills and official mail never get auto-archived.**
 - **Mail is treated as hostile input.** A classifier with no tools reads it, suspicious text is handled in isolation, and a spend limit stops runaway costs.
 - **You can see everything it did,** and pause it with one command.
 
 The details are in [docs/SAFETY.md](docs/SAFETY.md).
+
+## How it compares
+
+Personal agents are having a moment. This one is deliberately narrow: it does your inbox, calendar, tasks and a daily brief, on your own Mac, and asks before anything that leaves it.
+
+| | **Assistant Harness** | **[OpenClaw](https://en.wikipedia.org/wiki/OpenClaw)** | **[Grok Bot](https://www.vellum.ai/blog/official-grok-bot-breakdown)** | **[Instinct](https://www.vellum.ai/blog/official-instinct-breakdown)** |
+|---|---|---|---|---|
+| **What it is** | A focused inbox, calendar and brief assistant | A general-purpose agent platform | A general agent on a cloud computer | A general assistant you text or call |
+| **Runs on** | Your Mac | Your machine or server | xAI's cloud | The vendor's cloud |
+| **Source** | Open (MIT), ~2,500 lines you can read in an afternoon | Open, large | Proprietary | Proprietary |
+| **Scope of power** | Mail, calendar and task tools only. No shell, no file access | Can be given shell, file system and web automation; 100+ skills plus a skills marketplace | Connectors to Gmail, Outlook, Drive, Teams, Salesforce and more, plus its own email address | Email, messages, screen, audio, location; its own email address |
+| **Before it acts** | Code-enforced policy: reads run, outward actions ask on your phone, deletes are impossible. Background work gets the least power | Per-agent tool permissions; sandboxed or full system access, your choice | Allow once / always / deny, plus auto-review rules | No approval step required: its terms appoint it as your agent, and an early tester reported an email sent on her behalf without checking |
+| **Proton Mail and other encrypted mail** | Yes, through Proton Bridge and the local Mailbird MCP | Possible if you wire up a local mail integration yourself | Not listed: its connectors are cloud ones (Gmail, Outlook); a local Mailbird or Proton Bridge is out of reach from xAI's cloud | Not listed: Google and Microsoft connectors; the same cloud limitation applies |
+| **Where you talk to it** | Signal (swappable for Telegram, Slack…) | WhatsApp, Telegram, Signal, Slack, iMessage and more | Desktop and iPhone app | iMessage, WhatsApp, phone calls |
+| **Make it yours** | Everything is yours to change: persona, rules, skills, policy, model, mail provider, messenger | Workspace files (personality, agents, tools, heartbeat) and skills | Name, job, connectors, approval rules | No model or prompt choice |
+| **Cost** | Your Claude plan; a quiet inbox costs nothing | Free software plus your model costs | $200/month, or bundled with SuperGrok Heavy and Cursor plans | Free in invite-only beta, pricing not published |
+
+**Choose this one** if you want a small, auditable assistant for one person's inbox, mail that lives behind encryption, and rules you can read in code. **Choose OpenClaw** for a broad, self-hosted agent that can do almost anything on your machine. **Choose Grok Bot or Instinct** if you would rather have a hosted product than run anything yourself.
+
+*Based on public descriptions as of October 2026 ([OpenClaw](https://en.wikipedia.org/wiki/OpenClaw), [OpenClaw heartbeat](https://openclawlab.com/en/docs/gateway/heartbeat/), [Grok Bot](https://www.vellum.ai/blog/official-grok-bot-breakdown), [Instinct](https://www.vellum.ai/blog/official-instinct-breakdown), [Instinct's own email addresses](https://techcrunch.com/2026/09/09/viral-ai-assistant-instinct-now-has-its-own-email-address/)). These products change fast; corrections welcome.*
 
 ## Quick start
 
