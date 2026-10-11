@@ -55,16 +55,32 @@ async function route(m: IncomingMessage) {
   queue = queue.then(() => chat(m)).catch((e) => console.error("queue error:", e.message));
 }
 
+// "typing..." while the model works, renewed every 8 s (Signal drops it after ~15 s) and
+// stopped when the answer is ready.
+function keepTyping(): () => void {
+  void signal.typing(true);
+  const timer = setInterval(() => void signal.typing(true), 8000);
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    void signal.typing(false);
+  };
+}
+
 async function chat(m: IncomingMessage) {
   console.log(`owner message (${m.text.length} chars)`);
   const target = { author: m.from, timestamp: m.timestamp };
   // Status on the owner's message, each replacing the last: 👀 working, ✅ answered, ⚠️ failed.
   void signal.react("👀", target);
+  const stopTyping = keepTyping();
   try {
     if (m.quote) console.log(`owner is replying to an earlier message (${m.quote.text.length} chars)`);
     const started = Date.now();
     const { text, costUsd } = await ask(withQuoteContext(m.text, m.quote), approve, notify);
     console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
+    stopTyping(); // before the reply, so the indicator does not outlive the answer
     await out.reply(text, { quote: shouldThread(!!m.quote, Date.now() - started) ? { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp } : undefined });
     void signal.react("✅", target);
     await compactChatIfNeeded(); // after the reply is out; the next message waits for it
@@ -77,6 +93,7 @@ async function chat(m: IncomingMessage) {
         : "Something broke on my end. Check the logs, I'm not telling you what it was.",
     );
   } finally {
+    stopTyping();
     prepareChat(approve, notify); // warm up the process for the next message
   }
 }

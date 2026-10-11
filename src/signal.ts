@@ -170,6 +170,16 @@ export class SignalClient {
     }
   }
 
+  // The "typing..." indicator. Signal shows it for about 15 seconds, so it has to be renewed.
+  // Best-effort: a failure is never worth interrupting a reply for.
+  async typing(on: boolean): Promise<void> {
+    try {
+      await this.call("sendTyping", { recipient: [this.account], ...(on ? {} : { stop: true }) });
+    } catch (e) {
+      console.error("typing indicator failed:", (e as Error).message);
+    }
+  }
+
   // Sends to our own Note to Self. Returns the sent timestamp (used to ignore
   // our own echo when it syncs back).
   async sendNoteToSelf(text: string, textStyle: string[] = [], quote?: Quote): Promise<number> {

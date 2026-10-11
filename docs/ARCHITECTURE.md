@@ -50,7 +50,7 @@ Agent memory is usually described in layers. Here is where each one lives:
 
 ## Replies and threads
 
-Signal's reply (quote) works in both directions. When you reply to one of the assistant's messages (an alert, a brief section), the quoted text is passed to the chat as fenced data, so "move this one" has something to refer to. The assistant threads its own answer under your message only when that helps: you were already replying to something, or the answer took more than 20 seconds, so other messages may sit in between. Otherwise it answers plainly, to keep the Note to Self thread uncluttered.
+Signal's reply (quote) works in both directions. When you reply to one of the assistant's messages (an alert, a brief section), the quoted text is passed to the chat as fenced data, so "move this one" has something to refer to. The assistant threads its own answer under your message only when that helps: you were already replying to something, or the answer took more than 20 seconds, so other messages may sit in between. Otherwise it answers plainly, to keep the Note to Self thread uncluttered. While the model works, the assistant also sends Signal's "typing..." indicator (renewed every 8 seconds, stopped just before the answer goes out), next to the 👀 reaction on your message.
 
 ## Speed and cost
 
