@@ -1,0 +1,31 @@
+{
+  "name": "assistant-harness",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env src/main.ts",
+    "daemon": "./run-daemon.sh",
+    "typecheck": "tsc",
+    "test": "node --test test/*.test.ts",
+    "report": "node --env-file-if-exists=.env src/cli.ts report",
+    "restore": "node --env-file-if-exists=.env src/cli.ts restore",
+    "doctor": "node --env-file-if-exists=.env src/cli.ts doctor",
+    "check:secrets": "node scripts/check-secrets.ts",
+    "install:launchd": "scripts/install-launchd.sh",
+    "uninstall:launchd": "scripts/uninstall-launchd.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.296",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "undici": "^8.11.2"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "description": "A personal assistant agent: Signal chat, an email heartbeat, and a daily brief, built on the Claude Agent SDK.",
+  "license": "MIT"
+}
