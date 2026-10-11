@@ -109,3 +109,10 @@ test("hidden tools: Mailbird tools the skills never use are hidden, the ones the
   assert.ok(["snooze_conversation", "mark_all_as_read", "get_help"].every((t) => hidden.includes(`${M}${t}`)));
   assert.ok(!hidden.includes(`${M}get_message`) && !hidden.includes(`${M}archive_conversation`));
 });
+
+test("web: search is allowed in chat, opening a page asks, and background runs get neither", () => {
+  assert.equal(classify("WebSearch", { query: "zurich opening hours" }, "chat"), "allow");
+  assert.equal(classify("WebFetch", { url: "https://example.com/x", prompt: "hours" }, "chat"), "ask");
+  assert.equal(classify("WebFetch", { url: "file:///etc/passwd", prompt: "x" }, "chat"), "deny"); // the file:// rule still wins
+  for (const source of ["brief", "handler", "heartbeat"] as const) for (const t of ["WebSearch", "WebFetch"]) assert.equal(classify(t, { url: "https://example.com", query: "x" }, source), "deny", `${t} (${source})`);
+});

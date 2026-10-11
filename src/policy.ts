@@ -85,11 +85,21 @@ export function hiddenTools(
   return [...cfg.hiddenConnectors, ...new Set(extra)];
 }
 
+// The web. Pages and search results are untrusted content, like mail, and a fetched URL can carry
+// data out in its query string. So: searching is allowed in chat (a question typed by the
+// owner; results are snippets and links), opening a page is allowed only after the owner has
+// seen the exact address on their phone, and nothing unattended gets either (those runs read
+// untrusted mail). The approval text shows the address (format.ts).
+const WEB_SEARCH = "WebSearch";
+const WEB_FETCH = "WebFetch";
+
 export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
   if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && isNotePath(input.file_path) ? "allow" : "deny";
   if (tool === FORGET_NOTE) return source === "chat" ? "allow" : "deny";
+  if (tool === WEB_SEARCH) return source === "chat" ? "allow" : "deny";
+  if (tool === WEB_FETCH) return source === "chat" ? "ask" : "deny";
   if (tool === "Skill" || isReadTool(tool)) return "allow";
   return UNATTENDED_WRITES[source].has(tool) ? "allow" : "ask";
 }

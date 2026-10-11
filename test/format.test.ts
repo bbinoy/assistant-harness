@@ -33,3 +33,9 @@ test("approval text: text-direction controls are stripped, so what shows is what
   assert.doesNotMatch(text, /[‪-‮⁦-⁩]/);
   assert.match(text, /archive ecnab mail/);
 });
+
+test("approval text: opening a web page shows the exact address", () => {
+  const text = describeCall("WebFetch", { url: "https://calendly.com/someone/intro?utm=a", prompt: "free slots on Tuesday" });
+  assert.match(text, /^🌐 Open a web page/);
+  assert.match(text, /Address: https:\/\/calendly\.com\/someone\/intro\?utm=a/);
+});
