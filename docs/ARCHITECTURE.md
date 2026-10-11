@@ -102,7 +102,14 @@ src/memory-tools.ts  the chat-only `forget_note` tool (in-process MCP server)
 src/session.ts       when the chat session resumes, starts fresh or gets compacted (pure, tested)
 src/migrate.ts       one-time move of old state/ files into logs/ and memory/ (idempotent)
 src/fence.ts         fences untrusted or stored text as data inside a prompt
+src/quote.ts         Signal reply threading: quoted text in, threaded answers out (pure, tested)
+src/format.ts        readable approval text for each tool call (pure, tested)
+src/config.ts        required secrets and the owner's number, read from .env
+src/log.ts           redacting, rotating agent.log; first-start migration and permissions
+src/pause.ts         the pause switch and local-day helper
+src/redact.ts        keeps phone numbers and credentials out of logs
 src/cli.ts           doctor / report / restore / triage-check
+plugin/skills/       the skills the agent works with (daily-brief, mailbird, calendar, notion-tasks, meeting-prep, setup...), loaded straight from here
 test/                unit tests (node:test)
 scripts/             launchd install, secrets scanner
 ```
