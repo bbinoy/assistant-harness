@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,7 @@ import { inQuietHours } from "./actions.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
-import { readNotes } from "./notes.ts";
+import { missingSetup, readNotes } from "./notes.ts";
 import { migrateLegacyLayout } from "./migrate.ts";
 import { dataPath, readJson, readText } from "./state.ts";
 
@@ -127,11 +127,13 @@ async function doctor() {
   const lc = run("launchctl", ["list", settings.launchdLabel]);
   line(lc ? (/"PID"/.test(lc) ? true : "warn") : false, `launchd job ${settings.launchdLabel} loaded and running`, lc ? "" : "not loaded");
 
-  for (const skill of ["daily-brief", "mailbird", "notion-tasks", "calendar", "meeting-prep"]) {
-    const path = `${process.env.HOME}/.claude/skills/${skill}/SKILL.md`;
-    const todo = existsSync(path) && /TODO\(owner\)/.test(readFileSync(path, "utf8"));
-    line(existsSync(path) ? (todo ? "warn" : true) : false, `skill ${skill}`, todo ? "still has TODO(owner) parts to fill in" : existsSync(path) ? "" : "missing: npm run install:skills");
+  // The skills ship with the repo (plugin/skills), so there is nothing to install. What each
+  // one still needs about the owner lives in memory notes, and the chat sets those up.
+  for (const skill of ["daily-brief", "mailbird", "calendar", "notion-tasks", "meeting-prep", "setup"]) {
+    line(existsSync(`${settings.pluginDir}/skills/${skill}/SKILL.md`), `skill ${skill} (bundled)`);
   }
+  const gaps = missingSetup(readNotes());
+  line(gaps.length === 0 ? true : "warn", "setup notes", gaps.length ? `not set up yet: ${gaps.join("; ")}. Message the assistant "set up".` : "calendars, tasks, meetings and writing voice are set up");
 
   for (const [name, dir] of [["state", settings.stateDir], ["logs", settings.logsDir], ["memory", settings.memoryDir]] as const) {
     if (!existsSync(dir)) continue;

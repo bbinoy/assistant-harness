@@ -79,6 +79,9 @@ export function loadSettings(env: Env) {
     chatIdleResetHours: num(env, "CHAT_IDLE_RESET_HOURS", 6, 1, 168), // idle this long: start a fresh session
     chatCompactTokens: num(env, "CHAT_COMPACT_TOKENS", 110_000, 10_000, 500_000), // a turn this big: compact afterwards (tools and skills alone are ~50k)
 
+    // The bundled skills (plugin/skills) are loaded straight from the repo: nothing to install.
+    pluginDir: resolve(fileURLToPath(new URL("../plugin", import.meta.url))),
+
     dataDir,
     stateDir: join(dataDir, "state"), // bookkeeping the model never reads
     logsDir: join(dataDir, "logs"), // agent.log, audit.jsonl, daemon and launchd output

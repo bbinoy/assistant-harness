@@ -30,9 +30,6 @@ $EDITOR .env                          # at least SIGNAL_OWNER_NUMBER; set OWNER_
 # 3. Mail: make sure `claude mcp list` shows your mailbird server as connected
 #    (the agent reads its connection details from the same entry in ~/.claude.json)
 
-# 4. Skills: install the examples, then fill in the TODO(owner) parts (see below)
-npm run install:skills
-
 # 5. Check everything, then run it for real
 npm run doctor
 npm run install:launchd               # installs a launchd job; the agent starts now and at login
@@ -40,22 +37,25 @@ npm run install:launchd               # installs a launchd job; the agent starts
 
 Send yourself a message on Signal. The first heartbeat tick only records a **baseline** of your current inbox (it does not triage old mail). The first daily brief runs on the next tick at or after 07:00.
 
-### Skills
+### Skills and first-time setup
 
-The agent does its domain work through ordinary Claude Code skills in `~/.claude/skills/`. The repo ships anonymised templates in `examples/skills/`, and `npm run install:skills` copies them there. It never overwrites a skill you already have (`--force` does).
+The skills the agent works with ship in the repo, in `plugin/skills/`, and are loaded straight from there: there is nothing to install or copy. They hold no personal details. What they need to know about you (which calendars to check, where your Notion task list and meeting pages are, how you write) lives in your memory notes, and the agent sets those up with you in the chat.
 
-| Skill | Role | You fill in |
+After the agent is running, send it **"set up"** on Signal. It walks you through one item at a time, and you can skip any:
+
+| Item | What it does | Saved as |
 |---|---|---|
-| `daily-brief` | the brief's structure and rules | nothing, it is complete |
-| `mailbird` | triage rules, the newsletter-radar rules, your reply voice | your voice, your booking link |
-| `notion-tasks` | your task page and tidy rules (every deadline becomes a task) | your task page URL and id |
-| `calendar` | conflict flagging, travel-booking events | your calendars and time zone |
-| `meeting-prep` | when a meeting needs prep, where prep pages live | your Meetings database, view and template ids |
-| `mailbird-troubleshooting` | fixing a broken Mailbird connection | nothing |
+| Calendars | lists your Google calendars, you pick which count, plus your time zone | `setup-calendars.md` |
+| Tasks | finds your Notion task list, or creates one for you | `setup-tasks.md` |
+| Meeting notes | finds your meetings database, or creates a page for prep notes | `setup-meetings.md` |
+| How you write | with your permission, reads up to 15 of your sent mails and describes your style for you to correct | `voice-writing.md` |
+| Optional | booking link, topics for the brief's radar | `setup-booking-link.md`, `brief-radar-topics.md` |
 
-Every place that needs your own value is marked `TODO(owner)`, and `npm run doctor` warns until none are left. Drop any skill you do not use and delete the matching steps from the brief skill. Your filled-in skills hold personal details (addresses, Notion ids, your writing style), so they live in `~/.claude/skills/`, outside this repo. Keep them in a private repo of their own if you want them versioned.
+Until something is set up, the parts of the agent that need it skip it and say so (in chat, it offers to set it up; in the daily brief, a one-line "🛠 Setup" note at the end). `npm run doctor` shows what is missing. To change something later, say "set up my calendar" (or tasks, meetings, writing) again, or edit the note in `memory/notes/`.
 
-**Keep the agent's view of tools in step with your skills.** To save cost and time the model only sees four Notion tools (search, fetch, create-pages, update-page), and the Gmail, Drive, Docs and trading connectors are hidden. If a skill of yours needs another tool, add it to `NOTION_TOOLS` or remove the connector from `HIDDEN_CONNECTORS` in `.env`; otherwise that skill silently fails.
+The skills are `daily-brief` (the brief's structure), `mailbird` (triage and drafting rules), `calendar`, `notion-tasks`, `meeting-prep`, `mailbird-troubleshooting` and `setup`. To change how a domain is handled, edit the file in `plugin/skills/`. Your own skills in `~/.claude/skills/` are not offered to the agent.
+
+**Keep the agent's view of tools in step with the skills.** To save cost and time the model only sees four Notion tools (search, fetch, create-pages, update-page), and the Gmail, Drive, Docs and trading connectors are hidden. If a skill you write needs another tool, add it to `NOTION_TOOLS` or remove the connector from `HIDDEN_CONNECTORS` in `.env`; otherwise that skill silently fails.
 
 ## Daily use
 

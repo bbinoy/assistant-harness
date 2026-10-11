@@ -125,6 +125,6 @@ These are starting points, not tested here; check each platform's current docs.
 - **What counts as protected mail**: the `PROTECTED` pattern in `src/triage.ts` (invoices, bills, tax, insurance, legal, government). Extend it for your languages and senders.
 - **What may be auto-archived**: `ARCHIVE_KINDS` and the per-tick cap in `src/actions.ts`.
 - **Schedule and limits**: every tunable is an env var, validated at startup in `src/settings.ts`.
-- **The brief's shape**: it is whatever `~/.claude/skills/daily-brief/SKILL.md` says. Headings (`## `) become separate Signal messages.
+- **The brief's shape**: it is whatever `plugin/skills/daily-brief/SKILL.md` says. Headings (`## `) become separate Signal messages.
 
 Back to the [README](../README.md) · [Setup](SETUP.md) · [Architecture](ARCHITECTURE.md) · [Safety](SAFETY.md)

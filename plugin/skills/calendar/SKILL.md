@@ -1,34 +1,34 @@
 ---
 name: calendar
-description: Use for reviewing the owner's Google Calendar - listing the day's / week's events, flagging conflicts and overlaps, proposing reschedule slots, and creating calendar events from travel bookings. Part of the daily brief; also for ad-hoc "what's my day / find me a slot / is X on my calendar". Pairs with [[mailbird]], [[meeting-prep]], [[daily-brief]].
+description: Use for reviewing the owner's Google Calendar - listing the day's / week's events, flagging conflicts and overlaps, proposing reschedule slots, and creating calendar events from travel bookings. Part of the daily brief; also for ad-hoc "what's my day / find me a slot / is X on my calendar". Pairs with `number-one:mailbird`, `number-one:meeting-prep`, `number-one:daily-brief`.
 ---
 
 # Calendar review
 
-> TODO(owner): replace every `TODO(owner)` below with your own values, then delete this note.
-> `npm run doctor` warns while any remain.
+## Setup (from the owner's notes)
 
-## Calendars
+Which calendars to check, the time zone and which calendar travel bookings go on
+are in the owner's `setup-calendars` note (the `setup` notes in your memory block
+or `MEMORY.md`). Use exactly those; do not guess calendar ids.
 
-Google Calendar via MCP. Check all of these:
-- TODO(owner): your primary calendar id (usually your email address)
-- TODO(owner): any other calendar you want included
+**If there is no `setup-calendars` note:**
+- in chat, load `number-one:setup` and set it up with the owner now;
+- in an unattended run (nobody to ask), skip the calendar parts, and end the brief
+  with one line: "Calendar is not set up yet. Message me 'set up my calendar'."
 
-Calendars that are **not** connected (a work account whose calendar you
-cannot add, for example) are invisible. Never assume the list is complete;
-if a workday looks empty, say so.
-
-Use `list_events` with an explicit start/end range and
-`timeZone: "TODO(owner): your IANA time zone, e.g. Europe/Zurich"`. Call it
-for **all calendars in the same turn** (they are independent).
+Google Calendar via MCP. Call `list_events` with an explicit start/end range and
+the owner's time zone, for **all of the listed calendars in the same turn** (they
+are independent). The note may list calendars that are **not** connected (a work
+account that cannot be added, say): those are invisible, so never assume the list
+is complete, and if a workday looks empty, say so.
 
 ## Window
 
 - **Daily brief run:** today + tomorrow (forward), and back to the previous
-  brief's send time (for the post-meeting pass handoff to [[meeting-prep]]).
+  brief's send time (for the post-meeting pass handoff to `number-one:meeting-prep`).
 
 Produce a clean event list for the window - time, title, attendees,
-location - and hand it to [[meeting-prep]], which decides what needs prep.
+location - and hand it to `number-one:meeting-prep`, which decides what needs prep.
 
 ## Conflicts and hygiene (flag in the brief, never fix)
 
@@ -47,12 +47,12 @@ Do **not** call `update_event` on your own - the owner decides, then asks.
 ## Travel bookings -> calendar (the one automatic write)
 
 Scan recent booking-confirmation emails (flights, trains, hotels,
-buses) via [[mailbird]] `search_conversations`. For each **confirmed**
+buses) via `number-one:mailbird` `search_conversations`. For each **confirmed**
 booking with a firm date/time that is **not already on the calendar**:
 
-- `create_event` on the primary calendar: clear title ("Flight
+- `create_event` on the calendar the setup note names for bookings: clear title ("Flight
   ZRH -> BCN LX123", "Hotel: <name>, <city>", "Train <A> -> <B>"),
-  correct start/end (booking's own timezone, else the default above),
+  correct start/end (booking's own timezone, else the owner's time zone),
   location, and confirmation number + one-line summary in the
   description.
 - Note each created event in the brief under "Changed by the assistant".
@@ -73,4 +73,4 @@ booking with a firm date/time that is **not already on the calendar**:
 - **Conflicts / reschedules** section - only if there is something;
   each as a suggestion.
 - Created travel events -> "Changed by the assistant".
-- The meeting list itself is rendered by [[meeting-prep]].
+- The meeting list itself is rendered by `number-one:meeting-prep`.

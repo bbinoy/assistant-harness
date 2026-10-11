@@ -5,7 +5,7 @@ import type { Decision } from "./approvals.ts";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
 import { describeCall } from "./format.ts";
-import { isIndex, isNotePath, LAST_BRIEF, memoryFor, NOTES_DIR, parseNote } from "./notes.ts";
+import { isIndex, isNotePath, LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, parseNote, readNotes } from "./notes.ts";
 import { createMemoryServer } from "./memory-tools.ts";
 import { briefSystem, chatSystem, handlerSystem } from "./persona.ts";
 import { classify, hiddenTools, isReadTool } from "./policy.ts";
@@ -76,6 +76,8 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 
 const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens });
 
+const BUNDLED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup"].map((s) => `number-one:${s}`);
+
 interface Resume {
   resume?: string; // session to continue (chat only)
   previousCost: number; // total_cost_usd is cumulative across a resumed session
@@ -133,7 +135,9 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
       const written = String((tool === "Write" ? input.content : input.new_string) ?? "");
       const body = parseNote(file, written)?.text ?? written.trim();
       audit("memory_note", tool === "Write" ? "written" : "edited", "chat");
-      const gist = body.split("\n")[0]!.slice(0, 160);
+      // The note's own description says what it is; fall back to its first line.
+      const described = /^description:\s*["']?(.+?)["']?\s*$/m.exec(written.split(/\n---\n/)[0] ?? "")?.[1];
+      const gist = (described ?? body.split("\n")[0]!).slice(0, 160);
       memoryChanges.push(`${tool === "Write" ? "➕ saved" : "✏️ updated"} ${file}: ${gist}`);
     }
     opts.onToolSuccess?.(tool, input);
@@ -177,6 +181,10 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
     // "user" loads ~/.claude/skills, user-scope MCP servers and CLAUDE.md.
     // Not "project": there is no project here.
     settingSources: ["user"],
+    // The bundled skills, loaded from the repo; only these are offered to the model (the owner's
+    // other skills would cost context on every call and are none of its business).
+    plugins: [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
+    skills: BUNDLED_SKILLS,
     disallowedTools: hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
     canUseTool,
     hooks,
@@ -257,7 +265,7 @@ export function prepareChat(approve: Approve, notify: (text: string) => Promise<
 
 const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
   source: "chat",
-  systemPrompt: chatSystem(readText(LAST_BRIEF)),
+  systemPrompt: chatSystem(readText(LAST_BRIEF), new Date(), missingSetup(readNotes())),
   resumeChatSession: true,
   memoryNotify: notify,
   maxTurns: 40,
@@ -289,7 +297,7 @@ export function runBriefTurn(
 ): Promise<AgentReply> {
   return runAgent(prompt, approve, {
     source: "brief",
-    systemPrompt: briefSystem(memoryFor(["triage", "people", "scheduling", "context", "brief", "style"])),
+    systemPrompt: briefSystem(memoryFor(["triage", "people", "scheduling", "context", "brief", "style", "setup", "voice"]), missingSetup(readNotes())),
     resumeChatSession: false,
     maxTurns: 120,
     maxBudgetUsd: 5.0,
@@ -301,7 +309,7 @@ export function runBriefTurn(
 export function runHandlerTurn(prompt: string, approve: Approve): Promise<AgentReply> {
   return runAgent(prompt, approve, {
     source: "handler",
-    systemPrompt: handlerSystem(memoryFor(["people", "scheduling", "context", "style"])),
+    systemPrompt: handlerSystem(memoryFor(["people", "scheduling", "context", "style", "setup", "voice"]), missingSetup(readNotes())),
     resumeChatSession: false,
     maxTurns: 40,
     maxBudgetUsd: 2.0,

@@ -1,21 +1,24 @@
 ---
 name: notion-tasks
-description: Use when reviewing, tidying, or updating the owner's Notion task list, keeping it in sync with email activity, or reporting on tasks - typically as part of the daily brief, or an ad-hoc "what's on my list / add a task / mark this done". Pairs with [[mailbird]] and [[daily-brief]].
+description: Use when reviewing, tidying, or updating the owner's Notion task list, keeping it in sync with email activity, or reporting on tasks - typically as part of the daily brief, or an ad-hoc "what's on my list / add a task / mark this done". Pairs with `number-one:mailbird` and `number-one:daily-brief`.
 ---
 
 # Notion task list
 
-> TODO(owner): replace every `TODO(owner)` below with your own values, then delete this note.
-> `npm run doctor` warns while any remain.
+## Setup (from the owner's notes)
 
-**Page:** TODO(owner): the URL of your task page in Notion
-(id `TODO(owner): the page id`). This template assumes a **page** with two
-Markdown tables, `## 📅 Due` and `## 📋 Later`, with columns
-Task / Due / Priority / Area. Edit it with `notion-update-page`
-(`update_content` search-replace on the table rows). If you keep tasks in a
-database instead, rewrite this skill around `notion-create-pages` and
-`notion-update-page` on that database. (The agent only sees four Notion tools:
-search, fetch, create-pages and update-page. See `NOTION_TOOLS` in `.env.example`.)
+The task page (URL, id, whether it is a page of Markdown tables or a database, and
+its column and token names) is in the owner's `setup-tasks` note. Use exactly that.
+This skill describes the default layout: a **page** with two Markdown tables,
+`## 📅 Due` and `## 📋 Later`, columns Task / Due / Priority / Area, edited with
+`notion-update-page` (`update_content` search-replace on the table rows). If the
+note says the tasks are a database, use `notion-create-pages` and
+`notion-update-page` on it and adapt the steps below.
+
+**If there is no `setup-tasks` note:**
+- in chat, load `number-one:setup` and set it up with the owner now;
+- in an unattended run (nobody to ask), skip the task steps (no guessing a page),
+  and end the brief with one line: "Tasks are not set up yet. Message me 'set up my tasks'."
 
 **Fetch it once.** One `notion-fetch` on the page at the start of the
 tasks step; make all edits from that copy. Re-fetch at most once, only
@@ -23,8 +26,8 @@ to verify a complex multi-row rewrite. Never fetch it 2-3 times.
 
 ## Always do first (the page's own standing instructions)
 
-Put an instruction block for AI assistants on the page itself and follow it
-every run. A good default:
+The page carries an instruction block for AI assistants; follow it every run. If
+it has none, use these defaults:
 
 - Remove tasks that are done.
 - Move a row from **Later** to **Due** once its date is today or past;
@@ -33,8 +36,7 @@ every run. A good default:
 - Prefix a task with `⚠️` if it is overdue (date < today).
 - Fix any inconsistencies (missing sort, stale ⚠️, wrong section).
 
-Priority tokens: `🔴 High` `🟡 Medium` `🟢 Low`. Area tokens: `💼 Work`
-`🏠 Private`. Keep them exact (change them to your own).
+Priority and Area tokens (for example `🔴 High` `🟡 Medium` `🟢 Low`, `💼 Work` `🏠 Private`) are the ones in the setup note or already on the page. Keep them exact.
 
 ## Email <-> task sync
 
@@ -51,7 +53,7 @@ Only when the link is unambiguous:
   Area from context, Priority 🟡 unless clearly urgent.
 - **Nudge** when a task is "waiting on <person>" past its date and no
   reply has come: surface it in the brief with a draft follow-up (via
-  [[mailbird]]), do not auto-send.
+  `number-one:mailbird`), do not auto-send.
 
 When the link is fuzzy, do **not** edit - list it in the brief as a
 question ("looks like 'Foo' may be done - confirm?").
@@ -68,7 +70,7 @@ question ("looks like 'Foo' may be done - confirm?").
 ## Deadlines are tasks
 
 Keep it simple: every deadline lives here as a task row. When
-[[mailbird]] or [[meeting-prep]] surface a date-bound thing (payment
+`number-one:mailbird` or `number-one:meeting-prep` surface a date-bound thing (payment
 due, RSVP-by, sign-by, respond-by, application deadline, memo due, doc
 to sign) and no matching row exists, add one with its Due date and a
 short source hint. There is no separate deadline list - the Tasks

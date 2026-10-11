@@ -5,9 +5,6 @@ description: Use when a task involves email/inbox/Mailbird - checking mail, draf
 
 # Mailbird MCP
 
-> TODO(owner): fill in the `TODO(owner)` parts (your voice, your booking link), then delete this note.
-> `npm run doctor` warns while any remain.
-
 The owner's Mailbird Next app exposes a local MCP server (`mailbird`, user
 scope, available in every session). Tool usage, argument shapes and
 routing rules come from the server's own `initialize` instructions -
@@ -112,7 +109,7 @@ outreach and is triaged normally.
 ### Newsletter radar (skim a few before archiving)
 
 Newsletters are still archived, but a **small, selective** number are
-skimmed first to feed the brief's **Radar** section ([[daily-brief]]).
+skimmed first to feed the brief's **Radar** section (`number-one:daily-brief`).
 This is the one exception to "archive newsletters unopened".
 
 - **Which:** newsletters whose sender/subject plausibly covers the topics
@@ -141,7 +138,7 @@ reply isn't expected.
 
 Scan the owner's **Sent** mail from the last few days for promises they made:
 "I'll send you X", "by <day>", "next week I'll...", "let me get back to
-you on...". If there's no matching task in [[notion-tasks]], add one
+you on...". If there's no matching task in `number-one:notion-tasks`, add one
 (with the recipient + what was promised + any date), and note it in the
 brief. Don't create duplicates for things already tracked.
 
@@ -149,7 +146,7 @@ brief. Don't create duplicates for things already tracked.
 
 While triaging, pull any explicit date-bound ask - payment due, RSVP
 by, sign by, respond by, application deadline - and hand it to
-[[notion-tasks]] as a task with that Due date (if no matching row
+`number-one:notion-tasks` as a task with that Due date (if no matching row
 exists). Every deadline is a task; there is no separate list.
 
 ### Automated runs
@@ -163,28 +160,32 @@ This skill is run unattended by the agent, in two ways:
   handler that drafts replies. Invoices, bills, policy, tax and official mail
   are never archived automatically (the rules are in code, `src/triage.ts`).
 - **Daily brief, once per day** on the first heartbeat after the start hour:
-  the [[daily-brief]] skill sweeps what is left, then delivers one brief by
+  the `number-one:daily-brief` skill sweeps what is left, then delivers one brief by
   email and Signal.
 
 Operate the agent with `npm run doctor` (health), `npm run report` (what it
 did) and `npm run restore <id>` (un-archive). Mailbird must be running with
 "Allow write actions" on.
 
-## The owner's voice (drafted replies should sound like this)
+## The owner's voice (from the owner's notes)
 
-Match the correspondent's language and the thread's register first; within
-that, default to the below. Your assistant can only imitate what you tell it,
-so spend ten minutes here: skim your sent mail and describe it.
+How the owner writes is in their `voice-writing` note (length, greetings and
+sign-offs per language, tone, habits). Draft in that voice. Match the
+correspondent's language and the thread's register first; the voice note is the
+default within that. Wording rules (for example "no em dashes") are in the
+owner's `style-` notes; follow those too.
 
-- **Length.** TODO(owner): e.g. "Short. 2-5 sentences. One-liners are normal for logistics."
-- **Open / close.** TODO(owner): greetings and sign-offs you use, per language and formality. Say how you sign (first name only?).
-- **Voice.** TODO(owner): e.g. direct, warm but not effusive, low-pressure, how you handle hard conversations, how much humour.
-- **Mechanics.** TODO(owner): contractions, fragments, words you avoid ("I hope this finds you well"). Wording rules such as "no em dashes" belong in memory ("remember that I never use em dashes"), not here.
-- **Scheduling.** When a draft is about finding a time, offer the owner's
-  booking link, phrased naturally: TODO(owner): your booking link (or delete
-  this line), or name 2-3 concrete slots from their real free time. When the
-  other side has proposed times, check them against the calendar and confirm
-  one rather than sending the link back.
+**If there is no `voice-writing` note:** still draft (short, plain, polite, in the
+thread's language, signed with the owner's first name), and:
+- in chat, offer once to learn their voice from their sent mail: load
+  `number-one:setup`;
+- in an unattended run, add one line at the end of the brief: "I don't know how
+  you write yet. Message me 'set up my writing' and I'll learn it from your sent mail."
+
+**Scheduling.** When a draft is about finding a time, offer the owner's booking
+link if there is a `setup-booking-link` note (phrase it naturally), or name 2-3
+concrete slots from their real free time. When the other side has proposed times,
+check them against the calendar and confirm one rather than sending the link back.
 
 ## Guardrails (do not skip these for convenience)
 

@@ -10,19 +10,20 @@ import { settings } from "./settings.ts";
 // brief) read the same notes, and the guards around them.
 //
 // The category is the start of the file name ("triage-quark-not-urgent.md"). A run only sees
-// the categories it needs; a note with a name we do not recognise is shown to nobody but
+// the categories it needs (setup and voice notes: where the owner's calendars and Notion pages
+// are, how they write; see plugin/skills); a note with a name we do not recognise is shown to nobody but
 // chat, so a mislabelled note fails closed. A note may carry `expires: YYYY-MM-DD` in its
 // front matter; after that day it is no longer shown.
 
 export const NOTES_DIR = join(settings.memoryDir, "notes");
 export const LAST_BRIEF = "memory/last-brief.md"; // summary memory: the latest daily brief
 
-export const CATEGORIES = ["triage", "people", "scheduling", "context", "brief", "style"] as const;
+export const CATEGORIES = ["triage", "people", "scheduling", "context", "brief", "style", "setup", "voice"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 export const MAX_NOTES_SHOWN = 40;
-export const MAX_NOTE_CHARS = 600;
-export const MAX_TOTAL_CHARS = 6000;
+export const MAX_NOTE_CHARS = 1200;
+export const MAX_TOTAL_CHARS = 8000;
 
 export function ensureNotesDir(): void {
   mkdirSync(NOTES_DIR, { recursive: true, mode: 0o700 });
@@ -96,6 +97,19 @@ export function notesBlock(notes: readonly Note[], categories: readonly Category
   }
   return lines.length ? `${NOTE}\n${fence("owner_memory", lines.join("\n"))}` : "";
 }
+
+// The setup the bundled skills need before they can do their job, as the file name each one
+// is saved under (plugin/skills/setup tells the chat agent to use exactly these).
+export const SETUP_ITEMS = [
+  { file: "setup-calendars.md", label: "calendars (which to check, time zone)" },
+  { file: "setup-tasks.md", label: "task list (your Notion page)" },
+  { file: "setup-meetings.md", label: "meeting notes (where prep pages go)" },
+  { file: "voice-writing.md", label: "how you write (for email drafts)" },
+] as const;
+
+// Pure: the labels of setup items with no note yet (an expired or empty note counts as missing).
+export const missingSetup = (notes: readonly Note[]): string[] =>
+  SETUP_ITEMS.filter((i) => !notes.some((n) => n.file === i.file)).map((i) => i.label);
 
 // What a run sees: the notes of the given categories, rendered.
 export const memoryFor = (categories: readonly Category[], now = new Date()) => notesBlock(readNotes(now), categories);
