@@ -39,6 +39,19 @@ export function handlerPrompt(items: HandleItem[]): string {
   ].join("\n");
 }
 
+// The handler ends with one line per email: "<sender>: <what I did>" or "<sender>: left for <owner>
+// (<why>)". Reported as "Handled" only for what it actually did; the rest is "left for you", so
+// a run that did nothing is never announced as "Handled 1".
+export function formatReport(text: string, owner: string): string {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const left = lines.filter((l) => new RegExp(`left for ${owner}\\b`, "i").test(l));
+  const done = lines.filter((l) => !left.includes(l));
+  const parts: string[] = [];
+  if (done.length) parts.push(`🤝 Handled ${done.length}:\n${done.join("\n")}`);
+  if (left.length) parts.push(`👀 Left for you (${left.length}):\n${left.join("\n")}`);
+  return (parts.join("\n\n") || `🤝 Looked at it, nothing to report.`).slice(0, 1500);
+}
+
 export function createHandler(deps: { approve: Approve; notify: (text: string) => Promise<void> }) {
   let working = false;
 
@@ -57,7 +70,7 @@ export function createHandler(deps: { approve: Approve; notify: (text: string) =
         try {
           const { text, costUsd } = await runHandlerTurn(handlerPrompt(batch), deps.approve);
           audit("mail_handler", "done", "handler", { count: batch.length, costUsd });
-          await deps.notify(`🤝 Handled ${batch.length}:\n${text.trim().slice(0, 1500)}`);
+          await deps.notify(formatReport(text, OWNER));
         } catch (e) {
           console.error("handler failed:", (e as Error).message);
           audit("mail_handler", "failed", "handler", { count: batch.length });
