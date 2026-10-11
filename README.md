@@ -1,14 +1,16 @@
 # Assistant Harness
 
 **A personal assistant that lives on your Mac and talks to you on Signal.**
-It watches your inbox so you don't have to, handles the boring parts, tells you only about what matters, and asks before it does anything that counts.
+It runs your day, not just your inbox: it triages mail, keeps your Notion tasks tidy, watches your Google Calendar, preps your meetings from your Notion notes, drafts email replies and proposes fixes for calendar conflicts. It tells you only about what matters, and asks before it does anything that counts.
 
 Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview) and your own Claude Code skills. Small, readable, and made to be bent to your life: your name, your tone, your mail provider, your messenger.
 
 ## What it does
 
 - 📥 **Your inbox, handled.** Every 15 minutes it checks for new mail. Newsletters, notifications and cold outreach are archived. Anything that needs *you* arrives as one short message on your phone. Routine requests (like "can we meet next week?") get a reply drafted from your actual calendar.
-- ☀️ **A daily brief that remembers yesterday.** Once a day it reads your mail, tasks and calendar, preps your meetings, and sends one brief to your inbox and your phone, one message per section.
+- ☀️ **A daily brief that gets you ready for the day.** Once a day it reads your mail, Notion tasks and Google Calendar, then sends one brief to your inbox and your phone, one message per section. It remembers yesterday's brief, so it only tells you what changed.
+- 🗓️ **Meetings prepped, calendar conflicts sorted.** For each meeting it pulls the context from your Notion notes and past threads, and drafts the replies that are waiting. When two events collide it works out a fix and proposes it. Changes to your calendar wait for your OK.
+- ✅ **Tasks kept honest.** It reads your Notion task list, spots what is overdue or due soon, and tidies it as part of the brief.
 - 💬 **A chat that can actually do things.** Message yourself on Signal and talk to your mail, calendar and tasks in plain language. It has a personality (sassy by default, change it to taste).
 - 🧠 **It remembers what you tell it.** "Anything from the kids' school is urgent." "Dr. Weber is a client, write to him formally." "No meetings before 10." "Never use em dashes." Say it once in chat and it shapes how mail is sorted, how drafts read and when meetings are proposed. It lives in a plain file you can read and edit.
 - 🙋 **It asks first.** Sending, scheduling and sharing always wait for your OK, by reply, by a natural sentence, or by tapping 👍 on the question.
