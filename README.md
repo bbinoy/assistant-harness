@@ -121,7 +121,7 @@ Personal agents are having a moment. This one is deliberately narrow: it does yo
 
 | | **Number One** | **[OpenClaw](https://en.wikipedia.org/wiki/OpenClaw)** | **[Grok Bot](https://www.vellum.ai/blog/official-grok-bot-breakdown)** | **[Instinct](https://www.vellum.ai/blog/official-instinct-breakdown)** |
 |---|---|---|---|---|
-| **What it is** | A focused inbox, calendar and brief assistant | A general-purpose agent platform | A general agent on a cloud computer | A general assistant you text or call |
+| **What it is** | A lean inbox, calendar and daily standup assistant built on [Mailbird](https://www.getmailbird.com/) MCP locally | A general-purpose agent platform | A general agent on a cloud computer | A general assistant you text or call |
 | **Runs on** | Your Mac | Your machine or server | xAI's cloud | The vendor's cloud |
 | **Source** | Open (MIT), ~3,000 lines you can read in an afternoon | Open, large | Proprietary | Proprietary |
 | **Scope of power** | Mail, calendar and task tools only. No shell; files only inside its own memory notes | Can be given shell, file system and web automation; 100+ skills plus a skills marketplace | Connectors to Gmail, Outlook, Drive, Teams, Salesforce and more, plus its own email address | Email, messages, screen, audio, location; its own email address |
@@ -129,6 +129,7 @@ Personal agents are having a moment. This one is deliberately narrow: it does yo
 | **Proton Mail and other encrypted mail** | Yes, through Proton Bridge and the local Mailbird MCP | Possible if you wire up a local mail integration yourself | Not listed: its connectors are cloud ones (Gmail, Outlook); a local Mailbird or Proton Bridge is out of reach from xAI's cloud | Not listed: Google and Microsoft connectors; the same cloud limitation applies |
 | **Where you talk to it** | Signal (swappable for Telegram, Slack…) | WhatsApp, Telegram, Signal, Slack, iMessage and more | Desktop and iPhone app | iMessage, WhatsApp, phone calls |
 | **Make it yours** | Everything is yours to change: persona, rules, skills, policy, model, mail provider, messenger | Workspace files (personality, agents, tools, heartbeat) and skills | Name, job, connectors, approval rules | No model or prompt choice |
+| **Comes with existing personal assistant skills** | Yes: daily brief, mail triage and drafting, calendar review, Notion tasks, meeting prep and a guided setup, ready to use | Not listed as a bundle: 100+ general skills and a marketplace | Not listed | Not listed |
 | **Cost** | Your Claude plan: roughly a dollar for the daily brief, cents per chat message, nothing while the inbox is quiet | Free software plus your model costs | $200/month, or bundled with SuperGrok Heavy and Cursor plans | Free in invite-only beta, pricing not published |
 
 **Choose this one** if you want a small, auditable assistant for one person's inbox, mail that lives behind encryption, and rules you can read in code. **Choose OpenClaw** for a broad, self-hosted agent that can do almost anything on your machine. **Choose Grok Bot or Instinct** if you would rather have a hosted product than run anything yourself.
