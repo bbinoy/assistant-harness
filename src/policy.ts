@@ -65,16 +65,23 @@ const FORGET_NOTE = "mcp__memory__forget_note";
 // --- what the model never sees ---
 // Every tool schema the model can see is re-sent on every model call, so hiding tools nobody
 // uses is the biggest saving there is: Notion alone was ~58k tokens of a ~118k floor, one of
-// its tools 21k. Hidden: the connectors in HIDDEN_CONNECTORS, Notion beyond NOTION_TOOLS, and
+// its tools 21k. Hidden: the connectors in HIDDEN_CONNECTORS, Notion beyond NOTION_TOOLS, Mailbird beyond MAILBIRD_TOOLS, and
 // anything policy denies for everyone anyway (it could never run). Both lists are settings
 // (.env): a skill that needs a hidden tool fails, so keep them in step with your skills.
 const NOTION = "mcp__claude_ai_Notion__";
+const MAILBIRD = "mcp__mailbird__";
 
 // Names come from the tools a run has seen (agent.ts records them), so a tool a connector
 // adds later is hidden from the run after the one that first saw it.
-export function hiddenTools(seen: readonly string[], cfg: { hiddenConnectors: readonly string[]; notionTools: readonly string[] } = settings): string[] {
-  const keep = new Set(cfg.notionTools);
-  const extra = seen.filter((t) => (t.startsWith(NOTION) && !keep.has(t.slice(NOTION.length))) || DENY.some((re) => re.test(t)));
+export function hiddenTools(
+  seen: readonly string[],
+  cfg: { hiddenConnectors: readonly string[]; notionTools: readonly string[]; mailbirdTools: readonly string[] } = settings,
+): string[] {
+  const notion = new Set(cfg.notionTools);
+  const mail = new Set(cfg.mailbirdTools);
+  const extra = seen.filter(
+    (t) => (t.startsWith(NOTION) && !notion.has(t.slice(NOTION.length))) || (t.startsWith(MAILBIRD) && !mail.has(t.slice(MAILBIRD.length))) || DENY.some((re) => re.test(t)),
+  );
   return [...cfg.hiddenConnectors, ...new Set(extra)];
 }
 

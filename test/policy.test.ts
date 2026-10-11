@@ -98,7 +98,14 @@ test("hidden tools: unused connectors, Notion beyond the skills' four, and alway
 
 test("hidden tools: both lists come from settings, so a skill that needs another Notion tool can have it", () => {
   const N = "mcp__claude_ai_Notion__notion-";
-  const cfg = { hiddenConnectors: ["mcp__claude_ai_Gmail"], notionTools: ["notion-fetch", "notion-query-data-sources"] };
+  const cfg = { hiddenConnectors: ["mcp__claude_ai_Gmail"], notionTools: ["notion-fetch", "notion-query-data-sources"], mailbirdTools: ["get_message"] };
   const hidden = hiddenTools([`${N}fetch`, `${N}query-data-sources`, `${N}search`], cfg);
   assert.deepEqual(hidden, ["mcp__claude_ai_Gmail", `${N}search`]);
+});
+
+test("hidden tools: Mailbird tools the skills never use are hidden, the ones they use stay", () => {
+  const M = "mcp__mailbird__";
+  const hidden = hiddenTools([`${M}get_message`, `${M}archive_conversation`, `${M}snooze_conversation`, `${M}mark_all_as_read`, `${M}get_help`]);
+  assert.ok(["snooze_conversation", "mark_all_as_read", "get_help"].every((t) => hidden.includes(`${M}${t}`)));
+  assert.ok(!hidden.includes(`${M}get_message`) && !hidden.includes(`${M}archive_conversation`));
 });

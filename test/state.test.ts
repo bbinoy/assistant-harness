@@ -110,6 +110,8 @@ test("settings: the tool-hiding lists have safe defaults and reject typos", () =
   assert.ok(d.hiddenConnectors.includes("mcp__claude_ai_Interactive_Brokers_IBKR"));
   assert.deepEqual(d.notionTools, ["notion-search", "notion-fetch", "notion-create-pages", "notion-update-page"]);
   assert.deepEqual(loadSettings({ NOTION_TOOLS: "notion-fetch, notion-search" }).notionTools, ["notion-fetch", "notion-search"]);
+  assert.ok(d.mailbirdTools.includes("get_message") && !d.mailbirdTools.includes("snooze_conversation"));
+  assert.throws(() => loadSettings({ MAILBIRD_TOOLS: "Get-Message" }), /MAILBIRD_TOOLS/);
   assert.throws(() => loadSettings({ NOTION_TOOLS: "fetch" }), /NOTION_TOOLS/);
   assert.throws(() => loadSettings({ HIDDEN_CONNECTORS: "Gmail" }), /HIDDEN_CONNECTORS/);
 });

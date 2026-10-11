@@ -57,13 +57,24 @@ export function loadSettings(env: Env) {
 
     // What the model can see (policy.ts, hiddenTools): every tool it sees is re-sent on every
     // model call, so hide what your skills never use. A skill that needs a hidden tool will
-    // fail, so list it here. Connectors: tool-name prefixes. Notion: the tools to keep.
+    // fail, so list it here. Connectors: tool-name prefixes. Notion and Mailbird: the tools to keep.
     hiddenConnectors: list(
       env,
       "HIDDEN_CONNECTORS",
       ["mcp__claude_ai_Interactive_Brokers_IBKR", "mcp__claude_ai_Gmail", "mcp__claude_ai_Google_Drive", "mcp__claude_ai_Google_Docs", "mcp__claude_ai_Claude_Docs"],
       /^mcp__[\w-]+$/,
       "a tool-name prefix like mcp__claude_ai_Gmail",
+    ),
+    mailbirdTools: list(
+      env,
+      "MAILBIRD_TOOLS",
+      [
+        "summarize_all_inboxes", "list_accounts", "list_folders", "list_conversations", "search_conversations", "get_message", "get_conversation",
+        "list_attachments", "get_attachment_content", "archive_conversation", "select_conversation", "reply_to_conversation",
+        "reply_all_to_conversation", "create_draft", "update_draft", "forward_conversation", "send_message_now", "get_send_status", "send_self_briefing",
+      ],
+      /^[a-z_]+$/,
+      "a Mailbird tool name like get_message",
     ),
     notionTools: list(env, "NOTION_TOOLS", ["notion-search", "notion-fetch", "notion-create-pages", "notion-update-page"], /^notion-[\w-]+$/, "a Notion tool name like notion-fetch"),
 
