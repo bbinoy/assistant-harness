@@ -30,9 +30,8 @@ $EDITOR .env                          # at least SIGNAL_OWNER_NUMBER; set OWNER_
 # 3. Mail: make sure `claude mcp list` shows your mailbird server as connected
 #    (the agent reads its connection details from the same entry in ~/.claude.json)
 
-# 4. Skills: copy the example brief skill and write the ones you use
-cp -r examples/skills/daily-brief ~/.claude/skills/
-#    plus your own mailbird / notion-tasks / calendar / meeting-prep skills (see below)
+# 4. Skills: install the examples, then fill in the TODO(owner) parts (see below)
+npm run install:skills
 
 # 5. Check everything, then run it for real
 npm run doctor
@@ -43,16 +42,20 @@ Send yourself a message on Signal. The first heartbeat tick only records a **bas
 
 ### Skills
 
-The agent does its domain work through ordinary Claude Code skills in `~/.claude/skills/`. The repo ships one example, `examples/skills/daily-brief/SKILL.md` (the brief's structure and rules), and expects you to provide the ones it orchestrates, each describing *how you* want that domain handled:
+The agent does its domain work through ordinary Claude Code skills in `~/.claude/skills/`. The repo ships anonymised templates in `examples/skills/`, and `npm run install:skills` copies them there. It never overwrites a skill you already have (`--force` does).
 
-| Skill | Role |
-|---|---|
-| `mailbird` | triage rules, your reply voice, the newsletter-radar rules |
-| `notion-tasks` | your task database schema and tidy rules (every deadline becomes a task) |
-| `calendar` | conflict flagging, travel-booking events |
-| `meeting-prep` | when a meeting needs prep, where prep pages live |
+| Skill | Role | You fill in |
+|---|---|---|
+| `daily-brief` | the brief's structure and rules | nothing, it is complete |
+| `mailbird` | triage rules, the newsletter-radar rules, your reply voice | your voice, your booking link |
+| `notion-tasks` | your task page and tidy rules (every deadline becomes a task) | your task page URL and id |
+| `calendar` | conflict flagging, travel-booking events | your calendars and time zone |
+| `meeting-prep` | when a meeting needs prep, where prep pages live | your Meetings database, view and template ids |
+| `mailbird-troubleshooting` | fixing a broken Mailbird connection | nothing |
 
-Drop any you do not use and delete the matching steps from the brief skill. Your skills hold personal details, which is why they are not in this repo.
+Every place that needs your own value is marked `TODO(owner)`, and `npm run doctor` warns until none are left. Drop any skill you do not use and delete the matching steps from the brief skill. Your filled-in skills hold personal details (addresses, Notion ids, your writing style), so they live in `~/.claude/skills/`, outside this repo. Keep them in a private repo of their own if you want them versioned.
+
+**Keep the agent's view of tools in step with your skills.** To save cost and time the model only sees four Notion tools (search, fetch, create-pages, update-page), and the Gmail, Drive, Docs and trading connectors are hidden. If a skill of yours needs another tool, add it to `NOTION_TOOLS` or remove the connector from `HIDDEN_CONNECTORS` in `.env`; otherwise that skill silently fails.
 
 ## Daily use
 

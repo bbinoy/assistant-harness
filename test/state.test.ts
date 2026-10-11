@@ -104,3 +104,12 @@ test("settings: defaults, and typos fail loudly instead of becoming NaN", () => 
   assert.throws(() => loadSettings({ HEARTBEAT_ACTIONS: "yes" }), /HEARTBEAT_ACTIONS/);
   assert.equal(loadSettings({ HEARTBEAT_ACTIONS: "log" }).heartbeatLive, false);
 });
+
+test("settings: the tool-hiding lists have safe defaults and reject typos", () => {
+  const d = loadSettings({});
+  assert.ok(d.hiddenConnectors.includes("mcp__claude_ai_Interactive_Brokers_IBKR"));
+  assert.deepEqual(d.notionTools, ["notion-search", "notion-fetch", "notion-create-pages", "notion-update-page"]);
+  assert.deepEqual(loadSettings({ NOTION_TOOLS: "notion-fetch, notion-search" }).notionTools, ["notion-fetch", "notion-search"]);
+  assert.throws(() => loadSettings({ NOTION_TOOLS: "fetch" }), /NOTION_TOOLS/);
+  assert.throws(() => loadSettings({ HIDDEN_CONNECTORS: "Gmail" }), /HIDDEN_CONNECTORS/);
+});

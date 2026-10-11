@@ -24,6 +24,15 @@ function oneOf<T extends string>(env: Env, name: string, fallback: T, allowed: r
   return raw as T;
 }
 
+function list(env: Env, name: string, fallback: readonly string[], valid: RegExp, hint: string): string[] {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === "") return [...fallback];
+  const items = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const bad = items.find((s) => !valid.test(s));
+  if (bad) throw new Error(`${name}: "${bad}" is not ${hint}`);
+  return items;
+}
+
 export function loadSettings(env: Env) {
   // The data root holds three folders: state/ (bookkeeping), logs/ and memory/ (what the
   // model reads). Overridable so tests never touch the real data.
@@ -45,6 +54,18 @@ export function loadSettings(env: Env) {
 
     briefStartHour: num(env, "BRIEF_START_HOUR", 7, 0, 23),
     briefMaxAttempts: num(env, "BRIEF_MAX_ATTEMPTS", 3, 1, 10),
+
+    // What the model can see (policy.ts, hiddenTools): every tool it sees is re-sent on every
+    // model call, so hide what your skills never use. A skill that needs a hidden tool will
+    // fail, so list it here. Connectors: tool-name prefixes. Notion: the tools to keep.
+    hiddenConnectors: list(
+      env,
+      "HIDDEN_CONNECTORS",
+      ["mcp__claude_ai_Interactive_Brokers_IBKR", "mcp__claude_ai_Gmail", "mcp__claude_ai_Google_Drive", "mcp__claude_ai_Google_Docs", "mcp__claude_ai_Claude_Docs"],
+      /^mcp__[\w-]+$/,
+      "a tool-name prefix like mcp__claude_ai_Gmail",
+    ),
+    notionTools: list(env, "NOTION_TOOLS", ["notion-search", "notion-fetch", "notion-create-pages", "notion-update-page"], /^notion-[\w-]+$/, "a Notion tool name like notion-fetch"),
 
     dailyBudgetUsd: num(env, "DAILY_BUDGET_USD", 20, 0, 10_000),
 

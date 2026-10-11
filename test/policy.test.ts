@@ -95,3 +95,10 @@ test("hidden tools: unused connectors, Notion beyond the skills' four, and alway
   assert.ok(hidden.includes(`${N}query-data-sources`) && hidden.includes("mcp__mailbird__trash_conversation"));
   for (const keep of [`${N}fetch`, `${N}search`, `${N}create-pages`, `${N}update-page`, "mcp__mailbird__get_message", "mcp__claude_ai_Google_Calendar__list_events"]) assert.ok(!hidden.includes(keep), keep);
 });
+
+test("hidden tools: both lists come from settings, so a skill that needs another Notion tool can have it", () => {
+  const N = "mcp__claude_ai_Notion__notion-";
+  const cfg = { hiddenConnectors: ["mcp__claude_ai_Gmail"], notionTools: ["notion-fetch", "notion-query-data-sources"] };
+  const hidden = hiddenTools([`${N}fetch`, `${N}query-data-sources`, `${N}search`], cfg);
+  assert.deepEqual(hidden, ["mcp__claude_ai_Gmail", `${N}search`]);
+});

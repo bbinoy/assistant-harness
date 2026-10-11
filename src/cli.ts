@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
@@ -128,7 +128,9 @@ async function doctor() {
   line(lc ? (/"PID"/.test(lc) ? true : "warn") : false, `launchd job ${settings.launchdLabel} loaded and running`, lc ? "" : "not loaded");
 
   for (const skill of ["daily-brief", "mailbird", "notion-tasks", "calendar", "meeting-prep"]) {
-    line(existsSync(`${process.env.HOME}/.claude/skills/${skill}/SKILL.md`), `skill ${skill}`);
+    const path = `${process.env.HOME}/.claude/skills/${skill}/SKILL.md`;
+    const todo = existsSync(path) && /TODO\(owner\)/.test(readFileSync(path, "utf8"));
+    line(existsSync(path) ? (todo ? "warn" : true) : false, `skill ${skill}`, todo ? "still has TODO(owner) parts to fill in" : existsSync(path) ? "" : "missing: npm run install:skills");
   }
 
   for (const [name, dir] of [["state", settings.stateDir], ["logs", settings.logsDir], ["memory", settings.memoryDir]] as const) {

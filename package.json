@@ -11,6 +11,7 @@
     "restore": "node --env-file-if-exists=.env src/cli.ts restore",
     "doctor": "node --env-file-if-exists=.env src/cli.ts doctor",
     "check:secrets": "node scripts/check-secrets.ts",
+    "install:skills": "scripts/install-skills.sh",
     "install:launchd": "scripts/install-launchd.sh",
     "uninstall:launchd": "scripts/uninstall-launchd.sh",
     "triage-check": "node --env-file-if-exists=.env src/cli.ts triage-check"

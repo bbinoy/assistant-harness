@@ -141,6 +141,7 @@ Personal agents are having a moment. This one is deliberately narrow: it does yo
 git clone https://github.com/<you>/number-one && cd number-one
 npm install
 cp .env.example .env && chmod 600 .env     # add your Signal number and names
+npm run install:skills                      # example skills; fill in the TODO(owner) parts
 npm run doctor                              # checks everything is in place
 npm run install:launchd                     # starts it now and at every login
 ```
