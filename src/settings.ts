@@ -52,6 +52,12 @@ export function loadSettings(env: Env) {
     quietStartHour: num(env, "QUIET_START_HOUR", 22, 0, 23),
     quietEndHour: num(env, "QUIET_END_HOUR", 7, 0, 23),
 
+    // The radar: while the owner is awake, a model looks at calendar and mail every few hours and
+    // writes to them only when something deserves it (src/radar.ts).
+    proactive: oneOf(env, "PROACTIVE", "on", ["on", "off"] as const) === "on",
+    radarMinutes: num(env, "RADAR_MINUTES", 120, 30, 720),
+    maxProactivePerDay: num(env, "MAX_PROACTIVE_PER_DAY", 8, 0, 50),
+
     briefStartHour: num(env, "BRIEF_START_HOUR", 7, 0, 23),
     briefMaxAttempts: num(env, "BRIEF_MAX_ATTEMPTS", 3, 1, 10),
 

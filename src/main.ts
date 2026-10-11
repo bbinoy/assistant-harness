@@ -8,6 +8,8 @@ import { acceptOwner } from "./guards.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
+import { recordPing } from "./pings.ts";
+import { createRadar } from "./radar.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { ensureSignalDaemon } from "./signal-daemon.ts";
@@ -18,7 +20,14 @@ ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its no
 const signal = new SignalClient(settings.signalHost, settings.signalPort, config.ownerNumber);
 const out = createOutbound(signal);
 const approve: Approve = (description, call, abort) => approvals.request(out.replyPlain, description, call, abort);
-const notify = async (text: string) => void (await out.replyPlain(text));
+// `say` is a plain message to the owner. `notify` is what the assistant sends on its own (mail
+// alerts, handled mail, setup problems) and is also remembered, so the chat knows what a reply
+// like "yes, do that" refers to (pings.ts). Memory announcements and chat answers use `say`.
+const say = async (text: string) => void (await out.replyPlain(text));
+const notify = async (text: string) => {
+  recordPing(text);
+  await say(text);
+};
 
 // The linked device sees ALL of the owner's Signal traffic. Only their own Note to Self is
 // ever acted on; everything else is dropped here, before it can reach anything else.
@@ -63,7 +72,7 @@ async function chat(m: IncomingMessage) {
   try {
     if (m.quote) console.log(`owner is replying to an earlier message (${m.quote.text.length} chars)`);
     const started = Date.now();
-    const { text, costUsd } = await ask(withQuoteContext(m.text, m.quote), approve, notify);
+    const { text, costUsd } = await ask(withQuoteContext(m.text, m.quote), approve, say);
     console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
     await out.reply(text, { quote: shouldThread(!!m.quote, Date.now() - started) ? { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp } : undefined });
     void signal.react("✅", target);
@@ -77,7 +86,7 @@ async function chat(m: IncomingMessage) {
         : "Something broke on my end. Check the logs, I'm not telling you what it was.",
     );
   } finally {
-    prepareChat(approve, notify); // warm up the process for the next message
+    prepareChat(approve, say); // warm up the process for the next message
   }
 }
 
@@ -85,17 +94,22 @@ await ensureSignalDaemon(config.ownerNumber, settings.signalHost, settings.signa
 await signal.connect();
 console.log(`connected to signal-cli; accepting only ${mask(config.ownerNumber)}; auth: ${config.credential}`);
 
-prepareChat(approve, notify);
+prepareChat(approve, say);
 // A warm process is used only while fresh (agent.ts); keep one ready so a message after a
 // quiet hour is still quick. Local work only, no model call.
-setInterval(() => prepareChat(approve, notify), 25 * 60_000).unref();
+setInterval(() => prepareChat(approve, say), 25 * 60_000).unref();
 
 const handler = createHandler({ approve, notify });
 handler.resume();
+
+const radar = createRadar({ approve, notify: say, briefDue: isBriefDue }); // records its own pings
 
 startHeartbeat({
   alert: notify,
   handle: handler.enqueue,
   briefDue: isBriefDue,
-  onTick: () => void maybeRunBrief({ approve, sendBrief: out.sendBrief, notify }),
+  onTick: () => {
+    void maybeRunBrief({ approve, sendBrief: out.sendBrief, notify });
+    void radar();
+  },
 });

@@ -48,6 +48,12 @@ Agent memory is usually described in layers. Here is where each one lives:
 
 **What stays out of memory:** safety rules (policy, the protected-mail guard, suspicious-text isolation) and operational settings (quiet hours, intervals, the spend limit, model, names). Memory is written through a model, so it must never control those.
 
+## The proactive radar
+
+The heartbeat watches mail every few minutes with no model. The calendar can only be read through the model, so the radar is a periodic look instead: every `RADAR_MINUTES` (120), while you are awake and after the daily brief has run, one Sonnet run (`src/radar.ts`, skill `number-one:radar`) reads your calendar, the heartbeat's digest and what it already told you, and returns JSON: zero or more messages (a meeting about to start with its prep, a clash with two alternative slots, mail that the calendar makes urgent). Most runs return nothing.
+
+The model decides **what** deserves an interruption; code decides whether it **may** be sent (`src/radar-rules.ts`): never the same message twice (a dedupe key per event), at most 3 per run and `MAX_PROACTIVE_PER_DAY` (8) per day, and nothing while paused, during quiet hours, while the daily brief is still due, or over the spend limit. The run is read-only apart from a meeting prep page in Notion; a calendar change or a sent mail still asks on your phone (policy source `radar`). It must report how many events it read, so a run that never looked shows up in the log. Everything the assistant sends on its own is kept in `memory/recent-pings.json`, so the chat knows what "yes, do that" refers to. Switch it off with `PROACTIVE=off`.
+
 ## Skills and setup
 
 The skills are an SDK **plugin** that lives in the repo (`plugin/`, loaded with the `plugins` option, offered to the model with the `skills` option, so nothing in `~/.claude/skills` leaks in or costs context). They are written for anyone: calendars, Notion pages and writing style are read from the owner's `setup-calendars`, `setup-tasks`, `setup-meetings`, `voice-writing` notes. `src/notes.ts` knows these four required files (`SETUP_ITEMS`); the system prompts list the missing ones. In chat the agent then offers to run the `setup` skill, which finds things with the connectors (list calendars, search Notion, optionally read sent mail to learn the owner's voice), asks one small question at a time and saves each answer as a note. Runs with nobody to ask (brief, handler) skip what they cannot do without it and say so in one line. Which connectors a run could see (Notion, Google Calendar, mail) is recorded from its start-up message in `state/connectors.json` (`src/connectors.ts`), so a missing connector is reported as "not connected", with how to fix it, and never as "not set up"; setup items that depend on it are not listed as missing. Nothing personal is ever in the repo.
@@ -97,6 +103,10 @@ src/budget.ts        daily spend guard
 src/settings.ts      every tunable, validated at startup (pure loader, tested)
 src/state.ts         atomic, synchronous access to state/, logs/ and memory/ (tested)
 src/audit.ts         append-only audit log and its reader
+src/radar.ts         the proactive radar: periodic calendar and mail look-around, sends only what matters
+src/radar-rules.ts   when the radar is due, which of its messages may be sent (pure, tested)
+src/pings.ts         what the assistant sent on its own, for chat context and de-duplication
+src/connectors.ts    which connectors (Notion, Calendar, mail) the last run could see
 src/notes.ts         the owner's notes: how background runs read them, path guard, forget (pure core, tested)
 src/memory-tools.ts  the chat-only `forget_note` tool (in-process MCP server)
 src/session.ts       when the chat session resumes, starts fresh or gets compacted (pure, tested)

@@ -15,7 +15,7 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
   - 📰 **Summarises your newsletters into a short news digest**: Actually interested in the newsletters you subscribed to but started ignoring them after a while? Number One gives you the top 3 nuggets based on your preferences, and archives the newsletters for you.
 - 🤝 **Is helpful**
   - 💬 **Listens to your messages on Signal.** Message yourself on Signal and talk to your mail, calendar and tasks in plain language. It has a personality (sassy by default, change it to taste).
-  - ✋ **Is proactive.** Reaches out to you on Signal if something needs your attention.
+  - ✋ **Is proactive.** Reaches out to you on Signal if something needs your attention: urgent mail right away, and every couple of hours a look at your calendar for meetings about to start (with their prep) and clashes.
   - 🧠 **Remembers your instructions.** "Anything from the kids' school is urgent." "Dr. Weber is a client, write to him formally." "No meetings before 10." "Never use em dashes." Say it once in chat and it shapes how mail is sorted, how drafts read and when meetings are proposed. 
   - 🙋 **Asks for your approval.** Sending, scheduling and sharing always wait for your OK, by reply, by a natural sentence, or by tapping 👍 on the question.
 

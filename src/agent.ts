@@ -8,8 +8,9 @@ import { describeCall } from "./format.ts";
 import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
 import { isIndex, isNotePath, LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, parseNote, readNotes } from "./notes.ts";
 import { createMemoryServer } from "./memory-tools.ts";
-import { briefSystem, chatSystem, handlerSystem } from "./persona.ts";
+import { briefSystem, chatSystem, handlerSystem, radarSystem } from "./persona.ts";
 import { classify, hiddenTools, isReadTool } from "./policy.ts";
+import { recentPings } from "./pings.ts";
 import { OWNER, settings } from "./settings.ts";
 import { planSession, type ChatSession } from "./session.ts";
 import { readJson, readText, writeJson } from "./state.ts";
@@ -29,6 +30,7 @@ export function idsOf(input: Record<string, unknown>): Record<string, unknown> |
 export interface AgentReply {
   text: string;
   costUsd: number;
+  structured?: unknown; // the run's constrained JSON output, when it asked for one
 }
 
 export type Approve = (
@@ -71,6 +73,7 @@ export interface RunOptions {
   memoryNotify?: (text: string) => Promise<void>; // chat only: turns on the SDK's auto-memory (notes in memory/notes/) and announces every change
   maxTurns: number;
   maxBudgetUsd: number; // hard per-run spend cap
+  outputFormat?: Options["outputFormat"]; // constrained JSON output
   // Fires after a tool call succeeds. Used to capture the brief the agent sends.
   onToolSuccess?: (tool: string, input: unknown) => void;
 }
@@ -82,7 +85,7 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens });
 
 const down = () => disconnected(readConnectors());
-const BUNDLED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup"].map((s) => `number-one:${s}`);
+const BUNDLED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].map((s) => `number-one:${s}`);
 
 interface Resume {
   resume?: string; // session to continue (chat only)
@@ -163,6 +166,7 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
 
   return {
     model: settings.model,
+    outputFormat: opts.outputFormat,
     // Wait for every connector before the first model call. By default they connect in the
     // background, and a slow one (seen: ~30s) means the first call runs without its tools,
     // then the tool list changes mid-session, which also throws away the prompt cache. With
@@ -225,7 +229,7 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
     }
     recordCost(message.total_cost_usd - previousCost); // failures cost money too
     if (message.subtype === "success" && !message.is_error) {
-      return { text: message.result, costUsd: message.total_cost_usd - previousCost };
+      return { text: message.result, costUsd: message.total_cost_usd - previousCost, structured: message.structured_output };
     }
     if (lastError === "authentication_failed") throw new AuthError("authentication_failed");
     throw new Error(`agent turn ended with ${message.subtype}${lastError ? ` (${lastError})` : ""}`);
@@ -275,7 +279,7 @@ export function prepareChat(approve: Approve, notify: (text: string) => Promise<
 
 const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
   source: "chat",
-  systemPrompt: chatSystem(readText(LAST_BRIEF), new Date(), missingSetup(readNotes(), down()), down()),
+  systemPrompt: chatSystem(readText(LAST_BRIEF), new Date(), missingSetup(readNotes(), down()), down(), recentPings()),
   resumeChatSession: true,
   memoryNotify: notify,
   maxTurns: 40,
@@ -312,6 +316,18 @@ export function runBriefTurn(
     maxTurns: 120,
     maxBudgetUsd: 5.0,
     onToolSuccess,
+  });
+}
+
+// The proactive radar: a fresh session each time; it answers with constrained JSON.
+export function runRadarTurn(prompt: string, approve: Approve, outputFormat: Options["outputFormat"]): Promise<AgentReply> {
+  return runAgent(prompt, approve, {
+    source: "radar",
+    systemPrompt: radarSystem(memoryFor(["people", "scheduling", "context", "style", "brief", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
+    resumeChatSession: false,
+    maxTurns: 30,
+    maxBudgetUsd: 1.0,
+    outputFormat,
   });
 }
 

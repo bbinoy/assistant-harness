@@ -51,6 +51,9 @@ const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
   brief: ROUTINE_WRITES,
   handler: DRAFT_REPLIES,
   heartbeat: new Set(), // the heartbeat itself never runs an agent
+  // The radar reads calendar and mail, and may only write a meeting-prep page in Notion; anything
+  // else it tries asks the owner on the phone like the handler's.
+  radar: new Set(["mcp__claude_ai_Notion__notion-create-pages", "mcp__claude_ai_Notion__notion-update-page"]),
 };
 
 // The owner's memory is the SDK's auto-memory: the chat agent keeps small notes in
