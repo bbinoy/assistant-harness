@@ -56,7 +56,7 @@ export function loadSettings(env: Env) {
     // Chat session hygiene: the SDK only compacts near the context limit, so a long-lived
     // session would re-send an ever-growing history on every turn.
     chatIdleResetHours: num(env, "CHAT_IDLE_RESET_HOURS", 6, 1, 168), // idle this long: start a fresh session
-    chatCompactTokens: num(env, "CHAT_COMPACT_TOKENS", 60_000, 10_000, 500_000), // a turn this big: compact afterwards
+    chatCompactTokens: num(env, "CHAT_COMPACT_TOKENS", 110_000, 10_000, 500_000), // a turn this big: compact afterwards (tools and skills alone are ~50k)
 
     dataDir,
     stateDir: join(dataDir, "state"), // bookkeeping the model never reads

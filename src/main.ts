@@ -1,5 +1,5 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
-import { ask, AuthError, compactChatIfNeeded, type Approve } from "./agent.ts";
+import { ask, AuthError, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
@@ -73,12 +73,19 @@ async function chat(m: IncomingMessage) {
         ? "My login expired. On the Mac, run `claude auth login`, then message me again."
         : "Something broke on my end. Check the logs, I'm not telling you what it was.",
     );
+  } finally {
+    prepareChat(approve, notify); // warm up the process for the next message
   }
 }
 
 await ensureSignalDaemon(config.ownerNumber, settings.signalHost, settings.signalPort);
 await signal.connect();
 console.log(`connected to signal-cli; accepting only ${mask(config.ownerNumber)}; auth: ${config.credential}`);
+
+prepareChat(approve, notify);
+// A warm process is used only while fresh (agent.ts); keep one ready so a message after a
+// quiet hour is still quick. Local work only, no model call.
+setInterval(() => prepareChat(approve, notify), 25 * 60_000).unref();
 
 const handler = createHandler({ approve, notify });
 handler.resume();

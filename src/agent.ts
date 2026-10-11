@@ -1,5 +1,6 @@
 import { basename } from "node:path";
-import { query, type CanUseTool, type HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk";
+import { readFileSync } from "node:fs";
+import { query, startup, type CanUseTool, type HookCallbackMatcher, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { Decision } from "./approvals.ts";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
@@ -7,7 +8,7 @@ import { describeCall } from "./format.ts";
 import { isIndex, isNotePath, LAST_BRIEF, memoryFor, NOTES_DIR, parseNote } from "./notes.ts";
 import { createMemoryServer } from "./memory-tools.ts";
 import { briefSystem, chatSystem, handlerSystem } from "./persona.ts";
-import { classify, isReadTool } from "./policy.ts";
+import { classify, hiddenTools, isReadTool } from "./policy.ts";
 import { OWNER, settings } from "./settings.ts";
 import { planSession, type ChatSession } from "./session.ts";
 import { readJson, readText, writeJson } from "./state.ts";
@@ -40,17 +41,18 @@ export type Approve = (
 // resumed session, so we keep the running total and report each turn's delta.
 const SESSION_FILE = "state/session.json";
 
-// Connectors the skills never use. Removed from the model's view entirely (not just denied):
-// every tool schema the model can see is re-read on every turn, and these ~80 tools were most
-// of a small chat's context. Notion, Google Calendar and Mailbird stay. To give the assistant
-// another connector, delete its line here.
-const UNUSED_CONNECTORS = [
-  "mcp__claude_ai_Interactive_Brokers_IBKR",
-  "mcp__claude_ai_Gmail",
-  "mcp__claude_ai_Google_Drive",
-  "mcp__claude_ai_Google_Docs",
-  "mcp__claude_ai_Claude_Docs",
-];
+// Tool names runs have seen, so policy.hiddenTools() can hide the unused ones by name.
+// Seeded with Notion's current tools, so even the very first run is trimmed.
+const TOOLS_SEEN = "state/tools-seen.json";
+const NOTION_SEED = "ai-search check-mcp-next-steps convert-page-to-skill create-attachment create-comment create-database create-file-upload create-folder create-view download-attachment download-skill duplicate-page get-async-task get-comments get-session-status get-teams get-tool-access get-users list-favorite-pages list-private-pages list-recent-pages list-session-events list-shared-pages move-pages query-data-sources query-meeting-notes query-multiple-data-sources query-sessions read-session-event search-agents search-sessions send-message-to-session show-advanced-analysis-next-steps spawn-session stop-session update-data-source update-folder update-view upload-skill wait-session"
+  .split(" ")
+  .map((t) => `mcp__claude_ai_Notion__notion-${t}`);
+const toolsSeen = () => readJson<string[]>(TOOLS_SEEN, NOTION_SEED);
+function recordToolsSeen(tools: readonly string[]) {
+  const known = toolsSeen();
+  const added = tools.filter((t) => t.startsWith("mcp__") && !known.includes(t));
+  if (added.length) writeJson(TOOLS_SEEN, [...known, ...added]);
+}
 
 export interface RunOptions {
   source: Source; // audit tag: who is acting
@@ -69,17 +71,26 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 
 const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens });
 
-export async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Promise<AgentReply> {
-  const saved: ChatSession = opts.resumeChatSession ? readJson<ChatSession>(SESSION_FILE, { costUsd: 0 }) : { costUsd: 0 };
-  // A fresh session starts its cost total at zero, so the previous total must not be subtracted.
-  const fresh = opts.resumeChatSession && planSession(saved, new Date(), chatPlanOpts()) === "fresh";
-  if (fresh && saved.sessionId) {
-    console.log(`chat: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
-    audit("chat_session", "idle-reset", "chat");
-  }
-  const resume = fresh ? undefined : saved.sessionId;
-  const previousCost = fresh ? 0 : saved.costUsd;
+interface Resume {
+  resume?: string; // session to continue (chat only)
+  previousCost: number; // total_cost_usd is cumulative across a resumed session
+}
 
+// Chat continues its saved session unless session.ts says to start fresh.
+function chatResume(announce: boolean): Resume {
+  const saved = readJson<ChatSession>(SESSION_FILE, { costUsd: 0 });
+  // A fresh session starts its cost total at zero, so the previous total must not be subtracted.
+  if (planSession(saved, new Date(), chatPlanOpts()) === "fresh") {
+    if (announce && saved.sessionId) {
+      console.log(`chat: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
+      audit("chat_session", "idle-reset", "chat");
+    }
+    return { previousCost: 0 };
+  }
+  return { resume: saved.sessionId, previousCost: saved.costUsd };
+}
+
+function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
   // Permissions as code: policy.ts decides allow / ask / deny; "ask" goes to the owner's phone.
   const canUseTool: CanUseTool = async (tool, input, { signal }) => {
     const verdict = classify(tool, input, opts.source);
@@ -134,42 +145,47 @@ export async function runAgent(prompt: string, approve: Approve, opts: RunOption
     ],
   };
 
-  const stream = query({
-    prompt,
-    options: {
-      model: settings.model,
-      // Rendered fresh on every request (not recorded once per session): the prompt carries
-      // today's date and the last brief, and a change must apply to the very next message.
-      // Chat uses Claude Code's preset prompt because that is where the SDK's auto-memory
-      // instructions live (with a custom prompt the model says "noted" and saves nothing);
-      // our persona and rules are appended. The unattended runs keep a custom prompt and
-      // get their notes injected as data (notes.ts).
-      systemPrompt: opts.memoryNotify
-        ? { type: "preset", preset: "claude_code", append: opts.systemPrompt, snapshot: false }
-        : { type: "custom", prompt: opts.systemPrompt, snapshot: false },
-      settings: opts.memoryNotify ? { autoMemoryEnabled: true, autoMemoryDirectory: NOTES_DIR } : { autoMemoryEnabled: false },
-      mcpServers: opts.memoryNotify ? { memory: createMemoryServer(opts.memoryNotify) } : undefined,
-      resume,
-      // Built-ins: Skill, and for chat Read / Write / Edit, which policy.ts confines to the
-      // notes folder. No Bash. Everything else the agent can do is an MCP tool (Mailbird,
-      // Notion, Calendar...), gated by canUseTool.
-      tools: opts.memoryNotify ? ["Skill", "Read", "Write", "Edit"] : ["Skill"],
-      // "user" loads ~/.claude/skills, user-scope MCP servers and CLAUDE.md.
-      // Not "project": there is no project here.
-      settingSources: ["user"],
-      disallowedTools: UNUSED_CONNECTORS,
-      canUseTool,
-      hooks,
-      maxTurns: opts.maxTurns,
-      maxBudgetUsd: opts.maxBudgetUsd,
-    },
-  });
+  return {
+    model: settings.model,
+    // Wait for every connector before the first model call. By default they connect in the
+    // background, and a slow one (seen: ~30s) means the first call runs without its tools,
+    // then the tool list changes mid-session, which also throws away the prompt cache. With
+    // chat's warm process (below) this wait happens before the message arrives.
+    env: { ...process.env, MCP_CONNECTION_NONBLOCKING: "false" },
+    // Rendered fresh on every request (not recorded once per session): the prompt carries
+    // today's date and the last brief, and a change must apply to the very next message.
+    // Chat uses Claude Code's preset prompt because that is where the SDK's auto-memory
+    // instructions live (with a custom prompt the model says "noted" and saves nothing);
+    // our persona and rules are appended. The unattended runs keep a custom prompt and
+    // get their notes injected as data (notes.ts).
+    systemPrompt: opts.memoryNotify
+      ? { type: "preset", preset: "claude_code", append: opts.systemPrompt, snapshot: false }
+      : { type: "custom", prompt: opts.systemPrompt, snapshot: false },
+    settings: opts.memoryNotify ? { autoMemoryEnabled: true, autoMemoryDirectory: NOTES_DIR } : { autoMemoryEnabled: false },
+    mcpServers: opts.memoryNotify ? { memory: createMemoryServer(opts.memoryNotify) } : undefined,
+    resume,
+    // Built-ins: Skill, and for chat Read / Write / Edit, which policy.ts confines to the
+    // notes folder. No Bash. Everything else the agent can do is an MCP tool (Mailbird,
+    // Notion, Calendar...), gated by canUseTool.
+    tools: opts.memoryNotify ? ["Skill", "Read", "Write", "Edit"] : ["Skill"],
+    // "user" loads ~/.claude/skills, user-scope MCP servers and CLAUDE.md.
+    // Not "project": there is no project here.
+    settingSources: ["user"],
+    disallowedTools: hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
+    canUseTool,
+    hooks,
+    maxTurns: opts.maxTurns,
+    maxBudgetUsd: opts.maxBudgetUsd,
+  };
+}
 
-  // The stream yields many message types (system, assistant, tool use...).
-  // The one we want is the single "result" message that ends the turn.
+// The stream yields many message types (system, assistant, tool use...).
+// The one we want is the single "result" message that ends the turn.
+async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-sdk").SDKMessage>, opts: RunOptions, previousCost: number): Promise<AgentReply> {
   let lastError: string | undefined;
   let lastContext: number | undefined; // the last model call of the main loop shows how big the context is
   for await (const message of stream) {
+    if (message.type === "system" && message.subtype === "init") recordToolsSeen(message.tools);
     if (message.type === "assistant") {
       if (message.error) lastError = message.error;
       if (!message.parent_tool_use_id) lastContext = contextTokens(message.message.usage);
@@ -189,16 +205,70 @@ export async function runAgent(prompt: string, approve: Approve, opts: RunOption
   throw new Error("agent stream ended without a result");
 }
 
-// Interactive chat: resumes the persistent conversation.
-export function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>): Promise<AgentReply> {
-  return runAgent(prompt, approve, {
-    source: "chat",
-    systemPrompt: chatSystem(readText(LAST_BRIEF)),
-    resumeChatSession: true,
-    memoryNotify: notify,
-    maxTurns: 40,
-    maxBudgetUsd: 2.0, // a cold prompt cache alone can cost most of a dollar
+export async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Promise<AgentReply> {
+  const { resume, previousCost } = opts.resumeChatSession ? chatResume(true) : { resume: undefined, previousCost: 0 };
+  return consume(query({ prompt, options: buildOptions(approve, opts, resume) }), opts, previousCost);
+}
+
+// --- a warm process for the next chat message ---
+// Starting Claude Code (process, config, skills, connectors) takes ~3s before the model is
+// even asked. After each reply we start the next chat process in the background, so the
+// next message only waits for the model. It is used only if nothing it was built from has
+// changed (session, prompt, memory index), and only while fresh; otherwise a normal start.
+const SPARE_MAX_AGE_MS = 30 * 60_000;
+let spare: { key: string; at: number; warm: Promise<WarmQuery> } | undefined;
+
+const memoryIndex = () => {
+  try {
+    return readFileSync(`${NOTES_DIR}/MEMORY.md`, "utf8");
+  } catch {
+    return "";
+  }
+};
+const chatKey = (o: RunOptions, r: Resume) => JSON.stringify([r.resume ?? "", o.systemPrompt, memoryIndex()]);
+
+function discardSpare() {
+  const s = spare;
+  spare = undefined;
+  s?.warm.then((w) => w.close()).catch(() => {});
+}
+
+export function prepareChat(approve: Approve, notify: (text: string) => Promise<void>): void {
+  discardSpare();
+  const o = chatOptions(notify);
+  const r = chatResume(false);
+  const warm = startup({ options: buildOptions(approve, o, r.resume) });
+  warm.catch((e) => {
+    console.error("chat warm-up failed:", (e as Error).message);
+    if (spare?.warm === warm) spare = undefined;
   });
+  spare = { key: chatKey(o, r), at: Date.now(), warm };
+}
+
+const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
+  source: "chat",
+  systemPrompt: chatSystem(readText(LAST_BRIEF)),
+  resumeChatSession: true,
+  memoryNotify: notify,
+  maxTurns: 40,
+  maxBudgetUsd: 2.0, // a cold prompt cache alone can cost most of a dollar
+});
+
+// Interactive chat: resumes the persistent conversation, on the warm process when it fits.
+export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>): Promise<AgentReply> {
+  const o = chatOptions(notify);
+  const r = chatResume(true);
+  const s = spare;
+  spare = undefined; // a warm process serves one query
+  if (s && s.key === chatKey(o, r) && Date.now() - s.at < SPARE_MAX_AGE_MS) {
+    // Fall back only if the warm process never came up. Once the turn has started, an error
+    // is the turn's error: running it again could repeat what it already did.
+    const warm = await s.warm.catch((e: Error) => console.error("chat: warm process unavailable, starting normally:", e.message));
+    if (warm) return consume(warm.query(prompt), o, r.previousCost);
+  } else {
+    s?.warm.then((w) => w.close()).catch(() => {});
+  }
+  return consume(query({ prompt, options: buildOptions(approve, o, r.resume) }), o, r.previousCost);
 }
 
 // Unattended daily brief: a fresh session each run, a bigger budget, no banter.

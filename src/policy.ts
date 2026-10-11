@@ -61,6 +61,28 @@ const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
 const NOTE_FILE_TOOLS = new Set(["Read", "Write", "Edit"]);
 const FORGET_NOTE = "mcp__memory__forget_note";
 
+// --- what the model never sees ---
+// Every tool schema the model can see is re-sent on every model call, so hiding tools nobody
+// uses is the biggest saving there is: Notion alone was ~58k tokens of a ~118k floor, one of
+// its tools 21k. Hidden: connectors the skills never use, Notion beyond the four tools the
+// skills use, and anything policy denies for everyone anyway (it could never run).
+const UNUSED_CONNECTORS = [
+  "mcp__claude_ai_Interactive_Brokers_IBKR",
+  "mcp__claude_ai_Gmail",
+  "mcp__claude_ai_Google_Drive",
+  "mcp__claude_ai_Google_Docs",
+  "mcp__claude_ai_Claude_Docs",
+];
+const NOTION = "mcp__claude_ai_Notion__";
+const NOTION_KEEP = new Set(["notion-search", "notion-fetch", "notion-create-pages", "notion-update-page"]);
+
+// Names come from the tools a run has seen (agent.ts records them), so a tool a connector
+// adds later is hidden from the run after the one that first saw it.
+export function hiddenTools(seen: readonly string[]): string[] {
+  const extra = seen.filter((t) => (t.startsWith(NOTION) && !NOTION_KEEP.has(t.slice(NOTION.length))) || DENY.some((re) => re.test(t)));
+  return [...UNUSED_CONNECTORS, ...new Set(extra)];
+}
+
 export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";

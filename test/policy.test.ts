@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { idsOf } from "../src/agent.ts";
 import { NOTES_DIR } from "../src/notes.ts";
-import { applyChanges, classify, isReadTool } from "../src/policy.ts";
+import { applyChanges, classify, hiddenTools, isReadTool } from "../src/policy.ts";
 
 const N = "mcp__claude_ai_Notion__";
 const M = "mcp__mailbird__";
@@ -86,4 +86,12 @@ test("audit ids: keeps ids, drops content", () => {
   assert.deepEqual(idsOf({ conversationId: "abc", body: "secret text", subject: "x" }), { ids: { conversationId: "abc" } });
   assert.deepEqual(idsOf({ messageId: 5, id: "x" }), { ids: { messageId: 5, id: "x" } });
   assert.equal(idsOf({ body: "only content" }), undefined);
+});
+
+test("hidden tools: unused connectors, Notion beyond the skills' four, and always-denied tools", () => {
+  const N = "mcp__claude_ai_Notion__notion-";
+  const hidden = hiddenTools([`${N}fetch`, `${N}search`, `${N}create-pages`, `${N}update-page`, `${N}query-data-sources`, "mcp__mailbird__trash_conversation", "mcp__mailbird__get_message", "mcp__claude_ai_Google_Calendar__list_events"]);
+  assert.ok(hidden.includes("mcp__claude_ai_Gmail") && hidden.includes("mcp__claude_ai_Interactive_Brokers_IBKR"));
+  assert.ok(hidden.includes(`${N}query-data-sources`) && hidden.includes("mcp__mailbird__trash_conversation"));
+  for (const keep of [`${N}fetch`, `${N}search`, `${N}create-pages`, `${N}update-page`, "mcp__mailbird__get_message", "mcp__claude_ai_Google_Calendar__list_events"]) assert.ok(!hidden.includes(keep), keep);
 });

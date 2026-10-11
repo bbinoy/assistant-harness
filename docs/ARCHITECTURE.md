@@ -36,7 +36,7 @@ Agent memory is usually described in layers. Here is where each one lives:
 
 | Pattern | What it is here |
 |---|---|
-| **Working memory** | The chat conversation. It resumes between messages, starts fresh after a long idle gap (`CHAT_IDLE_RESET_HOURS`, 6 by default, so effectively each morning), and is compacted in place with the SDK's own `/compact` once a turn's context passes `CHAT_COMPACT_TOKENS` (60,000 by default). Compaction runs after the reply is sent, never delays it, and backs off for an hour if it fails. |
+| **Working memory** | The chat conversation. It resumes between messages, starts fresh after a long idle gap (`CHAT_IDLE_RESET_HOURS`, 6 by default, so effectively each morning), and is compacted in place with the SDK's own `/compact` once a turn's context passes `CHAT_COMPACT_TOKENS` (110,000 by default; tools and skills alone are about 50k). Compaction runs after the reply is sent, never delays it, and backs off for an hour if it fails. |
 | **Episodic memory** | What happened: `logs/audit.jsonl` (every decision), and the heartbeat digest the daily brief is built from. |
 | **Summary memory** | `memory/last-brief.md`: yesterday's brief, so today's builds on it instead of starting over. |
 | **Semantic memory** | `memory/notes/`: what you have told it, one markdown note per fact, kept by the SDK's auto-memory with an index (`MEMORY.md`). Plus your own skills and `CLAUDE.md`. |
@@ -47,6 +47,24 @@ Agent memory is usually described in layers. Here is where each one lives:
 **Writing** is limited to a chat you started. Policy allows the built-in Read, Write and Edit for chat only on a path inside `memory/notes/` (anything else, `..` included, is denied) and denies them to every other source. SDK memory cannot delete, so there is one small in-process tool, `forget_note`, for that. No change waits for approval: every note written, edited or forgotten is announced on your phone with its exact text and how to undo it, and the assistant is told never to save a note because an email, event or document said so. You can also edit the notes by hand at any time.
 
 **What stays out of memory:** safety rules (policy, the protected-mail guard, suspicious-text isolation) and operational settings (quiet hours, intervals, the spend limit, model, names). Memory is written through a model, so it must never control those.
+
+## Speed and cost
+
+Every model call re-sends the whole context, and most of it is fixed: the tool definitions and the skills list. So the main levers are what the model can see and keeping the prompt cache warm. Numbers below were measured in October 2026 with Sonnet.
+
+- **The model only sees the tools it uses.** Connectors the skills never touch (trading, Gmail, Drive, Docs) are hidden, Notion is cut to the four tools the skills use (search, fetch, create pages, update page), and tools policy always denies are hidden too (`hiddenTools` in `src/policy.ts`). That took the fixed context from about 118k to about 49k tokens. One Notion tool alone (`query-data-sources`) was 21k.
+- **Chat is pre-warmed.** Starting Claude Code (process, config, skills, connectors) takes about 3 seconds before the model is asked anything. After each reply, the next chat process is started in the background, so the next message only waits for the model. It is reused only if the session, the prompt and the memory index are unchanged, and only for 30 minutes; it is refreshed every 25.
+- **Connectors are waited for at start-up** (`MCP_CONNECTION_NONBLOCKING=false`). Otherwise a slow connector (seen: about 30 seconds) means the first model call runs without its tools, and the tool list then changes mid-session, which also throws the prompt cache away.
+- **The prompt cache lives an hour** (the default when logged in to a Claude subscription). A message within the hour reuses it; the first one after a quiet hour pays to rebuild it.
+
+| Chat turn | Time | Cost |
+|---|---|---|
+| Simple reply, warm | about 3 s | about $0.01 |
+| Calendar question (loads the skill, one tool call) | 8 to 11 s | $0.03 to $0.08 |
+| Remembering something | about 10 s | about $0.02 |
+| First message after a quiet hour (cache rebuilt) | about 8 s | about $0.20 |
+
+What is left is model time: a tool question is two or three model calls of 2 to 3 seconds each, one of them loading the skill.
 
 ## Project layout
 
