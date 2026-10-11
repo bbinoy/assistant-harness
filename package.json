@@ -6,7 +6,7 @@
     "start": "node --env-file=.env src/main.ts",
     "daemon": "./run-daemon.sh",
     "typecheck": "tsc",
-    "test": "node --test test/*.test.ts",
+    "test": "HARNESS_STATE_DIR=$(mktemp -d) node --test test/*.test.ts",
     "report": "node --env-file-if-exists=.env src/cli.ts report",
     "restore": "node --env-file-if-exists=.env src/cli.ts restore",
     "doctor": "node --env-file-if-exists=.env src/cli.ts doctor",

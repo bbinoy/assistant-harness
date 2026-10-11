@@ -1,10 +1,8 @@
 import { renderMarkdown, splitSections, toSignalStyles } from "./markdown.ts";
 import type { SignalClient } from "./signal.ts";
 
-// Older messages carried this prefix. We no longer send it, but still never process it.
-const LEGACY_PREFIX = "🤖 ";
-const ECHO_WINDOW_MS = 5 * 60_000;
 const CHUNK_LIMIT = 1800; // keep each Signal message comfortably short
+const ECHO_WINDOW_MS = 5 * 60_000;
 
 // Split long text on paragraph, then line, then hard boundaries.
 export function chunk(text: string, limit = CHUNK_LIMIT): string[] {
@@ -22,44 +20,37 @@ export function chunk(text: string, limit = CHUNK_LIMIT): string[] {
 }
 
 export function createOutbound(signal: SignalClient) {
-  // Replies to Note to Self sync back to us as new messages. Two guards stop us
-  // answering ourselves: remembered timestamps, and the prefix we refuse to process.
-  const sentByUs = new Set<number>();
-  // Text we are about to send, registered BEFORE sending. The echo can arrive before the
-  // send call returns its timestamp, so the timestamp set alone has a race; this does not.
-  const emitted = new Map<string, number>();
+  // Everything we send to Note to Self comes back to us as an incoming message, and must not
+  // be answered. Each message is registered BEFORE sending, by text (the echo can arrive
+  // before the send returns its timestamp), then by timestamp. Entries expire after a while.
+  const recent = new Map<string, number>(); // key -> expiry (epoch ms)
 
-  function remember(text: string) {
+  function remember(key: string) {
     const now = Date.now();
-    for (const [t, expires] of emitted) if (expires < now) emitted.delete(t);
-    emitted.set(text, now + ECHO_WINDOW_MS);
+    for (const [k, expires] of recent) if (expires < now) recent.delete(k);
+    recent.set(key, now + ECHO_WINDOW_MS);
   }
 
-  // True if an incoming message is just one of our own replies syncing back to us.
   function isOwnEcho(m: { text: string; timestamp: number }): boolean {
-    return sentByUs.has(m.timestamp) || (emitted.get(m.text) ?? 0) > Date.now() || m.text.startsWith(LEGACY_PREFIX);
+    const now = Date.now();
+    return (recent.get(`t:${m.timestamp}`) ?? 0) > now || (recent.get(`x:${m.text}`) ?? 0) > now;
   }
 
-  // Sends markdown as styled Signal text. `plain` skips markdown parsing; use it for
-  // anything that embeds untrusted text (approval prompts quote email content).
+  // Sends markdown as styled Signal text. `plain` skips markdown parsing: use it for anything
+  // that embeds untrusted text (approval prompts and alerts quote email content).
   // Returns the timestamp of the last message sent (what a reaction would target).
   async function reply(text: string, opts: { plain?: boolean } = {}): Promise<number> {
     let last = 0;
     for (const part of chunk(text)) {
-      if (opts.plain) {
-        remember(part);
-        last = await signal.sendNoteToSelf(part);
-      } else {
-        const r = renderMarkdown(part);
-        remember(r.text);
-        last = await signal.sendNoteToSelf(r.text, toSignalStyles(r.styles));
-      }
-      sentByUs.add(last);
+      const r = opts.plain ? { text: part, styles: [] } : renderMarkdown(part);
+      remember(`x:${r.text}`);
+      last = await signal.sendNoteToSelf(r.text, toSignalStyles(r.styles));
+      remember(`t:${last}`);
     }
     return last;
   }
 
-  const replyPlain = (text: string): Promise<number> => reply(text, { plain: true });
+  const replyPlain = (text: string) => reply(text, { plain: true });
 
   // One message per section, in order, so a long brief reads as a thread of short messages.
   async function sendBrief(markdown: string) {
@@ -71,4 +62,3 @@ export function createOutbound(signal: SignalClient) {
 
   return { reply, replyPlain, sendBrief, isOwnEcho };
 }
-export type Outbound = ReturnType<typeof createOutbound>;

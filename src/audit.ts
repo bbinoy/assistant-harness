@@ -1,27 +1,48 @@
-import { appendFile, mkdir, rename, stat } from "node:fs/promises";
+import { renameSync, statSync } from "node:fs";
+import { appendLine, readText, statePath } from "./state.ts";
 
-// One append-only log for everything the harness does or observes.
-//   source: who acted: a chat turn, the heartbeat, or the daily brief run
-//   meta:   small structured details. Chat tool calls log tool + decision only;
-//           heartbeat entries add ids, sender and subject so the daily brief can list them.
-const FILE = new URL("../state/audit.jsonl", import.meta.url);
+// One append-only log for everything the agent does or observes.
+//   source: who acted (a chat turn, the daily brief, the mail handler, the heartbeat itself)
+//   meta:   small structured details. Agent tool calls log ids only, never content; heartbeat
+//           triage entries add sender and subject so the brief and `npm run report` can list them.
 
-export type Source = "chat" | "heartbeat" | "brief";
+export type Source = "chat" | "brief" | "handler" | "heartbeat";
 
+export interface AuditEntry {
+  ts: string;
+  source: Source;
+  tool: string;
+  decision: string;
+  meta?: Record<string, any>;
+}
+
+const FILE = "audit.jsonl";
 const MAX_BYTES = 20 * 1024 * 1024;
 let appends = 0;
 
-export async function audit(
-  tool: string,
-  decision: string,
-  source: Source = "chat",
-  meta?: Record<string, unknown>,
-) {
-  await mkdir(new URL("../state/", import.meta.url), { recursive: true });
+export function audit(tool: string, decision: string, source: Source, meta?: Record<string, unknown>): void {
   const entry = { ts: new Date().toISOString(), source, tool, decision, ...(meta ? { meta } : {}) };
-  await appendFile(FILE, JSON.stringify(entry) + "\n");
-  // Keep one previous generation; the digest only ever reads the current file.
-  if (++appends % 100 === 0 && (await stat(FILE).catch(() => ({ size: 0 }))).size > MAX_BYTES) {
-    await rename(FILE, new URL("../state/audit.jsonl.1", import.meta.url));
+  appendLine(FILE, JSON.stringify(entry));
+  // Keep one previous generation; readers only ever need the recent past.
+  if (++appends % 100 === 0 && statSync(statePath(FILE)).size > MAX_BYTES) {
+    renameSync(statePath(FILE), statePath(`${FILE}.1`));
   }
 }
+
+// Entries matching `keep`, oldest first. A damaged line is skipped, never fatal.
+export function readAudit(keep: (e: AuditEntry) => boolean): AuditEntry[] {
+  const out: AuditEntry[] = [];
+  for (const line of (readText(FILE) ?? "").split("\n")) {
+    if (!line) continue;
+    try {
+      const e = JSON.parse(line) as AuditEntry;
+      if (keep(e)) out.push(e);
+    } catch {
+      /* skip */
+    }
+  }
+  return out;
+}
+
+// What the heartbeat decided about each new email (archived, alerted, kept...).
+export const isTriage = (e: AuditEntry) => e.source === "heartbeat" && e.tool === "heartbeat_triage";

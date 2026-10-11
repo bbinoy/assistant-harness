@@ -123,11 +123,6 @@ function tidy(r: Rendered): Rendered {
   return { text: trimmed, styles };
 }
 
-// Shift every range, e.g. after prepending a prefix to the text.
-export function shift(r: Rendered, by: number): Style[] {
-  return r.styles.map((s) => ({ ...s, start: s.start + by }));
-}
-
 export function toSignalStyles(styles: Style[]): string[] {
   return styles.map((s) => `${s.start}:${s.length}:${s.style}`);
 }

@@ -20,7 +20,7 @@ If you do not use Proton, none of that is needed.
 
 Mail is used in two places, and they are separate:
 
-1. **The heartbeat** (no model involved) uses a direct client, `src/mailbird.ts`, and calls these tools from `src/heartbeat.ts`, `src/brief.ts` and `src/cli.ts`:
+1. **The heartbeat** (no model involved) uses a direct client, `src/mailbird.ts` (its `inboxes()` wraps the first two calls below), from `src/heartbeat.ts` and `src/cli.ts`:
 
 | Operation (Mailbird tool) | Used for | Expected result |
 |---|---|---|
@@ -32,7 +32,7 @@ Mail is used in two places, and they are separate:
 | `move_conversation_to_inbox(conversationId)` | `npm run restore` | – |
 | `search_conversations(query, limit)` | restore fallback by subject | `[{ conversationId, subject }]` |
 
-2. **The agent's own turns** (chat, brief, handler) use whatever MCP servers Claude Code has configured. They reach mail through tool names such as `mcp__mailbird__get_message`. Those names appear in `src/policy.ts` (which tools are reads, routine writes, or need approval), `src/format.ts` (approval text), and `src/brief.ts` (`send_self_briefing`, the tool that emails the brief to yourself), plus your skills.
+2. **The agent's own turns** (chat, brief, handler) use whatever MCP servers Claude Code has configured. They reach mail through tool names such as `mcp__mailbird__get_message`. Those names appear in `src/policy.ts` (which tools are reads, routine writes, or need approval), `src/format.ts` (approval text), and `src/brief.ts` (`BRIEF_TOOL`, the tool that emails the brief to yourself), plus your skills.
 
 ### Gmail directly
 
@@ -50,9 +50,9 @@ Mail is used in two places, and they are separate:
 
 2. **For the agent's turns**, either run a Gmail MCP server of your own, or use the **Gmail connector** that claude.ai provides (it already shows up as `mcp__claude_ai_Gmail__*`; `format.ts` already knows how to describe several of its send tools, and `policy.ts` treats its read tools as reads and everything else as *ask*). Update the allow/ask/deny lists to the tools you actually expose.
 
-3. **The brief email**: `send_self_briefing` is a Mailbird convenience (render Markdown, send to yourself). With Gmail, send a message to your own address (`users.messages.send`) and change the tool name captured in `src/brief.ts`.
+3. **The brief email**: `send_self_briefing` is a Mailbird convenience (render Markdown, send to yourself). With Gmail, send a message to your own address (`users.messages.send`) and change `BRIEF_TOOL` in `src/brief.ts`.
 
-4. **Drop what you no longer need**: `importOldBrief` in `src/brief.ts` (a one-time migration from an earlier setup), the "Mailbird must be running" assumption in the docs, and the Mailbird entries in `doctor`.
+4. **Drop what you no longer need**: the "Mailbird must be running" assumption in the docs, and the Mailbird checks in `doctor` (`src/cli.ts`).
 
 5. **Skills**: your `mailbird` skill becomes a `gmail` skill (rename it in `persona.ts` and the brief skill).
 
@@ -118,10 +118,10 @@ These are starting points, not tested here; check each platform's current docs.
 ## Other things you will want to change
 
 - **Persona and names**: `ASSISTANT_NAME` / `OWNER_NAME` in `.env`; the personality is the `PERSONA` constant in `src/persona.ts`.
-- **What may run unattended**: `src/policy.ts`. Start by reading the three lists; unknown tools default to *ask*. The default policy denies one financial connector (Interactive Brokers) by name as an example; add any other sensitive connector you have.
+- **What may run unattended**: `src/policy.ts`. Start by reading the lists, including what each kind of run (chat, brief, mail handler) may do on its own; unknown tools default to *ask*. The default policy denies one financial connector (Interactive Brokers) by name as an example; add any other sensitive connector you have.
 - **What counts as protected mail**: the `PROTECTED` pattern in `src/triage.ts` (invoices, bills, tax, insurance, legal, government). Extend it for your languages and senders.
 - **What may be auto-archived**: `ARCHIVE_KINDS` and the per-tick cap in `src/actions.ts`.
-- **Schedule**: heartbeat interval, quiet hours, brief start hour and retry cap are env vars.
+- **Schedule and limits**: every tunable is an env var, validated at startup in `src/settings.ts`.
 - **The brief's shape**: it is whatever `~/.claude/skills/daily-brief/SKILL.md` says. Headings (`## `) become separate Signal messages.
 
 Back to the [README](../README.md) · [Setup](SETUP.md) · [Architecture](ARCHITECTURE.md) · [Safety](SAFETY.md)

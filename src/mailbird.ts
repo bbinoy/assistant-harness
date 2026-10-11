@@ -16,8 +16,16 @@ function connectionDetails(): { url: string; headerName: string; headerValue: st
   return { url, headerName: headerName!, headerValue: rest.join(": ") };
 }
 
+export interface Inbox {
+  accountId: number;
+  email: string;
+  senderName: string;
+  folderId: number;
+}
+
 export class Mailbird {
   private client: Client | undefined;
+  private inboxCache: Inbox[] | undefined;
 
   async connect(): Promise<void> {
     const { url, headerName, headerValue } = connectionDetails();
@@ -32,8 +40,18 @@ export class Mailbird {
     this.client = client;
   }
 
-  async listTools() {
-    return (await this.client!.listTools()).tools;
+  // Every account's Inbox folder. Accounts and folders rarely change, so this is cached for
+  // the life of the connection (two calls per account saved on every heartbeat tick).
+  async inboxes(): Promise<Inbox[]> {
+    if (this.inboxCache) return this.inboxCache;
+    const accounts = await this.call<{ id: number; email: string; senderName: string }[]>("list_accounts");
+    const found: Inbox[] = [];
+    for (const a of accounts) {
+      const folders = await this.call<{ id: number; identity: string }[]>("list_folders", { accountId: a.id });
+      const inbox = folders.find((f) => f.identity === "Inbox");
+      if (inbox) found.push({ accountId: a.id, email: a.email, senderName: a.senderName, folderId: inbox.id });
+    }
+    return (this.inboxCache = found);
   }
 
   // Calls a tool and returns parsed JSON when the result is JSON text, else the raw text.
@@ -51,7 +69,9 @@ export class Mailbird {
   }
 
   async close() {
-    await this.client?.close();
+    const client = this.client;
     this.client = undefined;
+    this.inboxCache = undefined;
+    await client?.close();
   }
 }

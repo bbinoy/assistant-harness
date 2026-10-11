@@ -1,11 +1,13 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { localDay } from "./pause.ts";
+import { settings } from "./settings.ts";
+import { readJson, writeJson } from "./state.ts";
 
 // A runaway guard, not an accounting system. Costs are the SDK's own estimates (notional on a
-// subscription). Once the day's total passes the ceiling, BACKGROUND work (brief retries, the
-// mail handler) stops until tomorrow. Chat stays available: you are in control of that.
-const FILE = new URL("../state/cost.json", import.meta.url);
-export const DAILY_LIMIT_USD = Number(process.env.DAILY_BUDGET_USD ?? 20);
+// subscription). Once the day's total passes the ceiling, BACKGROUND work (brief, mail handler)
+// stops until tomorrow. Chat stays available: you are in control of that.
+// Synchronous on purpose (see state.ts): concurrent recordCost calls can never lose an update.
+
+const FILE = "cost.json";
 
 interface Cost {
   day: string;
@@ -13,36 +15,28 @@ interface Cost {
   notifiedDay?: string;
 }
 
-async function load(): Promise<Cost> {
-  try {
-    const c = JSON.parse(await readFile(FILE, "utf8")) as Cost;
-    return c.day === localDay(new Date()) ? c : { day: localDay(new Date()), usd: 0, notifiedDay: c.notifiedDay };
-  } catch {
-    return { day: localDay(new Date()), usd: 0 };
-  }
+function today(): Cost {
+  const day = localDay(new Date());
+  const c = readJson<Cost | undefined>(FILE, undefined);
+  return c?.day === day ? c : { day, usd: 0 };
 }
 
-async function save(c: Cost) {
-  await mkdir(new URL("../state/", import.meta.url), { recursive: true });
-  await writeFile(FILE, JSON.stringify(c));
-}
-
-export async function recordCost(usd: number) {
+export function recordCost(usd: number): void {
   if (!(usd > 0)) return;
-  const c = await load();
+  const c = today();
   c.usd += usd;
-  await save(c);
+  writeJson(FILE, c);
 }
 
-export async function spentToday(): Promise<number> {
-  return (await load()).usd;
+export function spentToday(): number {
+  return today().usd;
 }
 
-// True when background work must not start. `firstTime` is true once per day, so the caller can tell the owner once.
-export async function overBudget(): Promise<{ over: boolean; firstTime: boolean; usd: number }> {
-  const c = await load();
-  const over = c.usd >= DAILY_LIMIT_USD;
+// `firstTime` is true once per day, so the caller can tell the owner exactly once.
+export function overBudget(): { over: boolean; firstTime: boolean; usd: number } {
+  const c = today();
+  const over = c.usd >= settings.dailyBudgetUsd;
   const firstTime = over && c.notifiedDay !== c.day;
-  if (firstTime) await save({ ...c, notifiedDay: c.day });
+  if (firstTime) writeJson(FILE, { ...c, notifiedDay: c.day });
   return { over, firstTime, usd: c.usd };
 }

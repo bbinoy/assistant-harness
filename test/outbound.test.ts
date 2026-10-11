@@ -39,10 +39,10 @@ test("echo guard: plain and styled sends are both registered, a user's own text 
   assert.equal(out.isOwnEcho({ text: "what's on my calendar?", timestamp: 3 }), false);
 });
 
-test("echo guard: still ignores legacy robot-prefixed messages and known timestamps", async () => {
+test("echo guard: known timestamps are recognised even when the text differs", async () => {
   const { signal } = fake();
   const out = createOutbound(signal);
-  assert.equal(out.isOwnEcho({ text: "🤖 old message", timestamp: 5 }), true);
   await out.reply("x"); // timestamp 1001
   assert.equal(out.isOwnEcho({ text: "different text", timestamp: 1001 }), true);
+  assert.equal(out.isOwnEcho({ text: "different text", timestamp: 1002 }), false);
 });

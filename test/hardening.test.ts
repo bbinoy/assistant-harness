@@ -5,7 +5,7 @@ import { redact } from "../src/redact.ts";
 
 const OWNER = "+15555550114";
 
-test("allowlist: only the owner's own Note to Self is accepted", () => {
+test("allowlist: only the owner's own Note to Self is accepted (messages and reactions alike)", () => {
   assert.equal(acceptOwner({ from: OWNER, noteToSelf: true }, OWNER), true);
   assert.equal(acceptOwner({ from: OWNER, noteToSelf: false }, OWNER), false); // owner writing to someone else
   assert.equal(acceptOwner({ from: "+15555550105", noteToSelf: true }, OWNER), false);

@@ -4,15 +4,23 @@
 //  - crashes and unhandled rejections are written to that same file before the process exits
 process.umask(0o077);
 
-import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { appendFileSync, chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { redact } from "./redact.ts";
+import { settings } from "./settings.ts";
 
-const DIR = fileURLToPath(new URL("../state/", import.meta.url));
-const FILE = `${DIR}agent.log`;
+const DIR = settings.stateDir;
+const FILE = join(DIR, "agent.log");
 const MAX_BYTES = 5 * 1024 * 1024;
 const KEEP = 3;
 mkdirSync(DIR, { recursive: true, mode: 0o700 });
+
+// Tighten state/ on every start: files created by others (launchd's stderr file, an older
+// version of the agent) may have been made with looser permissions.
+try {
+  chmodSync(DIR, 0o700);
+  for (const f of readdirSync(DIR)) chmodSync(join(DIR, f), 0o600);
+} catch { /* best effort */ }
 
 let writes = 0;
 function rotateIfNeeded() {

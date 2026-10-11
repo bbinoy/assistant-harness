@@ -1,6 +1,6 @@
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { recordCost } from "./budget.ts";
-import { OWNER } from "./identity.ts";
+import { OWNER } from "./settings.ts";
 
 export type Label = "act_now" | "handle" | "read_later" | "archive";
 export type Kind = "newsletter" | "notification" | "cold_outreach" | "personal_or_work";
@@ -104,7 +104,7 @@ async function classifyGroup(mails: MailInput[]): Promise<Triage[]> {
       if (message.type !== "result") continue;
       const o = message.subtype === "success" && !message.is_error ? (message.structured_output as any) : undefined;
       console.log(`triage: ${mails.length} email(s), ${message.subtype}, $${message.total_cost_usd.toFixed(4)}`);
-      await recordCost(message.total_cost_usd);
+      recordCost(message.total_cost_usd);
       if (!Array.isArray(o?.items)) {
         console.error(`triage fallback: subtype=${message.subtype} structured=${o ? "invalid" : "missing"}`);
         break;

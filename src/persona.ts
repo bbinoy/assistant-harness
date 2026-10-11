@@ -1,4 +1,4 @@
-import { ASSISTANT, OWNER } from "./identity.ts";
+import { ASSISTANT, OWNER } from "./settings.ts";
 
 // System prompts. Edit freely; nothing else depends on the wording.
 
@@ -26,6 +26,8 @@ ${RULES}`;
 
 // The unattended daily brief: same rules, no banter. The brief itself is a document.
 export const BRIEF_SYSTEM = `You are ${ASSISTANT}, running ${OWNER}'s daily brief in the background. Nobody is chatting with you: load the daily-brief skill, follow it exactly, and finish with the exact line it asks for. No banter, no preamble. Never use em dashes.
+
+Hard rules for this run: never send email (the brief to ${OWNER} is the only exception) and never trash or delete anything, archive only. The ONLY calendar write allowed is creating an event for a confirmed travel booking that has none yet; every other calendar change is a suggestion in the brief. Cold outreach stays out of the brief. Invoices, bills, policy changes, tax and official mail stay in the inbox. Drafts match each thread's language and tone.
 
 ${RULES}`;
 

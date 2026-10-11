@@ -26,7 +26,8 @@ flowchart LR
 - **The heartbeat is not a model.** Detecting new mail is a plain API call. The model runs only when something changed, and then once per batch, so a quiet inbox costs nothing.
 - **Permissions are code, not prompts.** Every tool call passes `policy.ts`, which returns *allow* (reads, plus routine writes such as archive and drafts), *ask* (anything outward-facing or unknown), or *deny* (delete, trash, spam, block, and the one financial connector the default policy knows by name, which you should extend). A prompt can ask the model to behave; only code can make it.
 - **Email is untrusted input.** The classifier sees mail as data, runs with no tools, and returns constrained JSON. Mail containing instruction-like text is classified *alone* (so it cannot influence its neighbours) and can never be auto-archived. Archiving needs the label, the *kind* and the protected-mail guard to agree.
-- **State is local and small.** Last brief, seen-message ids, the audit log and the cost counter live in `state/` (owner-only permissions). The agent has no file tools; the harness injects what it needs into prompts.
+- **State is local, small and atomic.** Last brief, seen-message ids, the handler queue, the audit log and the cost counter live in `state/` (owner-only). Every read-modify-write is synchronous, so two parts of the agent can never lose each other's update, and every write goes to a temp file renamed into place, so a crash never leaves a torn file. The agent itself has no file tools; the harness injects what it needs into prompts.
+- **Least privilege per run.** Chat, the daily brief and the background mail handler each get only the unattended writes they need (`policy.ts`). The handler, which reads untrusted mail with nobody watching, may only leave reply drafts.
 
 ## Project layout
 
@@ -48,7 +49,9 @@ src/brief.ts         daily brief trigger and run (pure schedule logic, tested)
 src/digest.ts        what the heartbeat did, for the brief
 src/mailbird.ts      direct MCP client for the local mail server
 src/budget.ts        daily spend guard
-src/audit.ts         append-only audit log
+src/settings.ts      every tunable, validated at startup (pure loader, tested)
+src/state.ts         atomic, synchronous access to state/ (tested)
+src/audit.ts         append-only audit log and its reader
 src/cli.ts           doctor / report / restore
 test/                unit tests (node:test)
 scripts/             launchd install, secrets scanner

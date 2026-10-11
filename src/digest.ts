@@ -1,31 +1,11 @@
-import { readFile } from "node:fs/promises";
+import { isTriage, readAudit, type AuditEntry } from "./audit.ts";
 
-const AUDIT_FILE = new URL("../state/audit.jsonl", import.meta.url);
-
-export interface TriageEntry {
-  ts: string;
-  decision: string; // "archived" | "would-archive" | "would-act_now" | ...
+export type TriageEntry = Pick<AuditEntry, "ts" | "decision"> & {
   meta: { id?: string; messageId?: number; from?: string; subject?: string; label?: string; kind?: string };
-}
+};
 
-export async function readTriageSince(sinceIso: string | undefined): Promise<TriageEntry[]> {
-  let raw: string;
-  try {
-    raw = await readFile(AUDIT_FILE, "utf8");
-  } catch {
-    return [];
-  }
-  const out: TriageEntry[] = [];
-  for (const line of raw.split("\n")) {
-    if (!line) continue;
-    try {
-      const e = JSON.parse(line);
-      if (e.source === "heartbeat" && e.tool === "heartbeat_triage" && (!sinceIso || e.ts > sinceIso)) out.push(e);
-    } catch {
-      /* skip a damaged line rather than lose the whole digest */
-    }
-  }
-  return out;
+export function readTriageSince(sinceIso: string): TriageEntry[] {
+  return readAudit((e) => isTriage(e) && e.ts > sinceIso) as TriageEntry[];
 }
 
 const LIST_CAP = 40;

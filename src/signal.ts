@@ -13,6 +13,7 @@ export interface IncomingReaction {
   emoji: string;
   targetTimestamp: number; // timestamp of the message that was reacted to
   isRemove: boolean;
+  noteToSelf: boolean; // made by us from another device, in our own Note to Self
 }
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
@@ -26,7 +27,6 @@ export class SignalClient {
   private pending = new Map<number, Pending>();
   private handler: ((m: IncomingMessage) => void) | undefined;
   private reactionHandler: ((r: IncomingReaction) => void) | undefined;
-  private loggedReactionShape = false;
 
   private host: string;
   private port: number;
@@ -95,42 +95,30 @@ export class SignalClient {
 
   private onEnvelope(env: any) {
     if (!env) return;
-    // A reaction: either from someone else (dataMessage) or one we made on another
-    // device (syncMessage.sentMessage), which is how reactions from our own phone arrive.
-    const reaction = env.dataMessage?.reaction ?? env.syncMessage?.sentMessage?.reaction;
+    const from = env.sourceNumber ?? env.source ?? "";
+    const sent = env.syncMessage?.sentMessage; // something WE did on another device (our phone)
+    const toSelf = !!sent && (sent.destinationNumber ?? sent.destination) === this.account;
+
+    // A reaction: from someone else (dataMessage), or ours from the phone (sentMessage).
+    const reaction = env.dataMessage?.reaction ?? sent?.reaction;
     if (reaction) {
-      if (!this.loggedReactionShape) {
-        this.loggedReactionShape = true;
-        console.log(`reaction envelope fields: ${Object.keys(reaction).join(", ")}`); // names only, once
-      }
       this.reactionHandler?.({
-        from: env.sourceNumber ?? env.source ?? "",
+        from,
         emoji: String(reaction.emoji ?? ""),
-        targetTimestamp: Number(reaction.targetSentTimestamp ?? reaction.targetTimestamp ?? 0),
-        isRemove: Boolean(reaction.isRemove ?? reaction.remove),
+        targetTimestamp: Number(reaction.targetSentTimestamp ?? 0),
+        isRemove: Boolean(reaction.isRemove),
+        noteToSelf: !env.dataMessage?.reaction && toSelf,
       });
       return;
     }
-    // Normal inbound message from someone else.
+    // A message from someone else.
     if (env.dataMessage?.message) {
-      this.handler?.({
-        from: env.sourceNumber ?? env.source ?? "",
-        text: env.dataMessage.message,
-        timestamp: env.dataMessage.timestamp ?? env.timestamp,
-        noteToSelf: false,
-      });
+      this.handler?.({ from, text: env.dataMessage.message, timestamp: env.dataMessage.timestamp ?? env.timestamp, noteToSelf: false });
       return;
     }
-    // Something WE sent from another device (our phone), synced to this device.
-    // Note to Self arrives this way: sender == destination == our own number.
-    const sent = env.syncMessage?.sentMessage;
+    // A message we sent from the phone. Note to Self arrives this way (destination == us).
     if (sent?.message) {
-      this.handler?.({
-        from: env.sourceNumber ?? env.source ?? "",
-        text: sent.message,
-        timestamp: sent.timestamp ?? env.timestamp,
-        noteToSelf: (sent.destinationNumber ?? sent.destination) === this.account,
-      });
+      this.handler?.({ from, text: sent.message, timestamp: sent.timestamp ?? env.timestamp, noteToSelf: toSelf });
     }
   }
 

@@ -1,45 +1,29 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import net from "node:net";
 import { readFile } from "node:fs/promises";
+import net from "node:net";
 import { fileURLToPath } from "node:url";
-import { spentToday, DAILY_LIMIT_USD } from "./budget.ts";
-import { LAUNCHD_LABEL } from "./identity.ts";
+import { isTriage, readAudit, type AuditEntry } from "./audit.ts";
+import { spentToday } from "./budget.ts";
 import { Mailbird } from "./mailbird.ts";
+import { isPaused } from "./pause.ts";
+import { settings } from "./settings.ts";
+import { readText, statePath } from "./state.ts";
 
 // Small operator tools:
 //   npm run report [hours]        what the heartbeat archived / alerted / queued (default 24h)
 //   npm run restore <id>          put an archived conversation back in the inbox
-const AUDIT_FILE = new URL("../state/audit.jsonl", import.meta.url);
-
-interface Entry {
-  ts: string;
-  decision: string;
-  meta?: { id?: string; from?: string; subject?: string; kind?: string; label?: string; reason?: string; result?: string; account?: string };
-}
-
-async function triageEntries(): Promise<Entry[]> {
-  const raw = await readFile(AUDIT_FILE, "utf8").catch(() => "");
-  return raw
-    .split("\n")
-    .filter(Boolean)
-    .flatMap((l) => {
-      try {
-        const e = JSON.parse(l);
-        return e.tool === "heartbeat_triage" ? [e as Entry] : [];
-      } catch {
-        return [];
-      }
-    });
-}
+//   npm run doctor                is everything the agent depends on in place?
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
 async function report(hours: number) {
   const since = new Date(Date.now() - hours * 3600_000).toISOString();
-  const rows = (await triageEntries()).filter((e) => e.ts > since);
+  const rows = readAudit((e) => isTriage(e) && e.ts > since);
   if (rows.length === 0) return console.log(`Nothing triaged in the last ${hours}h.`);
-  for (const decision of ["archived", "alerted", "alert-held-quiet-hours", "queued-for-handler", "archive-deferred", "archive-failed", "kept"]) {
+  const order = ["archived", "alerted", "covered-by-brief", "queued-for-handler", "archive-deferred", "archive-failed", "alert-failed", "handler-queue-failed", "kept"];
+  const decisions = [...order, ...new Set(rows.map((e) => e.decision).filter((d) => !order.includes(d)))];
+  for (const decision of decisions) {
     const set = rows.filter((e) => e.decision === decision);
     if (set.length === 0) continue;
     console.log(`\n${decision} (${set.length})`);
@@ -52,8 +36,8 @@ async function report(hours: number) {
 async function restore(id: string) {
   const mb = new Mailbird();
   await mb.connect();
-  const entry = (await triageEntries()).reverse().find((e) => e.meta?.id === id);
-  const candidates = [id, ...((entry?.meta?.result ?? "").match(UUID) ?? []).filter((u) => u !== id)];
+  const entry: AuditEntry | undefined = readAudit((e) => isTriage(e) && e.meta?.id === id).pop();
+  const candidates = [id, ...(String(entry?.meta?.result ?? "").match(UUID) ?? []).filter((u: string) => u !== id)];
   for (const c of candidates) {
     try {
       await mb.call("move_conversation_to_inbox", { conversationId: c });
@@ -106,14 +90,18 @@ async function doctor() {
   line(!!sig, "signal-cli installed", sig);
   const accounts = await readFile(`${process.env.HOME}/.local/share/signal-cli/data/accounts.json`, "utf8").catch(() => "");
   line(/"number"/.test(accounts), "a Signal account is linked to signal-cli");
-  const up = await new Promise<boolean>((res) => { const s = net.connect(7583, "127.0.0.1"); s.once("connect", () => (s.destroy(), res(true))); s.once("error", () => res(false)); });
-  line(up ? true : "warn", "Signal daemon reachable on 127.0.0.1:7583", up ? "" : "only running while the agent is");
+  const up = await new Promise<boolean>((res) => {
+    const s = net.connect(settings.signalPort, settings.signalHost);
+    s.once("connect", () => (s.destroy(), res(true)));
+    s.once("error", () => res(false));
+  });
+  line(up ? true : "warn", `Signal daemon reachable on ${settings.signalHost}:${settings.signalPort}`, up ? "" : "only running while the agent is");
 
   try {
     const mb = new Mailbird();
     await mb.connect();
-    const acc = await mb.call<unknown[]>("list_accounts");
-    line(true, "Mailbird MCP reachable", `${acc.length} account(s)`);
+    const inboxes = await mb.inboxes();
+    line(true, "Mailbird MCP reachable", `${inboxes.length} inbox(es)`);
     await mb.close();
   } catch (e) {
     line(false, "Mailbird MCP reachable", (e as Error).message.slice(0, 80));
@@ -122,24 +110,24 @@ async function doctor() {
   const auth = run("claude", ["auth", "status"]);
   line(!!auth && !/not logged in|logged out/i.test(auth), "Claude login valid (needed for Notion/Calendar/Gmail connectors)");
 
-  const lc = run("launchctl", ["list", LAUNCHD_LABEL]);
-  line(lc ? (/"PID"/.test(lc) ? true : "warn") : false, `launchd job ${LAUNCHD_LABEL} loaded and running`, lc ? "" : "not loaded");
+  const lc = run("launchctl", ["list", settings.launchdLabel]);
+  line(lc ? (/"PID"/.test(lc) ? true : "warn") : false, `launchd job ${settings.launchdLabel} loaded and running`, lc ? "" : "not loaded");
 
   for (const skill of ["daily-brief", "mailbird", "notion-tasks", "calendar", "meeting-prep"]) {
     line(existsSync(`${process.env.HOME}/.claude/skills/${skill}/SKILL.md`), `skill ${skill}`);
   }
 
-  const stateDir = `${root}state`;
+  const stateDir = settings.stateDir;
   if (existsSync(stateDir)) {
     const loose = readdirSync(stateDir).filter((f) => (statSync(`${stateDir}/${f}`).mode & 0o077) !== 0 && statSync(`${stateDir}/${f}`).isFile());
     line((statSync(stateDir).mode & 0o077) === 0, "state/ directory is owner-only");
     line(loose.length === 0 ? true : "warn", "state files are owner-only", loose.length ? `group/world-readable: ${loose.join(", ")}` : "");
   }
 
-  const spent = await spentToday();
-  line(spent < DAILY_LIMIT_USD, "daily spend guard", `$${spent.toFixed(2)} of $${DAILY_LIMIT_USD} today (notional)`);
-  line(existsSync(`${stateDir}/paused`) ? "warn" : true, "not paused", existsSync(`${stateDir}/paused`) ? "state/paused exists" : "");
-  const log = await readFile(`${stateDir}/agent.log`, "utf8").catch(() => "");
+  const spent = spentToday();
+  line(spent < settings.dailyBudgetUsd, "daily spend guard", `$${spent.toFixed(2)} of $${settings.dailyBudgetUsd} today (notional)`);
+  line(isPaused() ? "warn" : true, "not paused", isPaused() ? `${statePath("paused")} exists` : "");
+  const log = readText("agent.log") ?? "";
   const hourAgo = new Date(Date.now() - 3600_000);
   const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   const recentErrors = log.split("\n").filter((l) => l.includes(" ERR ") && l.slice(0, 5) >= hhmm(hourAgo)).length;

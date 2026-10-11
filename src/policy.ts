@@ -1,14 +1,25 @@
+import type { Source } from "./audit.ts";
+
+// Permissions as code. Every tool call any agent run wants to make passes classify():
+//   allow - run it
+//   ask   - the owner approves or declines on their phone
+//   deny  - never, whatever anyone says
+// Unknown tools default to "ask", never to "allow".
+
 export type Verdict = "allow" | "ask" | "deny";
 
-// Hard blocks. Evaluated first, so nothing below can override them.
+// Hard blocks, checked first so nothing below can override them.
 const DENY: RegExp[] = [
   /^mcp__claude_ai_Interactive_Brokers/, // a chat message must never be able to touch trading
   /__(trash|delete|untrash|mark_.*spam|unmark_.*spam|set_sender_blocked|unsubscribe)/i,
 ];
 
-// Read-only verbs: safe to run without asking. Matched against the tool's own name
-// (the part after the server name), ignoring a "notion-" style prefix, so both
-// "get_message" and "notion-fetch" count as reads.
+// No tool may reach local files. Mailbird's create_draft accepts file:// attachments, so an
+// injected email could otherwise get ~/.ssh or .env attached to a draft. The agent never needs this.
+const LOCAL_FILE = /file:\/\//i;
+
+// Read-only verbs, matched against the tool's own name (after the server name), ignoring a
+// "notion-" style prefix: both "get_message" and "notion-fetch" are reads.
 const READ_VERB = /^(list|get|search|read|query|fetch|summarize|suggest|whats|download|show|ai-search)/i;
 
 export function isReadTool(tool: string): boolean {
@@ -16,28 +27,35 @@ export function isReadTool(tool: string): boolean {
   return READ_VERB.test(name);
 }
 
-// Writes the routine runner already performs unattended (see assistant-run.sh):
-// archive, drafts, the self-briefing, Notion edits. Archive is reversible; drafts never send.
+// In-thread reply drafts: never sent, the owner sees them in their mail client.
+const DRAFT_REPLIES = new Set(["mcp__mailbird__reply_to_conversation", "mcp__mailbird__reply_all_to_conversation"]);
+
+// Writes chat and the daily brief may do unattended. All reversible or draft-only.
 const ROUTINE_WRITES = new Set([
+  ...DRAFT_REPLIES,
   "mcp__mailbird__archive_conversation",
   "mcp__mailbird__select_conversation",
-  "mcp__mailbird__reply_to_conversation",
-  "mcp__mailbird__reply_all_to_conversation",
   "mcp__mailbird__create_draft",
   "mcp__mailbird__update_draft",
-  "mcp__mailbird__send_self_briefing",
+  "mcp__mailbird__send_self_briefing", // can only ever send to the owner
   "mcp__claude_ai_Notion__notion-create-pages",
   "mcp__claude_ai_Notion__notion-update-page",
 ]);
 
-export function classify(tool: string): Verdict {
+// Least privilege by who is acting. The mail handler reads untrusted email with nobody
+// watching, so on its own it may only leave reply drafts; anything else it must ask for.
+const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
+  chat: ROUTINE_WRITES,
+  brief: ROUTINE_WRITES,
+  handler: DRAFT_REPLIES,
+  heartbeat: new Set(), // the heartbeat itself never runs an agent
+};
+
+export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
   if (DENY.some((re) => re.test(tool))) return "deny";
-  if (tool === "Skill") return "allow";
-  if (ROUTINE_WRITES.has(tool)) return "allow";
-  if (isReadTool(tool)) return "allow";
-  // Everything else is unknown or outward-facing (send, forward, calendar
-  // changes, sharing...): a human decides.
-  return "ask";
+  if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
+  if (tool === "Skill" || isReadTool(tool)) return "allow";
+  return UNATTENDED_WRITES[source].has(tool) ? "allow" : "ask";
 }
 
 // --- "yes, but make it 16:00": consent with a small edit, applied without re-asking ---

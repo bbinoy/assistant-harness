@@ -1,10 +1,15 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { runHandlerTurn, type Approve } from "./agent.ts";
 import { audit } from "./audit.ts";
 import { overBudget } from "./budget.ts";
-import { OWNER } from "./identity.ts";
+import { OWNER } from "./settings.ts";
+import { readJson, writeJson } from "./state.ts";
 
-const QUEUE_FILE = new URL("../state/handle-queue.json", import.meta.url);
+// Routine mail the heartbeat flagged ("the assistant can deal with this") is handed to a
+// Sonnet turn in the background, never blocking the heartbeat or chat. The queue lives on
+// disk, so a restart loses nothing. Queue updates are synchronous (see state.ts), so an
+// enqueue can never be overwritten by the worker taking a batch.
+
+const QUEUE = "handle-queue.json";
 const BATCH = 8;
 
 export interface HandleItem {
@@ -15,19 +20,7 @@ export interface HandleItem {
   subject: string;
 }
 
-async function load(): Promise<HandleItem[]> {
-  try {
-    return JSON.parse(await readFile(QUEUE_FILE, "utf8"));
-  } catch {
-    return [];
-  }
-}
-
-async function save(items: HandleItem[]) {
-  await mkdir(new URL("../state/", import.meta.url), { recursive: true });
-  await writeFile(QUEUE_FILE, JSON.stringify(items));
-}
-
+const load = () => readJson<HandleItem[]>(QUEUE, []);
 const safe = (s: string) => s.replace(/[<>"\n\r]/g, " ").slice(0, 120);
 
 export function handlerPrompt(items: HandleItem[]): string {
@@ -46,8 +39,6 @@ export function handlerPrompt(items: HandleItem[]): string {
   ].join("\n");
 }
 
-// A small persistent queue plus one worker: flagged mail is handled by a Sonnet turn in the
-// background, never blocking the heartbeat or chat. A crash loses nothing: the queue is on disk.
 export function createHandler(deps: { approve: Approve; notify: (text: string) => Promise<void> }) {
   let working = false;
 
@@ -56,20 +47,20 @@ export function createHandler(deps: { approve: Approve; notify: (text: string) =
     working = true;
     try {
       for (;;) {
-        const queue = await load();
-        if (queue.length === 0) return;
-        if ((await overBudget()).over) return; // stay queued; resumes when the budget resets
+        const queue = load();
+        if (queue.length === 0 || overBudget().over) return; // over budget: stays queued until tomorrow
         const batch = queue.slice(0, BATCH);
+        // Taken off the queue before running: a failing batch must not retry forever.
+        // The owner is told about failures and handles those emails themselves.
+        writeJson(QUEUE, queue.slice(batch.length));
         console.log(`handler: handling ${batch.length} email(s)`);
-        // Remove first: a failing batch must not retry forever. the owner is told and handles it themselves.
-        await save(queue.slice(batch.length));
         try {
           const { text, costUsd } = await runHandlerTurn(handlerPrompt(batch), deps.approve);
-          await audit("heartbeat_handler", "done", "heartbeat", { count: batch.length, costUsd });
+          audit("mail_handler", "done", "handler", { count: batch.length, costUsd });
           await deps.notify(`🤝 Handled ${batch.length}:\n${text.trim().slice(0, 1500)}`);
         } catch (e) {
           console.error("handler failed:", (e as Error).message);
-          await audit("heartbeat_handler", "failed", "heartbeat", { count: batch.length });
+          audit("mail_handler", "failed", "handler", { count: batch.length });
           await deps.notify(`I couldn't handle ${batch.length} email(s), so they are waiting for you:\n${batch.map((m) => `- ${safe(m.from)}: ${safe(m.subject)}`).join("\n")}`);
         }
       }
@@ -78,15 +69,13 @@ export function createHandler(deps: { approve: Approve; notify: (text: string) =
     }
   }
 
+  const start = () => void work().catch((e) => console.error("handler error:", (e as Error).message));
   return {
-    async enqueue(items: HandleItem[]) {
+    enqueue(items: HandleItem[]) {
       if (items.length === 0) return;
-      await save([...(await load()), ...items]);
-      void work().catch((e) => console.error("handler error:", (e as Error).message));
+      writeJson(QUEUE, [...load(), ...items]);
+      start();
     },
-    // Resume anything left over from before a restart.
-    resume() {
-      void work().catch((e) => console.error("handler error:", (e as Error).message));
-    },
+    resume: start, // pick up anything queued before a restart
   };
 }

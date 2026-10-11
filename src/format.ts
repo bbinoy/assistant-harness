@@ -43,20 +43,27 @@ function when(start: unknown, end: unknown, zone: unknown): string | undefined {
   return `${s.day} ${s.time} → ${e.day} ${e.time}${tz}`;
 }
 
+// An approval must never hide content silently: whatever is cut is announced.
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;
+  return flat.length > max ? `${flat.slice(0, max)}… (+${flat.length - max} more characters not shown)` : flat;
 }
 
-function show(value: unknown): string {
-  if (Array.isArray(value)) return value.map(show).join(", ");
+// Free text the owner is being asked to approve (an email body, event notes) gets more room.
+const LONG_TEXT = new Set(["body", "description", "message", "text", "content", "markdownBody"]);
+
+// Shape of an attendee/recipient object: shown as just its address. Anything else is shown whole.
+const PERSON_KEYS = new Set(["email", "address", "name", "displayName", "responseStatus", "optional"]);
+
+function show(key: string, value: unknown): string {
+  if (Array.isArray(value)) return value.map((v) => show(key, v)).join(", ");
   if (value && typeof value === "object") {
     const o = value as Record<string, unknown>;
-    // Attendee-like objects: prefer the address.
-    const id = o.email ?? o.address ?? o.name;
-    return typeof id === "string" ? id : clip(JSON.stringify(value), 120);
+    const id = o.email ?? o.address;
+    if (typeof id === "string" && Object.keys(o).every((k) => PERSON_KEYS.has(k))) return id;
+    return clip(JSON.stringify(value), 300);
   }
-  return clip(String(value), 160);
+  return clip(String(value), LONG_TEXT.has(key) ? 1200 : 200);
 }
 
 function humanise(tool: string): string {
@@ -87,7 +94,7 @@ export function describeCall(tool: string, input: Record<string, unknown>): stri
     if (SKIP.has(key) || value === undefined || value === null || value === "") continue;
     if (typeof value === "string" && SKIP_VALUES.has(value)) continue;
     if (Array.isArray(value) && value.length === 0) continue;
-    lines.push(`${LABELS[key] ?? key}: ${show(value)}`);
+    lines.push(`${LABELS[key] ?? key}: ${show(key, value)}`);
   }
   return lines.join("\n");
 }

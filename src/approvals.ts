@@ -1,5 +1,4 @@
 import { discardJudge, judgeReply, prepareJudge } from "./judge.ts";
-import { audit } from "./audit.ts";
 import { applyChanges, isModifiable, type Change } from "./policy.ts";
 
 // Human-in-the-loop approvals over Signal. At most one question is pending at a
@@ -64,10 +63,6 @@ export function answerReaction(emoji: string, targetTimestamp: number): "approve
   return "ignored";
 }
 
-export function label(): string {
-  return pendingLabel;
-}
-
 // Feed an incoming owner message while an approval may be pending.
 //   "none"      - nothing pending: a normal message
 //   "approved" / "declined" - consumed as the answer
@@ -112,7 +107,7 @@ export async function answer(text: string, onJudging: () => void): Promise<Answe
 
 // Ask the owner. Resolves "not approved" on no, timeout, or an aborted turn.
 export function request(
-  send: (text: string) => Promise<number | void>,
+  send: (text: string) => Promise<number>, // returns the sent message's timestamp
   description: string,
   call: { tool: string; input: Record<string, unknown> },
   signal?: AbortSignal,
@@ -137,12 +132,11 @@ export function request(
       pendingLabel = description.split("\n")[0] ?? "";
       pendingCall = call;
       console.log(`approval requested: ${pendingLabel}`);
-      void audit(call.tool, "ask-sent", "chat");
       prepareJudge(); // warm the judge while the owner reads the question
       const hint = isModifiable(call.tool) ? "Reply yes, no, or tell me what to change" : "Reply yes or no";
       send(`Approve?\n${description}\n\n${hint}, or react 👍 / 👎 (5 min, then I assume no).`)
         .then((ts) => {
-          if (typeof ts === "number" && pending === finish) pendingTimestamp = ts;
+          if (pending === finish) pendingTimestamp = ts;
         })
         .catch(() => finish({ approved: false }));
     });

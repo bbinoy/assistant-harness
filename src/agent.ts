@@ -1,17 +1,12 @@
 import { query, type CanUseTool, type HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { Decision } from "./approvals.ts";
 import { audit, type Source } from "./audit.ts";
-import { OWNER } from "./identity.ts";
 import { recordCost } from "./budget.ts";
 import { describeCall } from "./format.ts";
 import { BRIEF_SYSTEM, HANDLER_SYSTEM, PERSONA } from "./persona.ts";
 import { classify, isReadTool } from "./policy.ts";
-
-// "sonnet" is an alias the SDK resolves to the current Sonnet, so new releases
-// are picked up automatically. Set HARNESS_MODEL (e.g. a full model id) to pin one.
-const MODEL = process.env.HARNESS_MODEL ?? "sonnet";
-const STATE_FILE = new URL("../state/session.json", import.meta.url);
+import { OWNER, settings } from "./settings.ts";
+import { readJson, writeJson } from "./state.ts";
 
 // Thrown when the credential is rejected, so the caller can tell the owner how to fix it
 // instead of showing a generic failure.
@@ -36,22 +31,13 @@ export type Approve = (
   signal: AbortSignal,
 ) => Promise<Decision>;
 
-// The chat conversation (Note to Self). Its session id is persisted so a restart
-// continues the same conversation. total_cost_usd is cumulative across a resumed
-// session, so we store the running total and report each turn's delta.
-async function loadSession(): Promise<{ sessionId?: string; costUsd: number }> {
-  try {
-    const d = JSON.parse(await readFile(STATE_FILE, "utf8"));
-    return { sessionId: d.sessionId, costUsd: d.costUsd ?? 0 };
-  } catch {
-    return { costUsd: 0 };
-  }
+// The chat conversation (Note to Self) persists across restarts. total_cost_usd is cumulative
+// across a resumed session, so we keep the running total and report each turn's delta.
+interface ChatSession {
+  sessionId?: string;
+  costUsd: number;
 }
-
-async function saveSession(sessionId: string, costUsd: number) {
-  await mkdir(new URL("../state/", import.meta.url), { recursive: true });
-  await writeFile(STATE_FILE, JSON.stringify({ sessionId, costUsd }), { mode: 0o600 });
-}
+const SESSION_FILE = "session.json";
 
 export interface RunOptions {
   source: Source; // audit tag: who is acting
@@ -64,25 +50,26 @@ export interface RunOptions {
 }
 
 export async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Promise<AgentReply> {
-  const { sessionId: resume, costUsd: previousCost } = opts.resumeChatSession
-    ? await loadSession()
-    : { sessionId: undefined, costUsd: 0 };
+  const { sessionId: resume, costUsd: previousCost }: ChatSession = opts.resumeChatSession
+    ? readJson<ChatSession>(SESSION_FILE, { costUsd: 0 })
+    : { costUsd: 0 };
 
   // Permissions as code: policy.ts decides allow / ask / deny; "ask" goes to the owner's phone.
   const canUseTool: CanUseTool = async (tool, input, { signal }) => {
-    const verdict = classify(tool);
+    const verdict = classify(tool, input, opts.source);
     if (verdict === "allow") {
       // Reads log tool + decision only. Writes also log the ids they touch (ids, never
       // content), so "what did it archive?" can always be answered from the audit log.
-      await audit(tool, "allow", opts.source, isReadTool(tool) ? undefined : idsOf(input));
+      audit(tool, "allow", opts.source, isReadTool(tool) ? undefined : idsOf(input));
       return { behavior: "allow", updatedInput: input };
     }
     if (verdict === "deny") {
-      await audit(tool, "deny-policy", opts.source);
-      return { behavior: "deny", message: `${tool} is blocked by policy and cannot be used.` };
+      audit(tool, "deny-policy", opts.source);
+      return { behavior: "deny", message: `${tool} is blocked by policy (or its input is) and cannot be used.` };
     }
+    audit(tool, "ask-sent", opts.source); // logged before the wait, so a stuck approval is visible
     const d = await approve(describeCall(tool, input), { tool, input }, signal);
-    await audit(
+    audit(
       tool,
       d.approved ? (d.updatedInput ? "ask-approved-modified" : "ask-approved") : d.feedback ? "ask-feedback" : "ask-declined",
       opts.source,
@@ -114,7 +101,7 @@ export async function runAgent(prompt: string, approve: Approve, opts: RunOption
   const stream = query({
     prompt,
     options: {
-      model: MODEL,
+      model: settings.model,
       systemPrompt: opts.systemPrompt,
       resume,
       // Built-ins: only Skill. No Bash, no file access. Everything else the agent
@@ -136,8 +123,8 @@ export async function runAgent(prompt: string, approve: Approve, opts: RunOption
   for await (const message of stream) {
     if (message.type === "assistant" && message.error) lastError = message.error;
     if (message.type !== "result") continue;
-    if (opts.resumeChatSession) await saveSession(message.session_id, message.total_cost_usd);
-    await recordCost(message.total_cost_usd - previousCost); // failures cost money too
+    if (opts.resumeChatSession) writeJson(SESSION_FILE, { sessionId: message.session_id, costUsd: message.total_cost_usd });
+    recordCost(message.total_cost_usd - previousCost); // failures cost money too
     if (message.subtype === "success" && !message.is_error) {
       return { text: message.result, costUsd: message.total_cost_usd - previousCost };
     }
@@ -174,10 +161,10 @@ export function runBriefTurn(
   });
 }
 
-// Background handling of heartbeat-flagged mail: fresh session, Sonnet, bounded budget.
+// Background handling of heartbeat-flagged mail: fresh session, least privilege (see policy.ts).
 export function runHandlerTurn(prompt: string, approve: Approve): Promise<AgentReply> {
   return runAgent(prompt, approve, {
-    source: "heartbeat",
+    source: "handler",
     systemPrompt: HANDLER_SYSTEM,
     resumeChatSession: false,
     maxTurns: 40,
