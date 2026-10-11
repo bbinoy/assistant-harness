@@ -8,13 +8,16 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
 ## What it does
 
 - 📥 **Organizes your inbox.** Every 15 minutes it checks for new mail. Newsletters, notifications and cold outreach are archived. Anything that needs *you* arrives as one short message on your phone. Routine requests (like "can we meet next week?") get a reply drafted from your actual calendar.
-- ☀️ **Sends a brief for the day.** Once a day it reads your mail, Notion tasks, Notion meeting notes, and Google Calendar, then sends you a brief to your inbox and your phone. 
-- 🖋️ **Prepares meetings.** For each meeting it pulls the context from your Notion notes and past threads, and drafts the meeting agenda and email answers. 
-- ✅ **Organises your tasks.** It reads your Notion task list, spots what is overdue or due soon, adds tasks from emails, removes tasks that are clearly completed via emails/meeting notes.
-- 📆 **Organises your calendar.** Creates calendar entries from emails and meetings, keeps an eye on conflicts and helps you to resolve them, and makes sure meetings are prepared.
-- 💬 **Listens to your messages on Signal.** Message yourself on Signal and talk to your mail, calendar and tasks in plain language. It has a personality (sassy by default, change it to taste).
-- 🧠 **Remembers your instructions.** "Anything from the kids' school is urgent." "Dr. Weber is a client, write to him formally." "No meetings before 10." "Never use em dashes." Say it once in chat and it shapes how mail is sorted, how drafts read and when meetings are proposed. 
-- 🙋 **Asks for your approval.** Sending, scheduling and sharing always wait for your OK, by reply, by a natural sentence, or by tapping 👍 on the question.
+- ☀️ **Sends a brief for the day in the morning.**
+  - 🖋️ **Prepares meetings.** For each meeting it pulls the context from your Notion notes and past threads, and drafts the meeting agenda and email answers. 
+  - ✅ **Organises your tasks.** It reads your Notion task list, spots what is overdue or due soon, adds tasks from emails, removes tasks that are clearly completed via emails/meeting notes.
+  - 📆 **Organises your calendar.** Creates calendar entries from emails and meetings, keeps an eye on conflicts and helps you to resolve them, and makes sure meetings are prepared.
+  - 📰 **Summarises your newsletters into a short news digest**: Actually interested in the newsletters you subscribed to but started ignoring them after a while? Number One gives you the top 3 nuggets based on your preferences, and archives the newsletters for you.
+- 🤝 **Is helpful**
+  - 💬 **Listens to your messages on Signal.** Message yourself on Signal and talk to your mail, calendar and tasks in plain language. It has a personality (sassy by default, change it to taste).
+  - ✋ **Is proactive.** Reaches out to you on Signal if something needs your attention.
+  - 🧠 **Remembers your instructions.** "Anything from the kids' school is urgent." "Dr. Weber is a client, write to him formally." "No meetings before 10." "Never use em dashes." Say it once in chat and it shapes how mail is sorted, how drafts read and when meetings are proposed. 
+  - 🙋 **Asks for your approval.** Sending, scheduling and sharing always wait for your OK, by reply, by a natural sentence, or by tapping 👍 on the question.
 
 ## A day in the life: Starfleet edition
 
