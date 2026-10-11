@@ -20,7 +20,7 @@ git clone https://github.com/<you>/number-one && cd number-one
 npm install
 
 # 1. Link Signal (scan the QR code in Signal → Settings → Linked devices)
-signal-cli link -n "ben-e"            # prints a sgnl:// link; turn it into a QR code, e.g.
+signal-cli link -n "number-one"            # prints a sgnl:// link; turn it into a QR code, e.g.
                                       #   brew install qrencode && qrencode -t ANSIUTF8 '<link>'
 
 # 2. Configure
