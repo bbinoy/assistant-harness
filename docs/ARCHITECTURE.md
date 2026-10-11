@@ -25,7 +25,7 @@ flowchart LR
 
 - **The heartbeat is not a model, and it sleeps.** Detecting new mail is a plain API call. The model runs only when something changed, and then once per batch, so a quiet inbox costs nothing. At night (22:00 to 07:00 by default) it makes no calls at all and catches up on the first morning tick; urgent overnight mail goes into the daily brief instead of buzzing your phone at 07:00.
 - **Permissions are code, not prompts.** Every tool call passes `policy.ts`, which returns *allow* (reads, plus routine writes such as archive and drafts), *ask* (anything outward-facing or unknown), or *deny* (delete, trash, spam, block, and the one financial connector the default policy knows by name, which you should extend). A prompt can ask the model to behave; only code can make it.
-- **Email is untrusted input.** The classifier sees mail as data, runs with no tools, and returns constrained JSON. Mail containing instruction-like text is classified *alone* (so it cannot influence its neighbours) and can never be auto-archived. Archiving needs the label, the *kind* and the protected-mail guard to agree.
+- **Email is untrusted input.** The classifier sees mail as data, runs with no tools, and returns constrained JSON. Mail containing instruction-like text is classified *alone* (so it cannot influence its neighbours) and can never be auto-archived. Archiving needs the label and the *kind* to agree, and is reversible; the morning brief lists everything that was archived, with the classifier's reason, so a misjudgement is spotted and undone with `npm run restore`.
 - **Observable.** Every decision lands in the audit log, the heartbeat records its last tick (checked by `npm run doctor`), and `npm run triage-check` runs the real classifier on real mail without acting.
 - **Three folders, three jobs.** `state/` is bookkeeping the model never reads (seen-message ids, the handler queue, counters, the chat session pointer). `logs/` is the agent log and the audit trail. `memory/` is what the model reads to remember: the last brief and your notes (`memory/notes/`). All owner-only. Reads and writes are small and atomic. Every read-modify-write is synchronous, so two parts of the agent can never lose each other's update, and every write goes to a temp file renamed into place, so a crash never leaves a torn file. The agent has no file tools except for chat, which gets Read, Write and Edit confined by policy to `memory/notes/`; the harness injects everything else into prompts.
 - **Least privilege per run.** Chat, the daily brief and the background mail handler each get only the unattended writes they need (`policy.ts`). The handler, which reads untrusted mail with nobody watching, may only leave reply drafts.
@@ -46,7 +46,7 @@ Agent memory is usually described in layers. Here is where each one lives:
 
 **Writing** is limited to a chat you started. Policy allows the built-in Read, Write and Edit for chat only on a path inside `memory/notes/` (anything else, `..` included, is denied) and denies them to every other source. SDK memory cannot delete, so there is one small in-process tool, `forget_note`, for that. No change waits for approval: every note written, edited or forgotten is announced on your phone with its exact text and how to undo it, and the assistant is told never to save a note because an email, event or document said so. You can also edit the notes by hand at any time.
 
-**What stays out of memory:** safety rules (policy, the protected-mail guard, suspicious-text isolation) and operational settings (quiet hours, intervals, the spend limit, model, names). Memory is written through a model, so it must never control those.
+**What stays out of memory:** safety rules (policy, suspicious-text isolation) and operational settings (quiet hours, intervals, the spend limit, model, names). Memory is written through a model, so it must never control those.
 
 ## The proactive radar
 
@@ -93,7 +93,7 @@ src/policy.ts        allow / ask / deny + edit-and-approve rules (pure, tested)
 src/approvals.ts     pending approvals: words, judge, reactions
 src/judge.ts         constrained Haiku judge for free-text approval replies
 src/heartbeat.ts     the tick: check mail, triage, act, hand off
-src/triage.ts        batched classifier + injection isolation + protected-mail guard
+src/triage.ts        batched classifier + injection isolation
 src/actions.ts       what to do with a classification (pure, tested)
 src/handler.ts       Sonnet handler for routine mail (persistent queue)
 src/brief.ts         daily brief trigger and run (pure schedule logic, tested)

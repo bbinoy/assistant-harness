@@ -109,7 +109,7 @@ You can answer that question with `yes`, `sure, go ahead`, an edit like the one 
 - **It cannot delete or send on its own.** Mail is only archived, and archiving is reversible. Sending, forwarding and calendar changes ask first. Some actions (deleting, trading, attaching your local files) are simply blocked.
 - **Memory cannot grant power.** What you ask it to remember shapes tone, priorities and sorting, never permissions. Every change to memory is announced on your phone with the exact text, so a mistake is one message from undone. Only a chat you started can change it (not an email, not the background jobs), and the assistant is told never to save something because an email said so.
 - **Background work gets the least power.** The part that handles mail while you are not looking may only leave reply drafts; anything more, it has to ask.
-- **Your invoices, bills and official mail never get auto-archived.**
+- **Archiving is judged by intent and reviewed by you.** The classifier archives only what leaves nothing to do (receipts, status notices, newsletters), keeps anything with an open question, a payment or a person waiting, and every archived mail is listed with the reason in the morning brief, one command from being restored.
 - **Mail is treated as hostile input.** A classifier with no tools reads it, suspicious text is handled in isolation, and a spend limit stops runaway costs.
 - **You can see everything it did,** and pause it with one command.
 

@@ -157,8 +157,8 @@ This skill is run unattended by the agent, in two ways:
   mail in one batch (act now / assistant can handle / read later / archive).
   Clear noise is archived; mail that needs the owner goes to their phone as
   one Signal message; routine mail the assistant can deal with goes to a
-  handler that drafts replies. Invoices, bills, policy, tax and official mail
-  are never archived automatically (the rules are in code, `src/triage.ts`).
+  handler that drafts replies. The classifier archives by intent (only what leaves
+  nothing to do) and keeps anything open; the rules are in `src/triage.ts`.
 - **Daily brief, once per day** on the first heartbeat after the start hour:
   the `number-one:daily-brief` skill sweeps what is left, then delivers one brief by
   email and Signal.

@@ -22,7 +22,7 @@ export function planActions(results: Triage[], opts: { maxArchives: number }): P
     else if (t.label === "archive") {
       // Three-way agreement before anything is removed from the inbox: the label says
       // archive, the kind is a noise kind (a mismatch like archive + personal_or_work is
-      // doubtful), and no code-side guard (protected mail, suspicious text) objected.
+      // doubtful), and no code-side guard (suspicious text) objected.
       if (t.protected || !ARCHIVE_KINDS.has(t.kind)) plan.keep.push(i);
       else if (plan.archive.length >= opts.maxArchives) plan.deferred.push(i);
       else plan.archive.push(i);

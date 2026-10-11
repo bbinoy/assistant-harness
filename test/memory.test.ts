@@ -99,8 +99,10 @@ test("persona: each run sees only its categories; chat gets the memory conventio
   for (const p of [chat, briefSystem(""), handler]) assert.ok(!/em dash/i.test(p), "that preference lives in notes");
 });
 
-test("triage: the classifier is told calendar change notices are archivable notifications, new invitations are not", () => {
+test("triage: the classifier judges automated records and status updates by intent, and keeps anything open", () => {
   const p = triageSystem("");
-  assert.match(p, /updated invitation, an accepted or declined reply, a cancellation\) is archive with kind notification/);
-  assert.match(p, /A NEW invitation that asks .* to respond/);
+  assert.match(p, /Judge by intent, not by sender or format/);
+  assert.match(p, /ask what is left to do[\s\S]*already happened or that a system already applied[\s\S]*nothing is left/);
+  assert.match(p, /an official or legal letter that may need a response/);
+  assert.match(p, /Examples of the idea, not a list/);
 });
