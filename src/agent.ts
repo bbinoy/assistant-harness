@@ -40,6 +40,18 @@ export type Approve = (
 // resumed session, so we keep the running total and report each turn's delta.
 const SESSION_FILE = "state/session.json";
 
+// Connectors the skills never use. Removed from the model's view entirely (not just denied):
+// every tool schema the model can see is re-read on every turn, and these ~80 tools were most
+// of a small chat's context. Notion, Google Calendar and Mailbird stay. To give the assistant
+// another connector, delete its line here.
+const UNUSED_CONNECTORS = [
+  "mcp__claude_ai_Interactive_Brokers_IBKR",
+  "mcp__claude_ai_Gmail",
+  "mcp__claude_ai_Google_Drive",
+  "mcp__claude_ai_Google_Docs",
+  "mcp__claude_ai_Claude_Docs",
+];
+
 export interface RunOptions {
   source: Source; // audit tag: who is acting
   systemPrompt: string;
@@ -145,6 +157,7 @@ export async function runAgent(prompt: string, approve: Approve, opts: RunOption
       // "user" loads ~/.claude/skills, user-scope MCP servers and CLAUDE.md.
       // Not "project": there is no project here.
       settingSources: ["user"],
+      disallowedTools: UNUSED_CONNECTORS,
       canUseTool,
       hooks,
       maxTurns: opts.maxTurns,
@@ -184,7 +197,7 @@ export function ask(prompt: string, approve: Approve, notify: (text: string) => 
     resumeChatSession: true,
     memoryNotify: notify,
     maxTurns: 40,
-    maxBudgetUsd: 1.0,
+    maxBudgetUsd: 2.0, // a cold prompt cache alone can cost most of a dollar
   });
 }
 
