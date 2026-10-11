@@ -15,6 +15,8 @@ This skill describes the default layout: a **page** with two Markdown tables,
 note says the tasks are a database, use `notion-create-pages` and
 `notion-update-page` on it and adapt the steps below.
 
+**If the Notion tools (`notion-search`, `notion-fetch`) do not exist** (the connector is not connected in the owner's Claude account), say so plainly, never guess or invent tasks data, skip this part, and in an unattended run end the brief with one line: "🔌 <connector> isn't connected, so tasks was skipped." In chat, add how to fix it: connect it under Settings, Connectors in their Claude account, then message you again.
+
 **If there is no `setup-tasks` note:**
 - in chat, find it yourself and save it: load `number-one:setup` (it searches Notion
   for the task list, saves the note, and asks the owner only if it finds nothing or

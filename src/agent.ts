@@ -5,6 +5,7 @@ import type { Decision } from "./approvals.ts";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
 import { describeCall } from "./format.ts";
+import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
 import { isIndex, isNotePath, LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, parseNote, readNotes } from "./notes.ts";
 import { createMemoryServer } from "./memory-tools.ts";
 import { briefSystem, chatSystem, handlerSystem } from "./persona.ts";
@@ -76,6 +77,7 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 
 const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens });
 
+const down = () => disconnected(readConnectors());
 const BUNDLED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup"].map((s) => `number-one:${s}`);
 
 interface Resume {
@@ -200,7 +202,10 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
   let lastError: string | undefined;
   let lastContext: number | undefined; // the last model call of the main loop shows how big the context is
   for await (const message of stream) {
-    if (message.type === "system" && message.subtype === "init") recordToolsSeen(message.tools);
+    if (message.type === "system" && message.subtype === "init") {
+      recordToolsSeen(message.tools);
+      recordConnectors(message.tools);
+    }
     if (message.type === "assistant") {
       if (message.error) lastError = message.error;
       if (!message.parent_tool_use_id) lastContext = contextTokens(message.message.usage);
@@ -266,7 +271,7 @@ export function prepareChat(approve: Approve, notify: (text: string) => Promise<
 
 const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
   source: "chat",
-  systemPrompt: chatSystem(readText(LAST_BRIEF), new Date(), missingSetup(readNotes())),
+  systemPrompt: chatSystem(readText(LAST_BRIEF), new Date(), missingSetup(readNotes(), down()), down()),
   resumeChatSession: true,
   memoryNotify: notify,
   maxTurns: 40,
@@ -298,7 +303,7 @@ export function runBriefTurn(
 ): Promise<AgentReply> {
   return runAgent(prompt, approve, {
     source: "brief",
-    systemPrompt: briefSystem(memoryFor(["triage", "people", "scheduling", "context", "brief", "style", "setup", "voice"]), missingSetup(readNotes())),
+    systemPrompt: briefSystem(memoryFor(["triage", "people", "scheduling", "context", "brief", "style", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
     resumeChatSession: false,
     maxTurns: 120,
     maxBudgetUsd: 5.0,
@@ -310,7 +315,7 @@ export function runBriefTurn(
 export function runHandlerTurn(prompt: string, approve: Approve): Promise<AgentReply> {
   return runAgent(prompt, approve, {
     source: "handler",
-    systemPrompt: handlerSystem(memoryFor(["people", "scheduling", "context", "style", "setup", "voice"]), missingSetup(readNotes())),
+    systemPrompt: handlerSystem(memoryFor(["people", "scheduling", "context", "style", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
     resumeChatSession: false,
     maxTurns: 40,
     maxBudgetUsd: 2.0,

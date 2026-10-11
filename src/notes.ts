@@ -101,15 +101,17 @@ export function notesBlock(notes: readonly Note[], categories: readonly Category
 // The setup the bundled skills need before they can do their job, as the file name each one
 // is saved under (plugin/skills/setup tells the chat agent to use exactly these).
 export const SETUP_ITEMS = [
-  { file: "setup-calendars.md", label: "calendars (which to check, time zone)" },
-  { file: "setup-tasks.md", label: "task list (your Notion page)" },
-  { file: "setup-meetings.md", label: "meeting notes (where prep pages go)" },
-  { file: "voice-writing.md", label: "how you write (for email drafts)" },
+  { file: "setup-calendars.md", label: "calendars (which to check, time zone)", needs: "calendar" },
+  { file: "setup-tasks.md", label: "task list (your Notion page)", needs: "notion" },
+  { file: "setup-meetings.md", label: "meeting notes (where prep pages go)", needs: "notion" },
+  { file: "voice-writing.md", label: "how you write (for email drafts)", needs: undefined },
 ] as const;
 
 // Pure: the labels of setup items with no note yet (an expired or empty note counts as missing).
-export const missingSetup = (notes: readonly Note[]): string[] =>
-  SETUP_ITEMS.filter((i) => !notes.some((n) => n.file === i.file)).map((i) => i.label);
+// An item whose connector is down is left out: the missing connection is the problem to report,
+// not the missing note.
+export const missingSetup = (notes: readonly Note[], down: readonly string[] = []): string[] =>
+  SETUP_ITEMS.filter((i) => !notes.some((n) => n.file === i.file) && !(i.needs && down.includes(i.needs))).map((i) => i.label);
 
 // What a run sees: the notes of the given categories, rendered.
 export const memoryFor = (categories: readonly Category[], now = new Date()) => notesBlock(readNotes(now), categories);

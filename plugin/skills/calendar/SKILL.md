@@ -11,6 +11,8 @@ Which calendars to check, the time zone and which calendar travel bookings go on
 are in the owner's `setup-calendars` note (the `setup` notes in your memory block
 or `MEMORY.md`). Use exactly those; do not guess calendar ids.
 
+**If the calendar tools (`list_calendars`, `list_events`) do not exist** (the connector is not connected in the owner's Claude account), say so plainly, never guess or invent calendar data, skip this part, and in an unattended run end the brief with one line: "🔌 <connector> isn't connected, so calendar was skipped." In chat, add how to fix it: connect it under Settings, Connectors in their Claude account, then message you again.
+
 **If there is no `setup-calendars` note:**
 - in chat, load `number-one:setup` and set it up with the owner now;
 - in an unattended run (nobody to ask), skip the calendar parts, and end the brief

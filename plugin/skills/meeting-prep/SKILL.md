@@ -26,6 +26,8 @@ The owner's `setup-meetings` note says where meeting pages go: a **database**
 meetings" view) or a **parent page** whose sub-pages are the prep pages. Use
 exactly that; do not guess a location.
 
+**If the Notion tools (`notion-search`, `notion-fetch`) do not exist** (the connector is not connected in the owner's Claude account), say so plainly, never guess or invent meeting prep data, skip this part, and in an unattended run end the brief with one line: "🔌 <connector> isn't connected, so meeting prep was skipped." In chat, add how to fix it: connect it under Settings, Connectors in their Claude account, then message you again.
+
 **If there is no `setup-meetings` note:**
 - in chat, find it yourself and save it: load `number-one:setup` (it searches Notion
   for the meetings database or page, saves the note, and asks the owner only if it

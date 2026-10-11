@@ -10,6 +10,7 @@ import { inQuietHours } from "./actions.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
+import { disconnected, NAMES, readConnectors } from "./connectors.ts";
 import { missingSetup, readNotes } from "./notes.ts";
 import { migrateLegacyLayout } from "./migrate.ts";
 import { dataPath, readJson, readText } from "./state.ts";
@@ -132,7 +133,11 @@ async function doctor() {
   for (const skill of ["daily-brief", "mailbird", "calendar", "notion-tasks", "meeting-prep", "setup"]) {
     line(existsSync(`${settings.pluginDir}/skills/${skill}/SKILL.md`), `skill ${skill} (bundled)`);
   }
-  const gaps = missingSetup(readNotes());
+  const conn = readConnectors();
+  if (conn) {
+    for (const k of ["notion", "calendar"] as const) line(conn[k] ? true : "warn", `${NAMES[k]} connector`, conn[k] ? "" : `not available in the last run (${local(conn.at)}): add it in your Claude account (Settings, Connectors)`);
+  }
+  const gaps = missingSetup(readNotes(), disconnected(conn));
   line(gaps.length === 0 ? true : "warn", "setup notes", gaps.length ? `not set up yet: ${gaps.join("; ")}. Message the assistant "set up".` : "calendars, tasks, meetings and writing voice are set up");
 
   for (const [name, dir] of [["state", settings.stateDir], ["logs", settings.logsDir], ["memory", settings.memoryDir]] as const) {

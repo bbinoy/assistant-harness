@@ -51,6 +51,8 @@ After the agent is running, send it **"set up"** on Signal. It walks you through
 | How you write | with your permission, reads up to 15 of your sent mails and describes your style for you to correct | `voice-writing.md` |
 | Optional | booking link, topics for the brief's radar | `setup-booking-link.md`, `brief-radar-topics.md` |
 
+**Notion and Google Calendar come through connectors in your Claude account** (Settings, then Connectors). If one is not connected, its tools do not exist, and the agent says so plainly ("Notion isn't connected") instead of asking you to type in what the connector would have told it, and skips that part: tasks and meeting prep without Notion, the calendar review without Google Calendar. Mail triage, chat and writing-style setup need neither. Connect it, message the agent again, and it carries on. `npm run doctor` shows the status of each connector as of the last run.
+
 Until something is set up, the parts of the agent that need it skip it and say so (in chat, it offers to set it up; in the daily brief, a one-line "🛠 Setup" note at the end). `npm run doctor` shows what is missing. To change something later, say "set up my calendar" (or tasks, meetings, writing) again, or edit the note in `memory/notes/`.
 
 The skills are `daily-brief` (the brief's structure), `mailbird` (triage and drafting rules), `calendar`, `notion-tasks`, `meeting-prep`, `mailbird-troubleshooting` and `setup`. To change how a domain is handled, edit the file in `plugin/skills/`. Your own skills in `~/.claude/skills/` are not offered to the agent.

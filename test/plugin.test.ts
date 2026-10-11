@@ -63,3 +63,24 @@ test("setup: Notion tasks and meetings are found by the agent, saved, and only a
     assert.match(read(s), /(do not edit a page\s+nobody has confirmed|create no\s+pages)/, `${s}: no edits to an unconfirmed page when unattended`);
   }
 });
+
+test("connectors: detected from the tools a run saw; a missing one is reported as not connected, not as not set up", async () => {
+  const { detect, disconnected, NAMES } = await import("../src/connectors.ts");
+  const all = ["mcp__claude_ai_Notion__notion-fetch", "mcp__claude_ai_Google_Calendar__list_events", "mcp__mailbird__get_message"];
+  assert.deepEqual(disconnected(detect(all)), []);
+  assert.deepEqual(disconnected(detect(["mcp__mailbird__get_message"])), ["notion", "calendar"]);
+  assert.deepEqual(disconnected(detect(all.slice(1))), ["notion"]);
+  assert.deepEqual(disconnected(undefined), []); // nothing recorded yet: say nothing
+  // setup items that depend on a down connector are not listed as "missing"
+  const base = missingSetup([]);
+  assert.equal(missingSetup([], ["calendar"]).length, base.length - 1);
+  assert.equal(missingSetup([], ["notion", "calendar"]).length, base.length - 3);
+  const chat = chatSystem(undefined, new Date("2026-10-12T09:00:00"), [], ["notion"]);
+  assert.match(chat, /Not connected right now[\s\S]*Notion[\s\S]*Do not ask them to type in/);
+  assert.match(briefSystem("", [], ["notion", "calendar"]), /🔌 Notion and Google Calendar aren't connected/);
+  assert.ok(!chatSystem(undefined, new Date(), [], []).includes("Not connected"));
+  assert.equal(NAMES.calendar, "Google Calendar");
+  const read = (s: string) => readFileSync(join(skillsDir, s, "SKILL.md"), "utf8");
+  assert.match(read("setup"), /do not\*\* ask them to type in what the connector/);
+  for (const s of ["calendar", "notion-tasks", "meeting-prep"]) assert.match(read(s), /🔌/, `${s} reports a missing connector`);
+});
