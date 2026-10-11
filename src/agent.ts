@@ -208,7 +208,7 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
   for await (const message of stream) {
     if (message.type === "system" && message.subtype === "init") {
       recordToolsSeen(message.tools);
-      recordConnectors(message.tools);
+      recordConnectors(message.tools, message.mcp_servers);
     }
     if (message.type === "assistant") {
       if (message.error) lastError = message.error;

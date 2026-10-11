@@ -84,3 +84,13 @@ test("connectors: detected from the tools a run saw; a missing one is reported a
   assert.match(read("setup"), /do not\*\* ask them to type in what the connector/);
   for (const s of ["calendar", "notion-tasks", "meeting-prep"]) assert.match(read(s), /🔌/, `${s} reports a missing connector`);
 });
+
+test("connectors: judged by the server status in the start-up message, so a slow connector is not reported as missing", async () => {
+  const { detect, disconnected } = await import("../src/connectors.ts");
+  const server = (name: string, status: string) => ({ name, status });
+  const all = [server("mailbird", "connected"), server("claude.ai Notion", "connected"), server("claude.ai Google Calendar", "connected")];
+  assert.deepEqual(disconnected(detect([], all)), []); // hidden or not yet listed tools do not matter
+  assert.deepEqual(disconnected(detect([], [server("mailbird", "pending"), server("claude.ai Notion", "pending"), server("claude.ai Google Calendar", "connected")])), []); // still connecting
+  assert.deepEqual(disconnected(detect([], [server("claude.ai Notion", "needs-auth"), server("claude.ai Google Calendar", "failed")])), ["notion", "calendar"]);
+  assert.deepEqual(disconnected(detect([], [server("mailbird", "connected"), server("claude.ai Gmail", "connected")])), ["notion", "calendar"]); // never added
+});

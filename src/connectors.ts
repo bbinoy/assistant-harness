@@ -21,14 +21,29 @@ export const NAMES: Record<Connector, string> = { notion: "Notion", calendar: "G
 // What the owner loses while a connector is down, in plain words.
 export const SKIPPED: Record<Connector, string> = { notion: "tasks and meeting prep pages", calendar: "the calendar review and the meeting list" };
 
-// Pure: from the tool names a run was given (hidden tools are not in the list, and the kept
-// Notion tools are enough to count).
-export function detect(tools: readonly string[], at = new Date()): Connectors {
-  const has = (prefix: string) => tools.some((t) => t.startsWith(prefix));
-  return { at: at.toISOString(), notion: has("mcp__claude_ai_Notion__"), calendar: has("mcp__claude_ai_Google_Calendar__"), mail: has("mcp__mailbird__") };
+export interface ServerStatus {
+  name: string;
+  status: string;
 }
 
-export const recordConnectors = (tools: readonly string[]) => writeJson(FILE, detect(tools));
+const SERVERS: Record<"notion" | "calendar" | "mail", RegExp> = { notion: /\bnotion\b/i, calendar: /google calendar/i, mail: /^mailbird$/i };
+
+// Pure. A connector is DOWN only when the run's start-up message says so: its server is not
+// listed at all (never added to the account), or failed, needs sign-in, or is disabled. Merely
+// "pending" is not down: slow servers (Mailbird through npx, a cold connector) are still
+// connecting and their tools appear a moment later. Without server info (an older SDK), fall
+// back to whether any of its tools were given.
+export function detect(tools: readonly string[], servers?: readonly ServerStatus[], at = new Date()): Connectors {
+  const hasTool = (prefix: string) => tools.some((t) => t.startsWith(prefix));
+  const up = (key: keyof typeof SERVERS, toolPrefix: string): boolean => {
+    if (!servers) return hasTool(toolPrefix);
+    const s = servers.find((x) => SERVERS[key].test(x.name.replace(/^claude\.ai\s+/i, "")));
+    return !!s && !["failed", "needs-auth", "disabled"].includes(s.status);
+  };
+  return { at: at.toISOString(), notion: up("notion", "mcp__claude_ai_Notion__"), calendar: up("calendar", "mcp__claude_ai_Google_Calendar__"), mail: up("mail", "mcp__mailbird__") };
+}
+
+export const recordConnectors = (tools: readonly string[], servers?: readonly ServerStatus[]) => writeJson(FILE, detect(tools, servers));
 export const readConnectors = (): Connectors | undefined => readJson<Connectors | undefined>(FILE, undefined);
 
 // Pure: connectors that were missing in the last run. Unknown (no run yet) counts as fine.
