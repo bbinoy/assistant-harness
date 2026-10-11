@@ -11,8 +11,8 @@ import { triageBatch, type MailInput } from "./triage.ts";
 // Only when something new arrived does a model classify it (one batch), and then the
 // pure rules in actions.ts decide what to archive, alert on or hand to the handler.
 
-const SEEN = "seen.json";
-const LIVENESS = "heartbeat.json"; // last tick, for `npm run doctor`
+const SEEN = "state/seen.json";
+const LIVENESS = "state/heartbeat.json"; // last tick, for `npm run doctor`
 const SEEN_TTL_MS = 14 * 24 * 3600_000;
 export const BRIEF_SUBJECT = /^\s*[☀🌙]/u; // our own briefs: never triaged
 const FETCH_CONCURRENCY = 4;

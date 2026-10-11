@@ -1,52 +1,83 @@
-import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, chmodSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { settings } from "./settings.ts";
 
-// Everything the agent remembers lives in small files under state/ (owner-only).
+// Everything the agent keeps lives in small files under the data root, in three owner-only
+// folders. Paths are always "<folder>/<name>", so the folder is explicit at every call site:
+//   state/   bookkeeping the model never reads (seen.json, cost.json, session.json, paused...)
+//   logs/    agent.log, audit.jsonl, signal-daemon.log, launchd-stderr.log
+//   memory/  what the model reads: facts.md (semantic memory) and last-brief.md (summary memory)
 //
 // All access is synchronous on purpose. The files are tiny, and a synchronous
 // read-modify-write cannot be interleaved with anything else in Node's event loop, so
 // two callers can never lose each other's update. Writes go to a temporary file and are
 // renamed into place, so a crash mid-write leaves the old version, never a torn file.
 
-export const statePath = (name: string) => join(settings.stateDir, name);
+// A typo or a ".." must fail loudly, not write outside the three folders.
+const REL = /^(state|logs|memory)\/(?!\.)[\w.-]+$/;
 
-function ensureDir() {
-  mkdirSync(settings.stateDir, { recursive: true, mode: 0o700 });
+export function dataPath(rel: string): string {
+  if (!REL.test(rel)) throw new Error(`state: "${rel}" is not a path like "state/seen.json"`);
+  return join(settings.dataDir, rel);
 }
 
-export function readText(name: string): string | undefined {
+function ensureDir(path: string) {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+}
+
+export function readText(rel: string): string | undefined {
   try {
-    return readFileSync(statePath(name), "utf8");
+    return readFileSync(dataPath(rel), "utf8");
   } catch {
     return undefined;
   }
 }
 
-export function writeText(name: string, text: string): void {
-  ensureDir();
-  const path = statePath(name);
+export function writeText(rel: string, text: string): void {
+  const path = dataPath(rel);
+  ensureDir(path);
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, text, { mode: 0o600 });
   renameSync(tmp, path);
 }
 
-export function readJson<T>(name: string, fallback: T): T {
-  const raw = readText(name);
+export function readJson<T>(rel: string, fallback: T): T {
+  const raw = readText(rel);
   if (raw === undefined) return fallback;
   try {
     return JSON.parse(raw) as T;
   } catch {
-    console.error(`state: ${name} is unreadable, starting from defaults`);
+    console.error(`state: ${rel} is unreadable, starting from defaults`);
     return fallback;
   }
 }
 
-export function writeJson(name: string, value: unknown): void {
-  writeText(name, JSON.stringify(value));
+export function writeJson(rel: string, value: unknown): void {
+  writeText(rel, JSON.stringify(value));
 }
 
-export function appendLine(name: string, line: string): void {
-  ensureDir();
-  appendFileSync(statePath(name), line + "\n", { mode: 0o600 });
+export function appendLine(rel: string, line: string): void {
+  const path = dataPath(rel);
+  ensureDir(path);
+  appendFileSync(path, line + "\n", { mode: 0o600 });
+}
+
+// A file descriptor opened for appending, for a child process to write its output to.
+export function openLog(rel: string): number {
+  const path = dataPath(rel);
+  ensureDir(path);
+  return openSync(path, "a", 0o600);
+}
+
+// Run at every start: create the three folders and tighten them (700) and their files (600).
+// Files made by others (launchd's stderr file, an older version of the agent) may have been
+// created with looser permissions.
+export function secureDataDirs(): void {
+  for (const dir of [settings.stateDir, settings.logsDir, settings.memoryDir]) {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      chmodSync(dir, 0o700);
+      for (const f of readdirSync(dir, { withFileTypes: true })) if (f.isFile()) chmodSync(join(dir, f.name), 0o600);
+    } catch { /* best effort */ }
+  }
 }

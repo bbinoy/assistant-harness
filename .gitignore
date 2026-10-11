@@ -1,6 +1,9 @@
+.claude/
 .DS_Store
 .env
 .node-path
 *.log
+logs/
+memory/
 node_modules
 state/

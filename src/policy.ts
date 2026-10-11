@@ -20,7 +20,7 @@ const LOCAL_FILE = /file:\/\//i;
 
 // Read-only verbs, matched against the tool's own name (after the server name), ignoring a
 // "notion-" style prefix: both "get_message" and "notion-fetch" are reads.
-const READ_VERB = /^(list|get|search|read|query|fetch|summarize|suggest|whats|download|show|ai-search)/i;
+const READ_VERB = /^(list|get|search|read|query|fetch|summarize|suggest|whats|download|show|ai-search|recall)/i;
 
 export function isReadTool(tool: string): boolean {
   const name = (tool.split("__").pop() ?? "").replace(/^notion-/i, "");
@@ -51,9 +51,16 @@ const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
   heartbeat: new Set(), // the heartbeat itself never runs an agent
 };
 
+// The owner's memory (the in-process "memory" server, chat only). Changing it is approved on
+// the phone every time: that approval is the defence against an email the chat agent read
+// trying to plant a rule. Nothing unattended may change it. Checked before any allow list,
+// so adding these tools to one can never open them up. recall is a read (isReadTool).
+const MEMORY_WRITES = new Set(["mcp__memory__remember", "mcp__memory__forget"]);
+
 export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
+  if (MEMORY_WRITES.has(tool)) return source === "chat" ? "ask" : "deny";
   if (tool === "Skill" || isReadTool(tool)) return "allow";
   return UNATTENDED_WRITES[source].has(tool) ? "allow" : "ask";
 }

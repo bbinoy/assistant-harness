@@ -1,26 +1,24 @@
 // Import this FIRST (for its side effects).
 //  - owner-only files: everything the harness creates is mode 600/700 (the audit log holds senders and subjects)
+//  - logs go to logs/agent.log; startup also migrates the old layout and secures state/, logs/, memory/
 //  - every console line gets a local timestamp, is redacted, and is appended to a rotating file
 //  - crashes and unhandled rejections are written to that same file before the process exits
 process.umask(0o077);
 
-import { appendFileSync, chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { migrateLegacyLayout } from "./migrate.ts";
 import { redact } from "./redact.ts";
 import { settings } from "./settings.ts";
+import { dataPath, secureDataDirs } from "./state.ts";
 
-const DIR = settings.stateDir;
-const FILE = join(DIR, "agent.log");
+const FILE = dataPath("logs/agent.log");
 const MAX_BYTES = 5 * 1024 * 1024;
 const KEEP = 3;
-mkdirSync(DIR, { recursive: true, mode: 0o700 });
 
-// Tighten state/ on every start: files created by others (launchd's stderr file, an older
-// version of the agent) may have been made with looser permissions.
-try {
-  chmodSync(DIR, 0o700);
-  for (const f of readdirSync(DIR)) chmodSync(join(DIR, f), 0o600);
-} catch { /* best effort */ }
+// Before anything reads a file: move logs and the last brief out of the old state/ layout,
+// then create and tighten state/, logs/ and memory/ (owner-only, whatever made the files).
+const migrated = migrateLegacyLayout(settings.dataDir);
+secureDataDirs();
 
 let writes = 0;
 function rotateIfNeeded() {
@@ -52,6 +50,8 @@ for (const level of ["log", "error"] as const) {
     } catch { /* logging must never crash the agent */ }
   };
 }
+
+if (migrated.length) console.log(`migrated ${migrated.length} file(s) out of state/: ${migrated.join(", ")}`);
 
 // Let launchd restart us, but leave a trace of why.
 process.on("uncaughtException", (e) => {

@@ -7,7 +7,7 @@ import { readJson, writeJson } from "./state.ts";
 // stops until tomorrow. Chat stays available: you are in control of that.
 // Synchronous on purpose (see state.ts): concurrent recordCost calls can never lose an update.
 
-const FILE = "cost.json";
+const FILE = "state/cost.json";
 
 interface Cost {
   day: string;

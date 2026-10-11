@@ -7,7 +7,7 @@ export const localDay = (d: Date) =>
 // `touch state/paused` = paused until the file is removed; a date inside (YYYY-MM-DD)
 // = paused until that local day, resuming on it. Handy for holidays.
 export function isPaused(now = new Date()): boolean {
-  const until = readText("paused")?.trim();
+  const until = readText("state/paused")?.trim();
   if (until === undefined) return false;
   return until === "" || localDay(now) < until;
 }

@@ -10,6 +10,15 @@ test("approval text: a long email body is shown generously and the cut is announ
   assert.ok(text.length > 1200);
 });
 
+test("approval text: memory changes show the category and the exact text", () => {
+  assert.equal(
+    describeCall("mcp__memory__remember", { category: "People", text: "Dr. Weber is a client, write formally in German", until: "2026-10-24" }),
+    "🧠 Remember\nCategory: People\nText: Dr. Weber is a client, write formally in German\nUntil: 2026-10-24",
+  );
+  assert.equal(describeCall("mcp__memory__forget", { query: "Weber" }), "🧠 Forget\nForget the fact containing: Weber");
+  assert.match(describeCall("mcp__mailbird__search_conversations", { query: "x" }), /\nquery: x$/); // labels are per tool
+});
+
 test("approval text: nothing is cut silently", () => {
   const text = describeCall("mcp__x__do", { note: "y".repeat(500) });
   assert.match(text, /\(\+300 more characters not shown\)/);
@@ -26,4 +35,10 @@ test("approval text: people shown as addresses, any other object shown in full",
   assert.match(text, /With: a@example\.com/);
   assert.match(text, /webhook/); // not hidden behind its email field
   assert.match(text, /🕒 Wed 14 Oct, 15:00–16:00/);
+});
+
+test("approval text: text-direction controls are stripped, so what shows is what runs", () => {
+  const text = describeCall("mcp__memory__remember", { category: "Triage rules", text: "archive ‮ecnab‬ mail" });
+  assert.doesNotMatch(text, /[‪-‮⁦-⁩]/);
+  assert.match(text, /archive ecnab mail/);
 });

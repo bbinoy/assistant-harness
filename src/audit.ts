@@ -1,5 +1,5 @@
 import { renameSync, statSync } from "node:fs";
-import { appendLine, readText, statePath } from "./state.ts";
+import { appendLine, dataPath, readText } from "./state.ts";
 
 // One append-only log for everything the agent does or observes.
 //   source: who acted (a chat turn, the daily brief, the mail handler, the heartbeat itself)
@@ -16,7 +16,7 @@ export interface AuditEntry {
   meta?: Record<string, any>;
 }
 
-const FILE = "audit.jsonl";
+const FILE = "logs/audit.jsonl";
 const MAX_BYTES = 20 * 1024 * 1024;
 let appends = 0;
 
@@ -24,8 +24,8 @@ export function audit(tool: string, decision: string, source: Source, meta?: Rec
   const entry = { ts: new Date().toISOString(), source, tool, decision, ...(meta ? { meta } : {}) };
   appendLine(FILE, JSON.stringify(entry));
   // Keep one previous generation; readers only ever need the recent past.
-  if (++appends % 100 === 0 && statSync(statePath(FILE)).size > MAX_BYTES) {
-    renameSync(statePath(FILE), statePath(`${FILE}.1`));
+  if (++appends % 100 === 0 && statSync(dataPath(FILE)).size > MAX_BYTES) {
+    renameSync(dataPath(FILE), dataPath(`${FILE}.1`));
   }
 }
 

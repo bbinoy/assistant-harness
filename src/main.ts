@@ -1,15 +1,18 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
-import { ask, AuthError, type Approve } from "./agent.ts";
+import { ask, AuthError, compactChatIfNeeded, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
+import { ensureFactsFile } from "./memory.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { ensureSignalDaemon } from "./signal-daemon.ts";
 import { SignalClient, type IncomingMessage } from "./signal.ts";
+
+ensureFactsFile(); // first run: memory/facts.md with empty headings, ready to edit
 
 const signal = new SignalClient(settings.signalHost, settings.signalPort, config.ownerNumber);
 const out = createOutbound(signal);
@@ -61,6 +64,7 @@ async function chat(m: IncomingMessage) {
     console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
     await out.reply(text);
     void signal.react("✅", target);
+    await compactChatIfNeeded(); // after the reply is out; the next message waits for it
   } catch (e) {
     console.error("agent error:", (e as Error).message);
     void signal.react("⚠️", target);

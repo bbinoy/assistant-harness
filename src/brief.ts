@@ -2,16 +2,17 @@ import { AuthError, runBriefTurn, type Approve } from "./agent.ts";
 import { audit } from "./audit.ts";
 import { overBudget } from "./budget.ts";
 import { buildDigest, readTriageSince } from "./digest.ts";
+import { fence } from "./fence.ts";
+import { LAST_BRIEF } from "./memory.ts";
 import { isPaused, localDay } from "./pause.ts";
 import { settings } from "./settings.ts";
 import { readJson, readText, writeJson, writeText } from "./state.ts";
 
 // The daily brief: once per local day, on the first heartbeat tick at or after the start
 // hour (late is fine), retried on later ticks up to a daily cap. Its memory is local: the
-// last brief (state/last-brief.md) and what the heartbeat did since (the audit log).
+// last brief (memory/last-brief.md) and what the heartbeat did since (the audit log).
 
-const STATE = "brief.json";
-const LAST_BRIEF = "last-brief.md";
+const STATE = "state/brief.json";
 const BRIEF_TOOL = "mcp__mailbird__send_self_briefing"; // the agent emails the brief with this
 const DONE_MARKER = "ROUTINE_COMPLETE";
 
@@ -54,7 +55,6 @@ export function clockLine(now: Date): string {
 
 // The run's prompt. Previous brief and digest go in as clearly fenced DATA.
 export function briefPrompt(now: Date, previous: string | undefined, previousAt: string | undefined, digest: string): string {
-  const fence = (tag: string, body: string) => `<${tag}>\n${body.replaceAll(`</${tag}`, `<\\/${tag}`)}\n</${tag}>`;
   return [
     clockLine(now),
     `Load the 'daily-brief' skill with the Skill tool and follow it exactly. After ${BRIEF_TOOL.split("__").pop()} succeeds, print the exact line ${DONE_MARKER}. If the mail tools are unreachable, send the brief anyway saying so, do the task and calendar parts if you can, and do NOT print ${DONE_MARKER}.`,
@@ -90,7 +90,7 @@ export async function maybeRunBrief(deps: BriefDeps): Promise<void> {
     if (!decision.run) {
       if (decision.reason === "attempt cap reached" && state.notifiedGaveUp !== localDay(now)) {
         writeJson(STATE, { ...state, notifiedGaveUp: localDay(now) });
-        await deps.notify(`The daily brief failed ${settings.briefMaxAttempts} times today, so I'm giving up until tomorrow. Check state/agent.log.`);
+        await deps.notify(`The daily brief failed ${settings.briefMaxAttempts} times today, so I'm giving up until tomorrow. Check logs/agent.log.`);
       }
       return;
     }

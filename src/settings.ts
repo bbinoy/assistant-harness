@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Every tunable in one place, read from the environment (see .env.example) and validated
@@ -25,6 +25,9 @@ function oneOf<T extends string>(env: Env, name: string, fallback: T, allowed: r
 }
 
 export function loadSettings(env: Env) {
+  // The data root holds three folders: state/ (bookkeeping), logs/ and memory/ (what the
+  // model reads). Overridable so tests never touch the real data.
+  const dataDir = env.HARNESS_DATA_DIR ? resolve(env.HARNESS_DATA_DIR) : resolve(fileURLToPath(new URL("../", import.meta.url)));
   return {
     // Who the agent works for and what it is called. Neutral defaults keep the repo impersonal.
     owner: env.OWNER_NAME || "the owner",
@@ -50,8 +53,15 @@ export function loadSettings(env: Env) {
 
     launchdLabel: env.LAUNCHD_LABEL || `com.${env.USER ?? "user"}.assistant-harness`,
 
-    // Overridable so tests never touch the real state.
-    stateDir: env.HARNESS_STATE_DIR ? resolve(env.HARNESS_STATE_DIR) : fileURLToPath(new URL("../state/", import.meta.url)),
+    // Chat session hygiene: the SDK only compacts near the context limit, so a long-lived
+    // session would re-send an ever-growing history on every turn.
+    chatIdleResetHours: num(env, "CHAT_IDLE_RESET_HOURS", 6, 1, 168), // idle this long: start a fresh session
+    chatCompactTokens: num(env, "CHAT_COMPACT_TOKENS", 60_000, 10_000, 500_000), // a turn this big: compact afterwards
+
+    dataDir,
+    stateDir: join(dataDir, "state"), // bookkeeping the model never reads
+    logsDir: join(dataDir, "logs"), // agent.log, audit.jsonl, daemon and launchd output
+    memoryDir: join(dataDir, "memory"), // what the model reads: facts.md and last-brief.md
   } as const;
 }
 

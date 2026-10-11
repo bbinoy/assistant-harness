@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
-import { openSync } from "node:fs";
 import net from "node:net";
-import { statePath } from "./state.ts";
+import { openLog } from "./state.ts";
 
 function portOpen(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -19,7 +18,7 @@ export async function ensureSignalDaemon(account: string, host: string, port: nu
     console.log("signal-cli daemon already running, reusing it");
     return;
   }
-  const log = openSync(statePath("signal-daemon.log"), "a", 0o600);
+  const log = openLog("logs/signal-daemon.log");
   // 127.0.0.1 only: the socket is unauthenticated, anything that can reach it can send as you.
   const child = spawn("signal-cli", ["-a", account, "daemon", "--tcp", `${host}:${port}`, "--no-receive-stdout"], {
     stdio: ["ignore", log, log],

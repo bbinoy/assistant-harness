@@ -10,13 +10,17 @@ import { inQuietHours } from "./actions.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
-import { readJson, readText, statePath } from "./state.ts";
+import { readFacts } from "./memory.ts";
+import { migrateLegacyLayout } from "./migrate.ts";
+import { dataPath, readJson, readText } from "./state.ts";
 
 // Small operator tools:
 //   npm run report [hours]        what the heartbeat archived / alerted / queued (default 24h)
 //   npm run restore <id>          put an archived conversation back in the inbox
 //   npm run doctor                is everything the agent depends on in place?
 //   npm run triage-check [n]      how the heartbeat would classify the newest n emails (acts on nothing)
+
+migrateLegacyLayout(settings.dataDir); // same one-time move as at agent start; a no-op once done
 
 // Local wall time, like the agent's own log.
 const local = (iso: string) => {
@@ -127,14 +131,15 @@ async function doctor() {
     line(existsSync(`${process.env.HOME}/.claude/skills/${skill}/SKILL.md`), `skill ${skill}`);
   }
 
-  const stateDir = settings.stateDir;
-  if (existsSync(stateDir)) {
-    const loose = readdirSync(stateDir).filter((f) => (statSync(`${stateDir}/${f}`).mode & 0o077) !== 0 && statSync(`${stateDir}/${f}`).isFile());
-    line((statSync(stateDir).mode & 0o077) === 0, "state/ directory is owner-only");
-    line(loose.length === 0 ? true : "warn", "state files are owner-only", loose.length ? `group/world-readable: ${loose.join(", ")}` : "");
+  for (const [name, dir] of [["state", settings.stateDir], ["logs", settings.logsDir], ["memory", settings.memoryDir]] as const) {
+    if (!existsSync(dir)) continue;
+    const loose = readdirSync(dir).filter((f) => (statSync(`${dir}/${f}`).mode & 0o077) !== 0 && statSync(`${dir}/${f}`).isFile());
+    line((statSync(dir).mode & 0o077) === 0, `${name}/ directory is owner-only`);
+    line(loose.length === 0 ? true : "warn", `${name}/ files are owner-only`, loose.length ? `group/world-readable: ${loose.join(", ")}` : "");
   }
+  line(true, "memory/facts.md", `${readFacts().length} fact(s) remembered`); // the count only, never the facts
 
-  const beat = readJson<{ lastTickAt?: string; lastNewMailAt?: string }>("heartbeat.json", {});
+  const beat = readJson<{ lastTickAt?: string; lastNewMailAt?: string }>("state/heartbeat.json", {});
   const ageMin = beat.lastTickAt ? (Date.now() - Date.parse(beat.lastTickAt)) / 60_000 : Infinity;
   const quiet = inQuietHours(new Date(), settings.quietStartHour, settings.quietEndHour);
   line(
@@ -145,12 +150,12 @@ async function doctor() {
 
   const spent = spentToday();
   line(spent < settings.dailyBudgetUsd, "daily spend guard", `$${spent.toFixed(2)} of $${settings.dailyBudgetUsd} today (notional)`);
-  line(isPaused() ? "warn" : true, "not paused", isPaused() ? `${statePath("paused")} exists` : "");
-  const log = readText("agent.log") ?? "";
+  line(isPaused() ? "warn" : true, "not paused", isPaused() ? `${dataPath("state/paused")} exists` : "");
+  const log = readText("logs/agent.log") ?? "";
   const hourAgo = new Date(Date.now() - 3600_000);
   const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   const recentErrors = log.split("\n").filter((l) => l.includes(" ERR ") && l.slice(0, 5) >= hhmm(hourAgo)).length;
-  line(recentErrors === 0 ? true : "warn", "no errors in the log in the last hour", recentErrors ? `${recentErrors} error line(s) in state/agent.log` : "");
+  line(recentErrors === 0 ? true : "warn", "no errors in the log in the last hour", recentErrors ? `${recentErrors} error line(s) in logs/agent.log` : "");
 
   console.log(bad === 0 ? "\nAll required checks passed." : `\n${bad} check(s) failed.`);
   process.exit(bad === 0 ? 0 : 1);

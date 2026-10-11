@@ -68,6 +68,16 @@ test("edit-and-approve: allowed fields only, calendar only", () => {
   assert.equal(applyChanges(tool, input, []), undefined);
 });
 
+test("memory tools: recall is a read, changes ask in chat and are denied for everyone else", () => {
+  const MEM = "mcp__memory__";
+  for (const source of ["chat", "brief", "handler", "heartbeat"] as const) assert.equal(classify(`${MEM}recall`, {}, source), "allow", source);
+  for (const t of [`${MEM}remember`, `${MEM}forget`]) {
+    assert.equal(classify(t, { category: "Style", text: "x" }, "chat"), "ask", t);
+    for (const source of ["brief", "handler", "heartbeat"] as const) assert.equal(classify(t, {}, source), "deny", `${t} (${source})`);
+  }
+  assert.equal(classify(`${MEM}remember`, { text: "see file:///etc/passwd" }, "chat"), "deny"); // the file:// rule still applies
+});
+
 test("audit ids: keeps ids, drops content", () => {
   assert.deepEqual(idsOf({ conversationId: "abc", body: "secret text", subject: "x" }), { ids: { conversationId: "abc" } });
   assert.deepEqual(idsOf({ messageId: 5, id: "x" }), { ids: { messageId: 5, id: "x" } });

@@ -104,11 +104,13 @@ Sections, in this order (skip a section if empty, except Focus):
    One-line count for later ones.
 5. `## ⏳ Waiting on` - one line each; only if non-empty.
 6. `## 📡 Radar` - 3 to 5 concrete bullets from the newsletters skimmed,
-   focused on [YOUR TOPICS AND REGIONS HERE]: an
+   focused on the topics and regions in the owner's memory (the Brief facts in
+   the injected `owner_memory` block): an
    announcement, launch, funding round, policy change, hire, or an event with
    date + venue + register-by deadline. Format `- what happened - why it
    matters to the owner (source)`. Never repeat a bullet from the previous brief.
-   Omit the section if nothing concrete turned up.
+   If no topics are remembered, omit the Radar section. Omit it too if nothing
+   concrete turned up.
 7. `## 🧹 Housekeeping` - what changed since the last brief: how many emails
    the heartbeat archived and **a short list of them** (sender - subject, grouped
    by kind; leave cold outreach out of the list, count it only), tasks +/-,
@@ -124,4 +126,4 @@ Cut ruthlessly: if the owner does not act on it, it is one line or gone.
 - Connect the dots: call moved -> flag the meeting; invoice in -> task to pay;
   booking with no calendar entry -> add it.
 - Flag streaks: "3rd follow-up from X", "no reply from Y in 10 days".
-- Short lines. No preamble. No em dashes.
+- Short lines. No preamble. Follow the owner's Style notes in memory for wording.

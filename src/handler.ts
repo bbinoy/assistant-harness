@@ -9,7 +9,7 @@ import { readJson, writeJson } from "./state.ts";
 // disk, so a restart loses nothing. Queue updates are synchronous (see state.ts), so an
 // enqueue can never be overwritten by the worker taking a batch.
 
-const QUEUE = "handle-queue.json";
+const QUEUE = "state/handle-queue.json";
 const BATCH = 8;
 
 export interface HandleItem {

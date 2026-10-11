@@ -10,8 +10,8 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 command -v node >/dev/null || { echo "node not found on PATH"; exit 1; }
 command -v signal-cli >/dev/null || echo "warning: signal-cli not found on PATH (brew install signal-cli)"
 dirname "$(command -v node)" > .node-path
-mkdir -p state && chmod 700 state
-: > state/launchd-stderr.log && chmod 600 state/launchd-stderr.log   # launchd would create it world-readable
+mkdir -p logs && chmod 700 logs
+: > logs/launchd-stderr.log && chmod 600 logs/launchd-stderr.log   # launchd would create it world-readable
 sed -e "s#__LABEL__#$LABEL#g" -e "s#__DIR__#$PWD#g" launchd/agent.plist.template > "$PLIST"
 plutil -lint "$PLIST" >/dev/null
 # bootout returns before the old job is fully gone; bootstrapping too early fails with
@@ -27,5 +27,5 @@ for i in 1 2 3 4 5; do
   sleep 2
 done
 echo "Installed and started $LABEL"
-echo "Log:    $PWD/state/agent.log"
+echo "Log:    $PWD/logs/agent.log"
 echo "Check:  npm run doctor"

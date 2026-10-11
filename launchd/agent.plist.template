@@ -17,11 +17,11 @@
     <integer>30</integer>
     <key>ProcessType</key>
     <string>Background</string>
-    <!-- The agent writes its own rotating, redacted log (state/agent.log).
+    <!-- The agent writes its own rotating, redacted log (logs/agent.log).
          launchd only keeps raw crash output that never reached that logger. -->
     <key>StandardOutPath</key>
     <string>/dev/null</string>
     <key>StandardErrorPath</key>
-    <string>__DIR__/state/launchd-stderr.log</string>
+    <string>__DIR__/logs/launchd-stderr.log</string>
 </dict>
 </plist>

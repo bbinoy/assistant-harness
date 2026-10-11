@@ -2,7 +2,9 @@
 // arguments. Deliberately not model-written: an approval prompt that a model
 // paraphrases can misrepresent the call it is meant to guard.
 
-const TOOLS: Record<string, { icon: string; title: string }> = {
+const TOOLS: Record<string, { icon: string; title: string; labels?: Record<string, string> }> = {
+  mcp__memory__remember: { icon: "🧠", title: "Remember", labels: { category: "Category", text: "Text", until: "Until" } },
+  mcp__memory__forget: { icon: "🧠", title: "Forget", labels: { query: "Forget the fact containing" } },
   mcp__claude_ai_Google_Calendar__create_event: { icon: "📅", title: "Create calendar event" },
   mcp__claude_ai_Google_Calendar__update_event: { icon: "📅", title: "Change calendar event" },
   mcp__claude_ai_Google_Calendar__respond_to_event: { icon: "📅", title: "Respond to invite" },
@@ -43,9 +45,13 @@ function when(start: unknown, end: unknown, zone: unknown): string | undefined {
   return `${s.day} ${s.time} → ${e.day} ${e.time}${tz}`;
 }
 
+// Bidirectional-text controls can make text display in a different order than it reads
+// (an approval that looks harmless on the phone but says something else). Never shown.
+const BIDI = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+
 // An approval must never hide content silently: whatever is cut is announced.
 function clip(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, " ").trim();
+  const flat = text.replace(BIDI, "").replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max)}… (+${flat.length - max} more characters not shown)` : flat;
 }
 
@@ -94,7 +100,7 @@ export function describeCall(tool: string, input: Record<string, unknown>): stri
     if (SKIP.has(key) || value === undefined || value === null || value === "") continue;
     if (typeof value === "string" && SKIP_VALUES.has(value)) continue;
     if (Array.isArray(value) && value.length === 0) continue;
-    lines.push(`${LABELS[key] ?? key}: ${show(key, value)}`);
+    lines.push(`${meta?.labels?.[key] ?? LABELS[key] ?? key}: ${show(key, value)}`);
   }
   return lines.join("\n");
 }
