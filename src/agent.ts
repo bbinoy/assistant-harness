@@ -41,6 +41,11 @@ export type Approve = (
 // resumed session, so we keep the running total and report each turn's delta.
 const SESSION_FILE = "state/session.json";
 
+// Note changes made during the current chat turn. They are announced ONCE, as one short
+// message when the turn ends (consume), not one per tool call. Chat is serial, so a
+// module-level list is safe.
+const memoryChanges: string[] = [];
+
 // Tool names runs have seen, so policy.hiddenTools() can hide the unused ones by name.
 // Seeded with Notion's current tools, so even the very first run is trimmed.
 const TOOLS_SEEN = "state/tools-seen.json";
@@ -128,7 +133,8 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
       const written = String((tool === "Write" ? input.content : input.new_string) ?? "");
       const body = parseNote(file, written)?.text ?? written.trim();
       audit("memory_note", tool === "Write" ? "written" : "edited", "chat");
-      void opts.memoryNotify(`🧠 Memory updated (${file}): ${body.slice(0, 400)}${body.length > 400 ? "…" : ""}\nWrong? Tell me to change or forget it.`).catch(() => {});
+      const gist = body.split("\n")[0]!.slice(0, 160);
+      memoryChanges.push(`${tool === "Write" ? "➕ saved" : "✏️ updated"} ${file}: ${gist}`);
     }
     opts.onToolSuccess?.(tool, input);
   };
@@ -162,7 +168,7 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
       ? { type: "preset", preset: "claude_code", append: opts.systemPrompt, snapshot: false }
       : { type: "custom", prompt: opts.systemPrompt, snapshot: false },
     settings: opts.memoryNotify ? { autoMemoryEnabled: true, autoMemoryDirectory: NOTES_DIR } : { autoMemoryEnabled: false },
-    mcpServers: opts.memoryNotify ? { memory: createMemoryServer(opts.memoryNotify) } : undefined,
+    mcpServers: opts.memoryNotify ? { memory: createMemoryServer((line) => memoryChanges.push(line)) } : undefined,
     resume,
     // Built-ins: Skill, and for chat Read / Write / Edit, which policy.ts confines to the
     // notes folder. No Bash. Everything else the agent can do is an MCP tool (Mailbird,
@@ -191,6 +197,10 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
       if (!message.parent_tool_use_id) lastContext = contextTokens(message.message.usage);
     }
     if (message.type !== "result") continue;
+    if (opts.memoryNotify && memoryChanges.length) {
+      const lines = memoryChanges.splice(0);
+      void opts.memoryNotify(`🧠 Memory\n${lines.join("\n")}\nWrong? Tell me to undo it.`).catch(() => {});
+    }
     if (opts.resumeChatSession) {
       const next: ChatSession = { sessionId: message.session_id, costUsd: message.total_cost_usd, lastTurnAt: new Date().toISOString(), lastContextTokens: lastContext };
       writeJson(SESSION_FILE, next);
