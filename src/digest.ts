@@ -1,7 +1,7 @@
 import { isTriage, readAudit, type AuditEntry } from "./audit.ts";
 
 export type TriageEntry = Pick<AuditEntry, "ts" | "decision"> & {
-  meta: { id?: string; messageId?: number; from?: string; subject?: string; label?: string; kind?: string };
+  meta: { id?: string; messageId?: number; from?: string; subject?: string; label?: string; kind?: string; reason?: string };
 };
 
 export function readTriageSince(sinceIso: string): TriageEntry[] {
@@ -25,13 +25,16 @@ export function buildDigest(entries: TriageEntry[], sinceIso: string | undefined
   const by = (label: string) => entries.filter((e) => e.meta.label === label);
   const archived = entries.filter((e) => e.decision === "archived");
   const candidates = entries.filter((e) => e.meta.label === "archive" && e.decision !== "archived");
+  // withKind adds the kind and the classifier's reason: for archived mail, that is what lets the
+  // owner scan the list and spot a mistake.
   const section = (title: string, rows: TriageEntry[], withKind: boolean) => {
     if (rows.length === 0) return;
     lines.push(`\n${title} (${rows.length}):`);
     for (const e of rows.slice(0, LIST_CAP)) {
       const kind = withKind ? ` [${e.meta.kind}]` : "";
       const id = e.meta.messageId ? ` {msg ${e.meta.messageId}}` : "";
-      lines.push(`- ${clip(e.meta.from, 40)}: ${clip(e.meta.subject, 90)}${kind}${id}`);
+      const why = withKind && e.meta.reason ? ` - why: ${clip(e.meta.reason, 80)}` : "";
+      lines.push(`- ${clip(e.meta.from, 40)}: ${clip(e.meta.subject, 90)}${kind}${why}${id}`);
     }
     if (rows.length > LIST_CAP) lines.push(`- ...and ${rows.length - LIST_CAP} more`);
   };

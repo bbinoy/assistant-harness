@@ -112,9 +112,11 @@ Sections, in this order (skip a section if empty, except Focus):
    If no topics are remembered, omit the Radar section. Omit it too if nothing
    concrete turned up.
 7. `## 🧹 Housekeeping` - what changed since the last brief: how many emails
-   the heartbeat archived and **a short list of them** (sender - subject, grouped
-   by kind; leave cold outreach out of the list, count it only), tasks +/-,
-   prep pages, calendar events, conflict flags.
+   the heartbeat archived, and **every archived email that is not a plain newsletter
+   or cold outreach listed on its own line**: `sender - subject (why it was archived)`,
+   using the reason from the digest. The owner scans this list to catch a mistake, so
+   do not abbreviate it away. Newsletters and cold outreach are only counted (newsletter
+   names in one short line). Then tasks +/-, prep pages, calendar events, conflict flags.
 
 Cut ruthlessly: if the owner does not act on it, it is one line or gone.
 
