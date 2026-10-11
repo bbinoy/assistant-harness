@@ -1,9 +1,10 @@
+import { basename } from "node:path";
 import { query, type CanUseTool, type HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk";
 import type { Decision } from "./approvals.ts";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
 import { describeCall } from "./format.ts";
-import { LAST_BRIEF, readFacts } from "./memory.ts";
+import { isIndex, isNotePath, LAST_BRIEF, memoryFor, NOTES_DIR, parseNote } from "./notes.ts";
 import { createMemoryServer } from "./memory-tools.ts";
 import { briefSystem, chatSystem, handlerSystem } from "./persona.ts";
 import { classify, isReadTool } from "./policy.ts";
@@ -43,7 +44,7 @@ export interface RunOptions {
   source: Source; // audit tag: who is acting
   systemPrompt: string;
   resumeChatSession: boolean; // chat: continue + save the conversation; brief: fresh every run
-  memoryTools?: boolean; // chat only: the in-process memory server (remember / forget / recall)
+  memoryNotify?: (text: string) => Promise<void>; // chat only: turns on the SDK's auto-memory (notes in memory/notes/) and announces every change
   maxTurns: number;
   maxBudgetUsd: number; // hard per-run spend cap
   // Fires after a tool call succeeds. Used to capture the brief the agent sends.
@@ -96,33 +97,51 @@ export async function runAgent(prompt: string, approve: Approve, opts: RunOption
     };
   };
 
-  const hooks: Partial<Record<"PostToolUse", HookCallbackMatcher[]>> | undefined = opts.onToolSuccess
-    ? {
-        PostToolUse: [
-          {
-            hooks: [
-              async (input) => {
-                if (input.hook_event_name === "PostToolUse") opts.onToolSuccess!(input.tool_name, input.tool_input);
-                return {};
-              },
-            ],
+  // After a successful tool call: announce a note change on the phone (chat), and report the
+  // call to whoever asked (the brief captures what it sent).
+  const afterTool = async (tool: string, input: Record<string, unknown>) => {
+    if (opts.memoryNotify && (tool === "Write" || tool === "Edit") && isNotePath(input.file_path) && !isIndex(input.file_path)) {
+      const file = basename(input.file_path);
+      const written = String((tool === "Write" ? input.content : input.new_string) ?? "");
+      const body = parseNote(file, written)?.text ?? written.trim();
+      audit("memory_note", tool === "Write" ? "written" : "edited", "chat");
+      void opts.memoryNotify(`🧠 Memory updated (${file}): ${body.slice(0, 400)}${body.length > 400 ? "…" : ""}\nWrong? Tell me to change or forget it.`).catch(() => {});
+    }
+    opts.onToolSuccess?.(tool, input);
+  };
+  const hooks: Partial<Record<"PostToolUse", HookCallbackMatcher[]>> = {
+    PostToolUse: [
+      {
+        hooks: [
+          async (input) => {
+            if (input.hook_event_name === "PostToolUse") await afterTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
+            return {};
           },
         ],
-      }
-    : undefined;
+      },
+    ],
+  };
 
   const stream = query({
     prompt,
     options: {
       model: settings.model,
       // Rendered fresh on every request (not recorded once per session): the prompt carries
-      // the owner's memory, and a change must apply to the very next message.
-      systemPrompt: { type: "custom", prompt: opts.systemPrompt, snapshot: false },
-      mcpServers: opts.memoryTools ? { memory: createMemoryServer() } : undefined,
+      // today's date and the last brief, and a change must apply to the very next message.
+      // Chat uses Claude Code's preset prompt because that is where the SDK's auto-memory
+      // instructions live (with a custom prompt the model says "noted" and saves nothing);
+      // our persona and rules are appended. The unattended runs keep a custom prompt and
+      // get their notes injected as data (notes.ts).
+      systemPrompt: opts.memoryNotify
+        ? { type: "preset", preset: "claude_code", append: opts.systemPrompt, snapshot: false }
+        : { type: "custom", prompt: opts.systemPrompt, snapshot: false },
+      settings: opts.memoryNotify ? { autoMemoryEnabled: true, autoMemoryDirectory: NOTES_DIR } : { autoMemoryEnabled: false },
+      mcpServers: opts.memoryNotify ? { memory: createMemoryServer(opts.memoryNotify) } : undefined,
       resume,
-      // Built-ins: only Skill. No Bash, no file access. Everything else the agent
-      // can do is an MCP tool (Mailbird, Notion, Calendar...), gated by canUseTool.
-      tools: ["Skill"],
+      // Built-ins: Skill, and for chat Read / Write / Edit, which policy.ts confines to the
+      // notes folder. No Bash. Everything else the agent can do is an MCP tool (Mailbird,
+      // Notion, Calendar...), gated by canUseTool.
+      tools: opts.memoryNotify ? ["Skill", "Read", "Write", "Edit"] : ["Skill"],
       // "user" loads ~/.claude/skills, user-scope MCP servers and CLAUDE.md.
       // Not "project": there is no project here.
       settingSources: ["user"],
@@ -158,12 +177,12 @@ export async function runAgent(prompt: string, approve: Approve, opts: RunOption
 }
 
 // Interactive chat: resumes the persistent conversation.
-export function ask(prompt: string, approve: Approve): Promise<AgentReply> {
+export function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>): Promise<AgentReply> {
   return runAgent(prompt, approve, {
     source: "chat",
-    systemPrompt: chatSystem(readFacts(), readText(LAST_BRIEF)),
+    systemPrompt: chatSystem(readText(LAST_BRIEF)),
     resumeChatSession: true,
-    memoryTools: true,
+    memoryNotify: notify,
     maxTurns: 40,
     maxBudgetUsd: 1.0,
   });
@@ -177,7 +196,7 @@ export function runBriefTurn(
 ): Promise<AgentReply> {
   return runAgent(prompt, approve, {
     source: "brief",
-    systemPrompt: briefSystem(readFacts()),
+    systemPrompt: briefSystem(memoryFor(["triage", "people", "scheduling", "context", "brief", "style"])),
     resumeChatSession: false,
     maxTurns: 120,
     maxBudgetUsd: 5.0,
@@ -189,7 +208,7 @@ export function runBriefTurn(
 export function runHandlerTurn(prompt: string, approve: Approve): Promise<AgentReply> {
   return runAgent(prompt, approve, {
     source: "handler",
-    systemPrompt: handlerSystem(readFacts()),
+    systemPrompt: handlerSystem(memoryFor(["people", "scheduling", "context", "style"])),
     resumeChatSession: false,
     maxTurns: 40,
     maxBudgetUsd: 2.0,

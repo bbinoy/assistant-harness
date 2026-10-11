@@ -6,13 +6,13 @@ import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
-import { ensureFactsFile } from "./memory.ts";
+import { ensureNotesDir } from "./notes.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { ensureSignalDaemon } from "./signal-daemon.ts";
 import { SignalClient, type IncomingMessage } from "./signal.ts";
 
-ensureFactsFile(); // first run: memory/facts.md with empty headings, ready to edit
+ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 
 const signal = new SignalClient(settings.signalHost, settings.signalPort, config.ownerNumber);
 const out = createOutbound(signal);
@@ -60,7 +60,7 @@ async function chat(m: IncomingMessage) {
   // Status on the owner's message, each replacing the last: 👀 working, ✅ answered, ⚠️ failed.
   void signal.react("👀", target);
   try {
-    const { text, costUsd } = await ask(m.text, approve);
+    const { text, costUsd } = await ask(m.text, approve, notify);
     console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
     await out.reply(text);
     void signal.react("✅", target);

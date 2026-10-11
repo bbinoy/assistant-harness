@@ -3,7 +3,7 @@ import { audit } from "./audit.ts";
 import { overBudget } from "./budget.ts";
 import { buildDigest, readTriageSince } from "./digest.ts";
 import { fence } from "./fence.ts";
-import { LAST_BRIEF } from "./memory.ts";
+import { LAST_BRIEF } from "./notes.ts";
 import { isPaused, localDay } from "./pause.ts";
 import { settings } from "./settings.ts";
 import { readJson, readText, writeJson, writeText } from "./state.ts";

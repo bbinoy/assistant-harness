@@ -61,7 +61,7 @@ export function loadSettings(env: Env) {
     dataDir,
     stateDir: join(dataDir, "state"), // bookkeeping the model never reads
     logsDir: join(dataDir, "logs"), // agent.log, audit.jsonl, daemon and launchd output
-    memoryDir: join(dataDir, "memory"), // what the model reads: facts.md and last-brief.md
+    memoryDir: join(dataDir, "memory"), // what the model reads: notes/ (the SDK auto-memory) and last-brief.md
   } as const;
 }
 

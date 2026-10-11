@@ -1,6 +1,6 @@
 // The chat conversation (Note to Self) persists across restarts, but not forever:
-//   - after a long idle gap it starts fresh (continuity comes from memory/facts.md and
-//     memory/last-brief.md, which are in the chat system prompt), and
+//   - after a long idle gap it starts fresh (continuity comes from memory/notes/ and
+//     memory/last-brief.md, which the chat loads every turn), and
 //   - after a turn whose context grew large it is compacted early, because the SDK only
 //     auto-compacts near the context limit and every turn re-sends the whole history.
 // The decision is a pure function so the boundaries are unit-tested.

@@ -10,7 +10,7 @@ import { inQuietHours } from "./actions.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
-import { readFacts } from "./memory.ts";
+import { readNotes } from "./notes.ts";
 import { migrateLegacyLayout } from "./migrate.ts";
 import { dataPath, readJson, readText } from "./state.ts";
 
@@ -137,7 +137,7 @@ async function doctor() {
     line((statSync(dir).mode & 0o077) === 0, `${name}/ directory is owner-only`);
     line(loose.length === 0 ? true : "warn", `${name}/ files are owner-only`, loose.length ? `group/world-readable: ${loose.join(", ")}` : "");
   }
-  line(true, "memory/facts.md", `${readFacts().length} fact(s) remembered`); // the count only, never the facts
+  line(true, "memory/notes/", `${readNotes().length} active note(s)`); // the count only, never the notes
 
   const beat = readJson<{ lastTickAt?: string; lastNewMailAt?: string }>("state/heartbeat.json", {});
   const ageMin = beat.lastTickAt ? (Date.now() - Date.parse(beat.lastTickAt)) / 60_000 : Infinity;

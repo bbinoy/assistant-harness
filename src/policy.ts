@@ -1,4 +1,5 @@
 import type { Source } from "./audit.ts";
+import { isNotePath } from "./notes.ts";
 
 // Permissions as code. Every tool call any agent run wants to make passes classify():
 //   allow - run it
@@ -20,7 +21,7 @@ const LOCAL_FILE = /file:\/\//i;
 
 // Read-only verbs, matched against the tool's own name (after the server name), ignoring a
 // "notion-" style prefix: both "get_message" and "notion-fetch" are reads.
-const READ_VERB = /^(list|get|search|read|query|fetch|summarize|suggest|whats|download|show|ai-search|recall)/i;
+const READ_VERB = /^(list|get|search|read|query|fetch|summarize|suggest|whats|download|show|ai-search)/i;
 
 export function isReadTool(tool: string): boolean {
   const name = (tool.split("__").pop() ?? "").replace(/^notion-/i, "");
@@ -51,16 +52,20 @@ const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
   heartbeat: new Set(), // the heartbeat itself never runs an agent
 };
 
-// The owner's memory (the in-process "memory" server, chat only). Changing it is approved on
-// the phone every time: that approval is the defence against an email the chat agent read
-// trying to plant a rule. Nothing unattended may change it. Checked before any allow list,
-// so adding these tools to one can never open them up. recall is a read (isReadTool).
-const MEMORY_WRITES = new Set(["mcp__memory__remember", "mcp__memory__forget"]);
+// The owner's memory is the SDK's auto-memory: the chat agent keeps small notes in
+// memory/notes/ with the built-in Read, Write and Edit tools, plus our forget_note. Those tools
+// are allowed for chat ONLY on a path inside that folder (anywhere else is denied), and every
+// change is announced on the phone with how to undo it (agent.ts), so a note planted by
+// something the agent read is seen at once. Nothing unattended may touch them. Checked before
+// any allow list, so adding them to one can never open them up.
+const NOTE_FILE_TOOLS = new Set(["Read", "Write", "Edit"]);
+const FORGET_NOTE = "mcp__memory__forget_note";
 
 export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
-  if (MEMORY_WRITES.has(tool)) return source === "chat" ? "ask" : "deny";
+  if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && isNotePath(input.file_path) ? "allow" : "deny";
+  if (tool === FORGET_NOTE) return source === "chat" ? "allow" : "deny";
   if (tool === "Skill" || isReadTool(tool)) return "allow";
   return UNATTENDED_WRITES[source].has(tool) ? "allow" : "ask";
 }

@@ -6,7 +6,7 @@ import { settings } from "./settings.ts";
 // folders. Paths are always "<folder>/<name>", so the folder is explicit at every call site:
 //   state/   bookkeeping the model never reads (seen.json, cost.json, session.json, paused...)
 //   logs/    agent.log, audit.jsonl, signal-daemon.log, launchd-stderr.log
-//   memory/  what the model reads: facts.md (semantic memory) and last-brief.md (summary memory)
+//   memory/  what the model reads: notes/ (semantic memory, the SDK auto-memory) and last-brief.md (summary memory)
 //
 // All access is synchronous on purpose. The files are tiny, and a synchronous
 // read-modify-write cannot be interleaved with anything else in Node's event loop, so
@@ -73,7 +73,7 @@ export function openLog(rel: string): number {
 // Files made by others (launchd's stderr file, an older version of the agent) may have been
 // created with looser permissions.
 export function secureDataDirs(): void {
-  for (const dir of [settings.stateDir, settings.logsDir, settings.memoryDir]) {
+  for (const dir of [settings.stateDir, settings.logsDir, settings.memoryDir, join(settings.memoryDir, "notes")]) {
     try {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       chmodSync(dir, 0o700);

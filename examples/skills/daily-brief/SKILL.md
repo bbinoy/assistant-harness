@@ -104,7 +104,7 @@ Sections, in this order (skip a section if empty, except Focus):
    One-line count for later ones.
 5. `## ⏳ Waiting on` - one line each; only if non-empty.
 6. `## 📡 Radar` - 3 to 5 concrete bullets from the newsletters skimmed,
-   focused on the topics and regions in the owner's memory (the Brief facts in
+   focused on the topics and regions in the owner's memory (the brief notes in
    the injected `owner_memory` block): an
    announcement, launch, funding round, policy change, hire, or an event with
    date + venue + register-by deadline. Format `- what happened - why it

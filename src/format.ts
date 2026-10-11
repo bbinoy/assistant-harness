@@ -3,8 +3,6 @@
 // paraphrases can misrepresent the call it is meant to guard.
 
 const TOOLS: Record<string, { icon: string; title: string; labels?: Record<string, string> }> = {
-  mcp__memory__remember: { icon: "🧠", title: "Remember", labels: { category: "Category", text: "Text", until: "Until" } },
-  mcp__memory__forget: { icon: "🧠", title: "Forget", labels: { query: "Forget the fact containing" } },
   mcp__claude_ai_Google_Calendar__create_event: { icon: "📅", title: "Create calendar event" },
   mcp__claude_ai_Google_Calendar__update_event: { icon: "📅", title: "Change calendar event" },
   mcp__claude_ai_Google_Calendar__respond_to_event: { icon: "📅", title: "Respond to invite" },

@@ -12,7 +12,7 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
 - 🗓️ **Meetings prepped, calendar conflicts sorted.** For each meeting it pulls the context from your Notion notes and past threads, and drafts the replies that are waiting. When two events collide it works out a fix and proposes it. Changes to your calendar wait for your OK.
 - ✅ **Tasks kept honest.** It reads your Notion task list, spots what is overdue or due soon, and tidies it as part of the brief.
 - 💬 **A chat that can actually do things.** Message yourself on Signal and talk to your mail, calendar and tasks in plain language. It has a personality (sassy by default, change it to taste).
-- 🧠 **It remembers what you tell it.** "Anything from the kids' school is urgent." "Dr. Weber is a client, write to him formally." "No meetings before 10." "Never use em dashes." Say it once in chat and it shapes how mail is sorted, how drafts read and when meetings are proposed. It lives in a plain file you can read and edit.
+- 🧠 **It remembers what you tell it.** "Anything from the kids' school is urgent." "Dr. Weber is a client, write to him formally." "No meetings before 10." "Never use em dashes." Say it once in chat and it is saved at once, with a note on your phone showing exactly what, so a mistake is one message from undone. It shapes how mail is sorted, how drafts read and when meetings are proposed. Built on the Claude Agent SDK's own memory: small markdown notes you can read and edit.
 - 🙋 **It asks first.** Sending, scheduling and sharing always wait for your OK, by reply, by a natural sentence, or by tapping 👍 on the question.
 
 ## A day in the life: Starfleet edition
@@ -78,15 +78,10 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
 > **Computer:** Archived. It can't challenge you to a duel now.
 >
 > **You:** remember that messages from Quark are never urgent
-> **Computer:** Approve?
-> 🧠 Remember
-> Category: Triage rules
-> Text: Messages from Quark are never urgent
+> **Computer:** 🧠 Memory updated (triage-quark-never-urgent.md): Messages from Quark are never urgent.
+> Wrong? Tell me to change or forget it.
 >
-> Reply yes or no, or react 👍 / 👎 (5 min, then I assume no).
->
-> **You:** 👍
-> **Computer:** Remembered. Quark's "urgent!!!" emails will now wait their turn.
+> Quark's "urgent!!!" emails will now wait their turn.
 
 **11:20.** Anything outward-facing waits for the captain's say-so:
 
@@ -108,7 +103,7 @@ You can answer that question with `yes`, `sure, go ahead`, an edit like the one 
 
 - **It only obeys you.** Just your own "Note to Self" thread, from your own number. Anything else is ignored.
 - **It cannot delete or send on its own.** Mail is only archived, and archiving is reversible. Sending, forwarding and calendar changes ask first. Some actions (deleting, trading, attaching your local files) are simply blocked.
-- **Memory cannot grant power.** What you ask it to remember shapes tone, priorities and sorting, never permissions. Every change to memory needs your OK on your phone, only you can make one (not an email, not the background jobs), and nothing it reads in an email can be saved as a rule.
+- **Memory cannot grant power.** What you ask it to remember shapes tone, priorities and sorting, never permissions. Every change to memory is announced on your phone with the exact text, so a mistake is one message from undone. Only a chat you started can change it (not an email, not the background jobs), and the assistant is told never to save something because an email said so.
 - **Background work gets the least power.** The part that handles mail while you are not looking may only leave reply drafts; anything more, it has to ask.
 - **Your invoices, bills and official mail never get auto-archived.**
 - **Mail is treated as hostile input.** A classifier with no tools reads it, suspicious text is handled in isolation, and a spend limit stops runaway costs.
@@ -153,7 +148,7 @@ You also need [Claude Code](https://docs.claude.com/en/docs/claude-code/overview
 ## Make it yours
 
 - **Your name, its name, its personality**: three lines in `.env` and one prompt in `src/persona.ts`.
-- **Your preferences**: tone, length, who matters, what the brief should include. They live in an editable memory file (`memory/facts.md`) that you can also change just by chatting. No code, no restart.
+- **Your preferences**: tone, length, who matters, what the brief should include. They live in small notes (`memory/notes/`) that you can also change just by chatting. No code, no restart.
 - **Your mail**: it ships with [Mailbird](https://www.getmailbird.com/) because that is how it reaches Proton Mail, whose end-to-end encryption means there is no server to point an agent at. If you use Gmail only, you can go direct and skip the local client entirely.
 - **Your messenger**: Signal is a thin layer. Telegram, Slack, iMessage and WhatsApp are realistic swaps.
 - **Your rules**: what runs unattended, what needs approval and what is blocked is one short, tested file.

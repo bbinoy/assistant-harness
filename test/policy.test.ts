@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { idsOf } from "../src/agent.ts";
+import { NOTES_DIR } from "../src/notes.ts";
 import { applyChanges, classify, isReadTool } from "../src/policy.ts";
 
 const N = "mcp__claude_ai_Notion__";
@@ -68,14 +69,17 @@ test("edit-and-approve: allowed fields only, calendar only", () => {
   assert.equal(applyChanges(tool, input, []), undefined);
 });
 
-test("memory tools: recall is a read, changes ask in chat and are denied for everyone else", () => {
-  const MEM = "mcp__memory__";
-  for (const source of ["chat", "brief", "handler", "heartbeat"] as const) assert.equal(classify(`${MEM}recall`, {}, source), "allow", source);
-  for (const t of [`${MEM}remember`, `${MEM}forget`]) {
-    assert.equal(classify(t, { category: "Style", text: "x" }, "chat"), "ask", t);
-    for (const source of ["brief", "handler", "heartbeat"] as const) assert.equal(classify(t, {}, source), "deny", `${t} (${source})`);
+test("memory notes: chat may read and write inside the notes folder only; everything else is denied", () => {
+  const inside = `${NOTES_DIR}/style-no-em-dashes.md`;
+  for (const t of ["Read", "Write", "Edit"]) {
+    assert.equal(classify(t, { file_path: inside }, "chat"), "allow", t);
+    assert.equal(classify(t, { file_path: `${NOTES_DIR}/../state/seen.json` }, "chat"), "deny", `${t} ..`);
+    assert.equal(classify(t, { file_path: "/etc/passwd" }, "chat"), "deny", `${t} outside`);
+    assert.equal(classify(t, {}, "chat"), "deny", `${t} no path`);
+    for (const source of ["brief", "handler", "heartbeat"] as const) assert.equal(classify(t, { file_path: inside }, source), "deny", `${t} (${source})`);
   }
-  assert.equal(classify(`${MEM}remember`, { text: "see file:///etc/passwd" }, "chat"), "deny"); // the file:// rule still applies
+  assert.equal(classify("mcp__memory__forget_note", { file: "x.md" }, "chat"), "allow");
+  for (const source of ["brief", "handler", "heartbeat"] as const) assert.equal(classify("mcp__memory__forget_note", { file: "x.md" }, source), "deny", source);
 });
 
 test("audit ids: keeps ids, drops content", () => {
