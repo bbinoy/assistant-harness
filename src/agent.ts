@@ -85,7 +85,9 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens });
 
 const down = () => disconnected(readConnectors());
-const BUNDLED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].map((s) => `number-one:${s}`);
+// The only skills the model can load. The SDK enforces this list (anything else is refused with
+// "not in this session's skills allowlist"); Skill calls never reach canUseTool.
+const OFFERED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].map((s) => `number-one:${s}`);
 
 interface Resume {
   resume?: string; // session to continue (chat only)
@@ -195,7 +197,7 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
     // The bundled skills, loaded from the repo; only these are offered to the model (the owner's
     // other skills would cost context on every call and are none of its business).
     plugins: [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
-    skills: BUNDLED_SKILLS,
+    skills: OFFERED_SKILLS,
     disallowedTools: hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
     canUseTool,
     hooks,

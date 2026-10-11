@@ -27,6 +27,7 @@ const say = async (text: string) => void (await out.replyPlain(text));
 const notify = async (text: string) => {
   recordPing(text);
   await say(text);
+  prepareChat(approve, say); // the chat prompt carries recent pings, so the warm process is stale now
 };
 
 // The linked device sees ALL of the owner's Signal traffic. Only their own Note to Self is

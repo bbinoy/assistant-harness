@@ -103,7 +103,7 @@ export function classify(tool: string, input: Record<string, unknown>, source: S
   if (tool === FORGET_NOTE) return source === "chat" ? "allow" : "deny";
   if (tool === WEB_SEARCH) return source === "chat" ? "allow" : "deny";
   if (tool === WEB_FETCH) return source === "chat" ? "ask" : "deny";
-  if (tool === "Skill" || isReadTool(tool)) return "allow";
+  if (tool === "Skill" || isReadTool(tool)) return "allow"; // which skills load is limited by the SDK's skills allowlist (agent.ts)
   return UNATTENDED_WRITES[source].has(tool) ? "allow" : "ask";
 }
 
