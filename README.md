@@ -1,4 +1,4 @@
-# Assistant Harness
+# Number One
 
 **A personal assistant that lives on your Mac and talks to you on Signal.**
 It runs your day, not just your inbox: it triages mail, keeps your Notion tasks tidy, watches your Google Calendar, preps your meetings from your Notion notes, drafts email replies and proposes fixes for calendar conflicts. It tells you only about what matters, and asks before it does anything that counts.
@@ -120,7 +120,7 @@ The details are in [docs/SAFETY.md](docs/SAFETY.md).
 
 Personal agents are having a moment. This one is deliberately narrow: it does your inbox, calendar, tasks and a daily brief, on your own Mac, and asks before anything that leaves it.
 
-| | **Assistant Harness** | **[OpenClaw](https://en.wikipedia.org/wiki/OpenClaw)** | **[Grok Bot](https://www.vellum.ai/blog/official-grok-bot-breakdown)** | **[Instinct](https://www.vellum.ai/blog/official-instinct-breakdown)** |
+| | **Number One** | **[OpenClaw](https://en.wikipedia.org/wiki/OpenClaw)** | **[Grok Bot](https://www.vellum.ai/blog/official-grok-bot-breakdown)** | **[Instinct](https://www.vellum.ai/blog/official-instinct-breakdown)** |
 |---|---|---|---|---|
 | **What it is** | A focused inbox, calendar and brief assistant | A general-purpose agent platform | A general agent on a cloud computer | A general assistant you text or call |
 | **Runs on** | Your Mac | Your machine or server | xAI's cloud | The vendor's cloud |
@@ -139,7 +139,7 @@ Personal agents are having a moment. This one is deliberately narrow: it does yo
 ## Quick start
 
 ```bash
-git clone https://github.com/<you>/assistant-harness && cd assistant-harness
+git clone https://github.com/<you>/number-one && cd number-one
 npm install
 cp .env.example .env && chmod 600 .env     # add your Signal number and names
 npm run doctor                              # checks everything is in place

@@ -51,7 +51,7 @@ export function loadSettings(env: Env) {
     signalHost: "127.0.0.1", // never anything else: signal-cli's socket is unauthenticated
     signalPort: num(env, "SIGNAL_PORT", 7583, 1024, 65_535),
 
-    launchdLabel: env.LAUNCHD_LABEL || `com.${env.USER ?? "user"}.assistant-harness`,
+    launchdLabel: env.LAUNCHD_LABEL || `com.${env.USER ?? "user"}.number-one`,
 
     // Chat session hygiene: the SDK only compacts near the context limit, so a long-lived
     // session would re-send an ever-growing history on every turn.
