@@ -66,6 +66,10 @@ Same recipe: implement the table above against its API or MCP server. IMAP maps 
 
 ## Messenger: Telegram, Slack, iMessage, WhatsApp
 
+### Why Signal
+
+A phone is the right place to talk to something that watches your inbox: it is always with you, and it supports **reactions**, which make one-tap approvals possible. Signal gives you end-to-end encryption between phone and Mac, a "Note to Self" thread that nobody else can write into, and `signal-cli`, a well-maintained client that runs as a linked device. The agent only ever reads that one thread.
+
 ### What the default relies on
 
 Signal via `signal-cli`, linked as a **secondary device**, reading the owner's **Note to Self**. That has three consequences baked into the code, and you should decide which still apply to your messenger:
@@ -119,3 +123,5 @@ These are starting points, not tested here; check each platform's current docs.
 - **What may be auto-archived**: `ARCHIVE_KINDS` and the per-tick cap in `src/actions.ts`.
 - **Schedule**: heartbeat interval, quiet hours, brief start hour and retry cap are env vars.
 - **The brief's shape**: it is whatever `~/.claude/skills/daily-brief/SKILL.md` says. Headings (`## `) become separate Signal messages.
+
+Back to the [README](../README.md) · [Setup](SETUP.md) · [Architecture](ARCHITECTURE.md) · [Safety](SAFETY.md)
