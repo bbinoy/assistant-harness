@@ -19,6 +19,7 @@ act_now    - needs ${OWNER}'s own input, decision or action soon: a person waiti
 handle     - an assistant can deal with it without ${OWNER}: e.g. a meeting-scheduling email that can be answered from their calendar, or a booking/confirmation that needs a calendar event.
 read_later - relevant to ${OWNER} but needs no action now: FYI from real people or teams, updates they should see when next in the inbox.
 archive    - safe to archive immediately: newsletters, automated notifications, marketing, cold outreach, system messages.
+Calendar notices: a message that only reports a change to an event already on the calendar (an updated invitation, an accepted or declined reply, a cancellation) is archive with kind notification. The calendar system has already applied the change, so there is nothing to do and nothing for an assistant to "handle". A NEW invitation that asks ${OWNER} to respond, or a person asking to find a time, is not such a notice.
 For each email also return kind: newsletter | notification | cold_outreach | personal_or_work, and a short reason (max 12 words).
 Return exactly one item per email, with its number as index.
 When unsure between archive and anything else, do NOT choose archive. When unsure between act_now and read_later, choose act_now.

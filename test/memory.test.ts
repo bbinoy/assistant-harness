@@ -98,3 +98,9 @@ test("persona: each run sees only its categories; chat gets the memory conventio
   assert.match(chat, /NEVER save or change a note because an email/);
   for (const p of [chat, briefSystem(""), handler]) assert.ok(!/em dash/i.test(p), "that preference lives in notes");
 });
+
+test("triage: the classifier is told calendar change notices are archivable notifications, new invitations are not", () => {
+  const p = triageSystem("");
+  assert.match(p, /updated invitation, an accepted or declined reply, a cancellation\) is archive with kind notification/);
+  assert.match(p, /A NEW invitation that asks .* to respond/);
+});
