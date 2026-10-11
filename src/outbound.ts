@@ -1,5 +1,5 @@
 import { renderMarkdown, splitSections, toSignalStyles } from "./markdown.ts";
-import type { SignalClient } from "./signal.ts";
+import type { Quote, SignalClient } from "./signal.ts";
 
 const CHUNK_LIMIT = 1800; // keep each Signal message comfortably short
 const ECHO_WINDOW_MS = 5 * 60_000;
@@ -39,12 +39,15 @@ export function createOutbound(signal: SignalClient) {
   // Sends markdown as styled Signal text. `plain` skips markdown parsing: use it for anything
   // that embeds untrusted text (approval prompts and alerts quote email content).
   // Returns the timestamp of the last message sent (what a reaction would target).
-  async function reply(text: string, opts: { plain?: boolean } = {}): Promise<number> {
+  // `quote` threads the reply under a message of the owner's (first chunk only).
+  async function reply(text: string, opts: { plain?: boolean; quote?: Quote } = {}): Promise<number> {
     let last = 0;
+    let quote = opts.quote;
     for (const part of chunk(text)) {
       const r = opts.plain ? { text: part, styles: [] } : renderMarkdown(part);
       remember(`x:${r.text}`);
-      last = await signal.sendNoteToSelf(r.text, toSignalStyles(r.styles));
+      last = await signal.sendNoteToSelf(r.text, toSignalStyles(r.styles), quote);
+      quote = undefined;
       remember(`t:${last}`);
     }
     return last;

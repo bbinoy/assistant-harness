@@ -1,11 +1,27 @@
 import net from "node:net";
 
+// The message a reply points at (Signal's "reply" / quote).
+export interface Quote {
+  text: string;
+  author: string;
+  timestamp: number; // timestamp of the quoted message
+}
+
 // What we keep from a signal-cli "receive" notification.
 export interface IncomingMessage {
   from: string; // sender's number
   text: string;
   timestamp: number;
   noteToSelf: boolean; // sent by us from another device, addressed to ourselves
+  quote?: Quote; // set when the message is a reply to an earlier one
+}
+
+// Pure: signal-cli's `quote` object -> ours. Undefined when there is nothing to show
+// (a quote of an attachment-only message has no text).
+export function parseQuote(raw: any): Quote | undefined {
+  const text = typeof raw?.text === "string" ? raw.text.trim() : "";
+  if (!text) return undefined;
+  return { text, author: String(raw.authorNumber ?? raw.author ?? ""), timestamp: Number(raw.id ?? 0) };
 }
 
 export interface IncomingReaction {
@@ -113,12 +129,12 @@ export class SignalClient {
     }
     // A message from someone else.
     if (env.dataMessage?.message) {
-      this.handler?.({ from, text: env.dataMessage.message, timestamp: env.dataMessage.timestamp ?? env.timestamp, noteToSelf: false });
+      this.handler?.({ from, text: env.dataMessage.message, timestamp: env.dataMessage.timestamp ?? env.timestamp, noteToSelf: false, quote: parseQuote(env.dataMessage.quote) });
       return;
     }
     // A message we sent from the phone. Note to Self arrives this way (destination == us).
     if (sent?.message) {
-      this.handler?.({ from, text: sent.message, timestamp: sent.timestamp ?? env.timestamp, noteToSelf: toSelf });
+      this.handler?.({ from, text: sent.message, timestamp: sent.timestamp ?? env.timestamp, noteToSelf: toSelf, quote: parseQuote(sent.quote) });
     }
   }
 
@@ -156,11 +172,12 @@ export class SignalClient {
 
   // Sends to our own Note to Self. Returns the sent timestamp (used to ignore
   // our own echo when it syncs back).
-  async sendNoteToSelf(text: string, textStyle: string[] = []): Promise<number> {
+  async sendNoteToSelf(text: string, textStyle: string[] = [], quote?: Quote): Promise<number> {
     const result = await this.call<{ timestamp: number }>("send", {
       noteToSelf: true,
       message: text,
       ...(textStyle.length ? { textStyle } : {}),
+      ...(quote ? { quoteTimestamp: quote.timestamp, quoteAuthor: quote.author, quoteMessage: quote.text } : {}),
     });
     return result.timestamp;
   }

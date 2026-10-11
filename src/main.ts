@@ -1,4 +1,5 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
+import { withQuoteContext, shouldThread } from "./quote.ts";
 import { ask, AuthError, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
@@ -60,9 +61,11 @@ async function chat(m: IncomingMessage) {
   // Status on the owner's message, each replacing the last: 👀 working, ✅ answered, ⚠️ failed.
   void signal.react("👀", target);
   try {
-    const { text, costUsd } = await ask(m.text, approve, notify);
+    if (m.quote) console.log(`owner is replying to an earlier message (${m.quote.text.length} chars)`);
+    const started = Date.now();
+    const { text, costUsd } = await ask(withQuoteContext(m.text, m.quote), approve, notify);
     console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
-    await out.reply(text);
+    await out.reply(text, { quote: shouldThread(!!m.quote, Date.now() - started) ? { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp } : undefined });
     void signal.react("✅", target);
     await compactChatIfNeeded(); // after the reply is out; the next message waits for it
   } catch (e) {
