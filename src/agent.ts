@@ -75,7 +75,7 @@ export interface RunOptions {
   maxBudgetUsd: number; // hard per-run spend cap
   outputFormat?: Options["outputFormat"]; // constrained JSON output
   // Fires after a tool call succeeds. Used to capture the brief the agent sends.
-  onToolSuccess?: (tool: string, input: unknown) => void;
+  onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void;
 }
 
 // Context size of one model call: everything it was sent.
@@ -140,7 +140,7 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
 
   // After a successful tool call: announce a note change on the phone (chat), and report the
   // call to whoever asked (the brief captures what it sent).
-  const afterTool = async (tool: string, input: Record<string, unknown>) => {
+  const afterTool = async (tool: string, input: Record<string, unknown>, response?: unknown) => {
     if (opts.memoryNotify && (tool === "Write" || tool === "Edit") && isNotePath(input.file_path) && !isIndex(input.file_path)) {
       const file = basename(input.file_path);
       const written = String((tool === "Write" ? input.content : input.new_string) ?? "");
@@ -151,14 +151,14 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
       const gist = (described ?? body.split("\n")[0]!).slice(0, 160);
       memoryChanges.push(`${tool === "Write" ? "➕ saved" : "✏️ updated"} ${file}: ${gist}`);
     }
-    opts.onToolSuccess?.(tool, input);
+    opts.onToolSuccess?.(tool, input, response);
   };
   const hooks: Partial<Record<"PostToolUse", HookCallbackMatcher[]>> = {
     PostToolUse: [
       {
         hooks: [
           async (input) => {
-            if (input.hook_event_name === "PostToolUse") await afterTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
+            if (input.hook_event_name === "PostToolUse") await afterTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, input.tool_response);
             return {};
           },
         ],
@@ -334,13 +334,14 @@ export function runRadarTurn(prompt: string, approve: Approve, outputFormat: Opt
 }
 
 // Background handling of heartbeat-flagged mail: fresh session, least privilege (see policy.ts).
-export function runHandlerTurn(prompt: string, approve: Approve): Promise<AgentReply> {
+export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void): Promise<AgentReply> {
   return runAgent(prompt, approve, {
     source: "handler",
     systemPrompt: handlerSystem(memoryFor(["people", "scheduling", "context", "style", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
     resumeChatSession: false,
     maxTurns: 40,
     maxBudgetUsd: 2.0,
+    onToolSuccess,
   });
 }
 

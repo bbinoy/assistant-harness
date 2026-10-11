@@ -9,6 +9,8 @@ import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
 import { recordPing } from "./pings.ts";
+import { Mailbird } from "./mailbird.ts";
+import { createProposer } from "./propose.ts";
 import { createRadar } from "./radar.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
@@ -38,11 +40,16 @@ signal.onMessage((m) => {
   route(m).catch((e) => console.error("route error:", e.message));
 });
 
-// A 👍 / 👎 on the pending "Approve?" message answers it.
+// The owner's Mailbird connection for proposals: a reply the handler drafted is shown on Signal and
+// sent with a 👍 (propose.ts). No model is involved in sending.
+const proposer = createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t), say });
+
+// A 👍 / 👎 on the pending "Approve?" message answers it; on a shown reply draft, 👍 sends it.
 signal.onReaction((r) => {
   if (!acceptOwner(r, config.ownerNumber) || r.isRemove) return;
   const outcome = approvals.answerReaction(r.emoji, r.targetTimestamp);
-  if (outcome !== "ignored") console.log(`approval ${outcome} (by reaction)`);
+  if (outcome !== "ignored") return void console.log(`approval ${outcome} (by reaction)`);
+  void proposer.onReaction(r.emoji, r.targetTimestamp).catch((e) => console.error("proposal reaction error:", e.message));
 });
 
 // Chat turns run one at a time, in order: two at once would share one session.
@@ -100,7 +107,7 @@ prepareChat(approve, say);
 // quiet hour is still quick. Local work only, no model call.
 setInterval(() => prepareChat(approve, say), 25 * 60_000).unref();
 
-const handler = createHandler({ approve, notify });
+const handler = createHandler({ approve, notify, propose: proposer.show });
 handler.resume();
 
 const radar = createRadar({ approve, notify: say, briefDue: isBriefDue }); // records its own pings

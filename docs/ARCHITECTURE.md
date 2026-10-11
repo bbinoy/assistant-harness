@@ -48,6 +48,10 @@ Agent memory is usually described in layers. Here is where each one lives:
 
 **What stays out of memory:** safety rules (policy, suspicious-text isolation) and operational settings (quiet hours, intervals, the spend limit, model, names). Memory is written through a model, so it must never control those.
 
+## Reply drafts, sent with a 👍
+
+When the background handler drafts an in-thread reply (a scheduling answer, say), the draft is shown on Signal ("✉️ Reply ready", To, Subject, the new text) and a 👍 on that message sends it (`src/propose.ts`, `src/proposals.ts`). No model is involved in sending: the draft's id is taken from the Mailbird tool result, its recipients and text are read back from Mailbird, and the owner's reaction is the send. Immediately before sending it is read again; if the recipients, a Cc, or any of the text (including the quoted part) changed since it was shown, nothing is sent and the current draft is shown again. A 👎 leaves the draft in the mailbox. To change something, reply to the message (the quoted text reaches the chat) and say what.
+
 ## The proactive radar
 
 The heartbeat watches mail every few minutes with no model. The calendar can only be read through the model, so the radar is a periodic look instead: every `RADAR_MINUTES` (120), while you are awake and after the daily brief has run, one Sonnet run (`src/radar.ts`, skill `number-one:radar`) reads your calendar, the heartbeat's digest and what it already told you, and returns JSON: zero or more messages (a meeting about to start with its prep, a clash with two alternative slots, mail that the calendar makes urgent). Most runs return nothing.
@@ -103,6 +107,8 @@ src/budget.ts        daily spend guard
 src/settings.ts      every tunable, validated at startup (pure loader, tested)
 src/state.ts         atomic, synchronous access to state/, logs/ and memory/ (tested)
 src/audit.ts         append-only audit log and its reader
+src/propose.ts       shows the handler's reply drafts on Signal, sends one on 👍 (no model in the send)
+src/proposals.ts     the draft-proposal rules: id from the tool result, "sent exactly as shown" check (pure, tested)
 src/radar.ts         the proactive radar: periodic calendar and mail look-around, sends only what matters
 src/radar-rules.ts   when the radar is due, which of its messages may be sent (pure, tested)
 src/pings.ts         what the assistant sent on its own, for chat context and de-duplication

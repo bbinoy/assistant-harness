@@ -62,6 +62,7 @@ The skills are `daily-brief` (the brief's structure), `mailbird` (triage and dra
 ## Daily use
 
 - **Chat**: message yourself. Replies are formatted with Signal's native styles (bold, italic, strikethrough, monospace).
+- **Send a drafted reply**: when the assistant has drafted a reply for you (it shows "✉️ Reply ready" with the recipient and text), react 👍 to send it exactly as shown, or reply to the message to change something.
 - **Approve**: reply `yes` / `no`, a sentence, or react 👍 / 👎 on the question.
 - `npm run doctor`: health check (tooling, permissions, Signal, Mailbird, login, launchd, skills, heartbeat liveness, spend, recent errors).
 - `npm run report [hours]`: what the heartbeat archived, alerted and queued (local times).
