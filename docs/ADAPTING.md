@@ -54,7 +54,7 @@ Mail is used in two places, and they are separate:
 
 4. **Drop what you no longer need**: the "Mailbird must be running" assumption in the docs, and the Mailbird checks in `doctor` (`src/cli.ts`).
 
-5. **Skills**: your `mailbird` skill becomes a `gmail` skill (rename it in `persona.ts` and the brief skill).
+5. **Skills**: the bundled `mailbird` skill (`plugin/skills/mailbird`) becomes a `gmail` skill: rename the folder, and the names in `BUNDLED_SKILLS` (`src/agent.ts`), `persona.ts` and the brief skill.
 
 Because Gmail is reachable from anywhere, you could also run the heartbeat on an always-on machine and keep only the Mac-bound parts (Proton via Bridge) local. A natural design is two instances with a lease, so only one answers a given message, and the always-on one covers while the Mac sleeps. That is not built here.
 

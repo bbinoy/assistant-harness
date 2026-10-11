@@ -178,7 +178,8 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
     // notes folder. No Bash. Everything else the agent can do is an MCP tool (Mailbird,
     // Notion, Calendar...), gated by canUseTool.
     tools: opts.memoryNotify ? ["Skill", "Read", "Write", "Edit"] : ["Skill"],
-    // "user" loads ~/.claude/skills, user-scope MCP servers and CLAUDE.md.
+    // "user" loads user-scope MCP servers (Mailbird) and CLAUDE.md; the skills offered are
+    // limited to the bundled ones below.
     // Not "project": there is no project here.
     settingSources: ["user"],
     // The bundled skills, loaded from the repo; only these are offered to the model (the owner's
