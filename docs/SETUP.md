@@ -46,8 +46,8 @@ After the agent is running, send it **"set up"** on Signal. It walks you through
 | Item | What it does | Saved as |
 |---|---|---|
 | Calendars | lists your Google calendars, you pick which count, plus your time zone | `setup-calendars.md` |
-| Tasks | finds your Notion task list, or creates one for you | `setup-tasks.md` |
-| Meeting notes | finds your meetings database, or creates a page for prep notes | `setup-meetings.md` |
+| Tasks | searches Notion for your task list and uses it (it asks only if it finds nothing or several, and can create one for you) | `setup-tasks.md` |
+| Meeting notes | searches Notion for your meetings database the same way, or creates a page for prep notes | `setup-meetings.md` |
 | How you write | with your permission, reads up to 15 of your sent mails and describes your style for you to correct | `voice-writing.md` |
 | Optional | booking link, topics for the brief's radar | `setup-booking-link.md`, `brief-radar-topics.md` |
 

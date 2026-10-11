@@ -27,10 +27,15 @@ meetings" view) or a **parent page** whose sub-pages are the prep pages. Use
 exactly that; do not guess a location.
 
 **If there is no `setup-meetings` note:**
-- in chat, load `number-one:setup` and set it up with the owner now;
-- in an unattended run (nobody to ask), still decide which meetings need prep
-  and list them with a one-line reason, but create no pages, and end the brief
-  with one line: "Meeting notes are not set up yet. Message me 'set up my meetings'."
+- in chat, find it yourself and save it: load `number-one:setup` (it searches Notion
+  for the meetings database or page, saves the note, and asks the owner only if it
+  finds nothing or several candidates), then carry on with the owner's request;
+- in an unattended run (nobody to ask, and you cannot save notes), still decide
+  which meetings need prep and list them with a one-line reason, but **create no
+  pages** in a location nobody has confirmed. You may search Notion read-only, and
+  end the brief with one line: "Meeting notes are not set up yet. I found '<title>'
+  (<url>); message me 'set up my meetings' to confirm it." (or "I couldn't find a
+  meetings database" if there is none).
 
 Reading what exists: for a database, **one** `notion-fetch` on its "all meetings"
 view URL (or the database URL); do not fetch it again and do not also fetch the

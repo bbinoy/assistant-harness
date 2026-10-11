@@ -15,8 +15,10 @@ owner never touches a file or a terminal.
 - **One thing at a time.** Say what you need and why in one line, ask one small
   question, save, move on. Offer to skip anything ("say skip and we'll do it
   later").
-- **Do the looking yourself.** Search, list and propose; the owner confirms or
-  corrects. Do not make them paste ids when you can find the thing.
+- **Do the looking yourself.** Search, list and propose; ask only when you found
+  nothing or could not choose between candidates. Do not make the owner paste ids
+  when you can find the thing. When you picked something yourself, say which one in
+  a line: the owner can correct it.
 - **Never invent a value.** If you cannot find or verify something, say so and ask.
 - **Never save secrets** (passwords, tokens) or the contents of emails.
 - **One note per item**, under the exact file name below (the assistant checks for
@@ -48,27 +50,39 @@ owner's request needs, or with the first missing item if they just said "set up"
 
 ### 2. Tasks (`setup-tasks.md`)
 
-1. Search Notion (`notion-search`) for a task list: "Tasks", "To-do", "Task
-   Manager". Show the best match(es) and ask which is theirs.
-2. If they have none, offer to create a page for it: ask under which page, then
-   `notion-create-pages` with two Markdown tables, `## 📅 Due` and `## 📋 Later`
-   (columns Task / Due / Priority / Area), plus an instruction block at the top
-   for assistants: remove done tasks, move rows from Later to Due when their date
-   arrives, sort by date then priority, prefix overdue rows with ⚠️. Show them
-   the link.
-3. Fetch the page once to confirm its structure (tables, or a database) and note
-   which it is.
-4. Save: page URL, page id, its structure (two tables / database) and the
-   column names and tokens it uses (priorities, areas).
+Find it yourself first; do not ask the owner for a link.
+
+1. Search Notion (`notion-search`) for the task list: "Tasks", "Task Manager",
+   "To-do". Look at the best results (title, last edited, whether it holds tables
+   or a database).
+2. **Exactly one clear match:** use it. Fetch the page once to learn its structure
+   (two Markdown tables, or a database; the column names and the tokens it uses
+   for priority and area), save the note, and tell the owner in one line which
+   page you picked ("I'm using your 'Task Manager' page. Say so if that's wrong.").
+3. **Several plausible matches:** show them (title and place) and ask which one is
+   theirs.
+4. **Nothing found:** say so and ask whether they keep tasks elsewhere (then ask
+   for the link or name). If they have no task list, offer to create one: ask
+   under which page, then `notion-create-pages` with two Markdown tables,
+   `## 📅 Due` and `## 📋 Later` (columns Task / Due / Priority / Area), plus an
+   instruction block at the top for assistants: remove done tasks, move rows from
+   Later to Due when their date arrives, sort by date then priority, prefix
+   overdue rows with ⚠️. Show them the link.
+5. Save: page URL, page id, its structure, and the column names and tokens it uses.
 
 ### 3. Meeting notes (`setup-meetings.md`)
 
-1. Search Notion for a meetings database or page ("Meetings", "Meeting notes").
-   Ask which is theirs. If it is a database, fetch it once to learn its
-   properties (the title, date, category, summary ones) and any template.
-2. If they have none, offer a parent page where prep pages will be created as
-   sub-pages (ask under which page, then create "Meetings" there).
-3. Save: URL and id; whether prep pages are rows in a database (then its data
+Find it yourself first here too.
+
+1. Search Notion for a meetings database or page: "Meetings", "Meeting notes".
+2. **Exactly one clear match:** use it. If it is a database, fetch it once to learn
+   its properties (the title, date, category and summary ones), its default
+   template and its "all meetings" view. Save the note and tell the owner in one
+   line which one you picked.
+3. **Several plausible matches:** show them and ask which is theirs.
+4. **Nothing found:** say so, and offer a parent page where prep pages will be
+   created as sub-pages (ask under which page, then create "Meetings" there).
+5. Save: URL and id; whether prep pages are rows in a database (then its data
    source id, property names, default template name and id) or sub-pages of a
    parent page; and the "all meetings" view URL if there is one.
 

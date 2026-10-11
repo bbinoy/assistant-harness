@@ -10,7 +10,7 @@ than rebuilding from scratch. It runs once a day, at any time of day (it may
 run late if the Mac was asleep). Load and follow the sub-skills; this file
 sequences them, owns the state model and owns the output format.
 
-**Sub-skills.** This skill orchestrates four others: `number-one:mailbird` (email), `number-one:notion-tasks` (tasks), `number-one:calendar` and `number-one:meeting-prep`. Each says where it gets the owner's details (calendars, Notion pages, writing voice): from the owner's memory notes (`setup` and `voice` notes in your memory block). Nobody is there to ask during this run, so when a note is missing the sub-skill skips that part and tells you; collect those into one **🛠 Setup** line at the end of the brief ("Calendar and tasks are not set up yet. Message me 'set up' and I'll walk you through it in chat."). The brief still goes out with whatever could be done.
+**Sub-skills.** This skill orchestrates four others: `number-one:mailbird` (email), `number-one:notion-tasks` (tasks), `number-one:calendar` and `number-one:meeting-prep`. Each says where it gets the owner's details (calendars, Notion pages, writing voice): from the owner's memory notes (`setup` and `voice` notes in your memory block). Nobody is there to ask during this run (and you cannot save notes), so when a note is missing the sub-skill skips the edits that depend on it, may search read-only to name what it found, and tells you; collect those into one **🛠 Setup** line at the end of the brief ("Calendar and tasks are not set up yet. Message me 'set up' and I'll walk you through it in chat."). The brief still goes out with whatever could be done.
 
 ## Token discipline
 

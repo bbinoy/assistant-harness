@@ -46,8 +46,20 @@ test("setup: missing items are listed, in prompts as an offer in chat and a skip
   assert.deepEqual(missingSetup(SETUP_ITEMS.map((i) => note(i.file))), []);
   assert.equal(missingSetup([note("setup-calendars.md")]).length, SETUP_ITEMS.length - 1);
   const missing = missingSetup([]);
-  assert.match(chatSystem(undefined, new Date("2026-10-12T09:00:00"), missing), /number-one:setup skill and walk them through it in this chat/);
+  assert.match(chatSystem(undefined, new Date("2026-10-12T09:00:00"), missing), /number-one:setup skill\. For the Notion task list and meeting notes, find them yourself and save them, and ask .* only if you find nothing or several candidates/);
   assert.match(briefSystem("", missing), /You cannot ask anyone[\s\S]*message "set up"/);
   assert.match(handlerSystem("", missing), /Not set up yet/);
   assert.ok(!chatSystem(undefined, new Date(), []).includes("Not set up yet"));
+});
+
+test("setup: Notion tasks and meetings are found by the agent, saved, and only asked about when nothing or several are found; background runs never edit an unconfirmed page", () => {
+  const read = (s: string) => readFileSync(join(skillsDir, s, "SKILL.md"), "utf8");
+  const setup = read("setup");
+  assert.match(setup, /Exactly one clear match/);
+  assert.match(setup, /Several plausible matches/);
+  assert.match(setup, /Nothing found/);
+  for (const s of ["notion-tasks", "meeting-prep"]) {
+    assert.match(read(s), /find it yourself and save it/, `${s}: discovers in chat`);
+    assert.match(read(s), /(do not edit a page\s+nobody has confirmed|create no\s+pages)/, `${s}: no edits to an unconfirmed page when unattended`);
+  }
 });

@@ -16,9 +16,14 @@ note says the tasks are a database, use `notion-create-pages` and
 `notion-update-page` on it and adapt the steps below.
 
 **If there is no `setup-tasks` note:**
-- in chat, load `number-one:setup` and set it up with the owner now;
-- in an unattended run (nobody to ask), skip the task steps (no guessing a page),
-  and end the brief with one line: "Tasks are not set up yet. Message me 'set up my tasks'."
+- in chat, find it yourself and save it: load `number-one:setup` (it searches Notion
+  for the task list, saves the note, and asks the owner only if it finds nothing or
+  several candidates), then carry on with the owner's request;
+- in an unattended run (nobody to ask, and you cannot save notes), you may search
+  Notion read-only to see whether a clear task list exists, but **do not edit a page
+  nobody has confirmed**. Skip the task edits and end the brief with one line:
+  "Tasks are not set up yet. I found '<title>' (<url>); message me 'set up my tasks'
+  to confirm it." (or "I couldn't find a task list" if there is none).
 
 **Fetch it once.** One `notion-fetch` on the page at the start of the
 tasks step; make all edits from that copy. Re-fetch at most once, only
