@@ -1,5 +1,9 @@
 # Setup
 
+## Status and limits
+
+This is a personal project that runs daily for its author. It works, its safety-critical logic is unit-tested, and it is opinionated. It is **macOS only**, built for **one user**, and it works only while your Mac is awake. Read the code before trusting it with your inbox, and check Anthropic's current terms for using your plan this way.
+
 ## Requirements
 
 - **macOS** (launchd supervises the agent; Mailbird is the mail client). Linux would work for everything except those two.

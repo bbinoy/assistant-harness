@@ -1,4 +1,4 @@
-# Ben-E
+# Assistant Harness
 
 **A personal assistant that lives on your Mac and talks to you on Signal.**
 It watches your inbox so you don't have to, handles the boring parts, tells you only about what matters, and asks before it does anything that counts.
@@ -12,81 +12,81 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
 - 💬 **A chat that can actually do things.** Message yourself on Signal and talk to your mail, calendar and tasks in plain language. It has a personality (sassy by default, change it to taste).
 - 🙋 **It asks first.** Sending, scheduling and sharing always wait for your OK, by reply, by a natural sentence, or by tapping 👍 on the question.
 
-## A day in the life
+## A day in the life: Starfleet edition
 
-*(All names below are fictional.)*
+*(All names are fictional, and the Federation has not been consulted.)*
 
-**07:00.** The Mac wakes and the heartbeat resumes after its night off. It finds 21 emails that arrived overnight, archives the 19 that are clearly noise, and runs the daily brief. It lands on Signal as one message per section (and in your inbox):
+**Stardate 2026.286, 07:00.** The ship's Mac wakes and the heartbeat resumes after its night off. It finds 21 messages that arrived while you slept, archives the 19 that are clearly noise, and runs the daily brief. It lands on Signal as one message per section (and in your inbox):
 
 > **🎯 Focus**
-> **Answer Prof. Quibblesworth about the pigeon-detection grant before 11:00.** She has asked twice and the second email just says "?".
-> - Dentist moved to Thursday (again). Calendar updated, nothing to do.
+> **Answer Starfleet Command about the nebula-survey budget before 11:00.** They have asked twice and the second message just says "Engage?".
+> - Holodeck maintenance moved to Thursday (again). Calendar updated, nothing to do.
 >
 > **📥 Needs you**
-> - Mortimer, Acme Yoghurt Labs: wants a yes or no on "the probiotic pivot" (draft ready)
-> - Landlord: the cat "has opinions" about the new sofa, reply owed for 3 days (draft ready)
-> - Tax office: form 7B-stroke-6, due Friday (task added)
+> - Quark, Quark's Bar & Grill: wants a yes or no on "the latinum pivot" (draft ready)
+> - Chief Engineer: the warp core "has opinions" about the new dilithium supplier, reply owed for 3 days (draft ready)
+> - Federation Tax Authority: form 7B-stroke-6, due Friday (task added)
 >
 > **📅 Meetings**
-> - 09:30 Standup, Rubber Duck Debugging Guild (no prep needed)
-> - 14:00 Pitch to Bartholomew Capital, "Uber for umbrellas" (prep -> link)
-> - 17:30 Pottery overlaps the Q3 Synergy Brunch. Suggest moving the brunch to 11:00 (not changed)
+> - 09:30 Senior staff meeting, Bridge (no prep needed)
+> - 14:00 First contact briefing, Vulcan Science Academy, "Is logic enough?" (prep -> link)
+> - 17:30 Holodeck pottery overlaps the Q3 Synergy Brunch with the Borg. Suggest moving the brunch to 11:00 (not changed)
 >
 > **✅ Tasks**
-> - ⚠️ overdue: renew passport (4 days)
-> - due today: invoice the Llama Dental Cooperative
+> - ⚠️ overdue: renew Starfleet commission (4 days)
+> - due today: invoice the Ferengi Dental Cooperative
 > - 6 more later this week
 >
 > **⏳ Waiting on**
-> - The plumber: no reply in 6 days, 3rd follow-up. Want a nudge draft?
+> - The starbase plumber: no reply in 6 days, 3rd follow-up. Want a nudge draft?
 >
 > **📡 Radar**
-> - Zurich: Alpine Cheese-Tech Meetup, 21 Oct 18:00, register by 18 Oct (Fondue Futures Weekly)
-> - London: "Carbon-Neutral Croissants" closes a 2M seed round (Bakery Ventures Weekly)
-> - AI: a new model can now say "it depends" in 14 languages. Your lawyers are nervous (The Gradient Descent Gazette)
+> - Geneva: Warp-Field Efficiency Summit, 21 Oct 18:00, register by 18 Oct (Dilithium Daily)
+> - London: "Carbon-Neutral Replicators" closes a 2M seed round (Replicator Ventures Weekly)
+> - AI: a new model can now say "it depends" in 14 languages, Klingon included. Your lawyers are nervous (The Gradient Descent Gazette)
 >
 > **🧹 Housekeeping**
-> Archived 19 overnight: 11 newsletters, 6 notifications (mostly a CI bot being dramatic), 2 cold outreach. +2 tasks, 1 prep page, 1 conflict flagged.
+> Archived 19 overnight: 11 newsletters, 6 notifications (mostly the red-alert bot being dramatic), 2 cold outreach (one very persistent Ferengi). +2 tasks, 1 prep page, 1 conflict flagged.
 
-**10:42.** A new email arrives while you are in a meeting. It is urgent, so you get exactly one message:
+**10:42.** A new message arrives while you are in a meeting. It is urgent, so you get exactly one alert:
 
 > 📥 1 email needs you:
-> - Dr. Fennimore: Need your decision on the proposal by noon (client waiting on a yes or no)
+> - Dr. Crusher: Need your decision on the proposal by noon (Sickbay waiting on a yes or no)
 
 **11:15.** A scheduling request arrives. It is routine, so the assistant checks your calendar and leaves a draft in the thread. It never sends:
 
 > 🤝 Handled 1:
-> Anna Keller: drafted a reply offering Tue 15:00 or Wed 10:30, both free
+> Commander Riker: drafted a reply offering Tue 15:00 or Wed 10:30, both free
 
-**Any time.** Just talk to it. Small icons on your message show what it is doing: 👀 working on it, ✅ done, ⚠️ something broke.
+**Any time.** Just talk to the ship's computer. Small icons on your message show what it is doing: 👀 working on it, ✅ done, ⚠️ something broke.
 
 > **You:** what's on my plate today?
-> **Ben-E:** Three things, one of them loud.
-> - **Prof. Quibblesworth** needs the pigeon-grant answer by 11:00. Her second email is just "?".
-> - Pottery at 17:30 collides with the Q3 Synergy Brunch. I'd move the brunch. Pottery has never wasted anyone's time.
-> - Passport renewal is 4 days overdue. I am not judging. I am just saying.
+> **Computer:** Three things, one of them at red alert.
+> - **Starfleet Command** needs the nebula-survey answer by 11:00. Their second message is just "Engage?".
+> - Holodeck pottery at 17:30 collides with the Q3 Synergy Brunch. I'd move the brunch. Pottery has never started a war.
+> - Your commission renewal is 4 days overdue. I am not judging. I am just saying.
 >
-> **You:** draft a reply to Mortimer: yes to the pivot, not the logo
-> **Ben-E:** Draft is waiting in the thread. Yes to the probiotic pivot, a polite no to the logo, zero exclamation marks. Not sent, obviously.
+> **You:** draft a reply to Quark: yes to the pivot, not the logo
+> **Computer:** Draft is waiting in the thread. Yes to the latinum pivot, a polite no to the logo, zero exclamation marks. Not sent, obviously. Even Quark gets a proofread.
 >
-> **You:** delete the angry email from the landlord
-> **Ben-E:** That one is on my never-delete list. I can archive it, so it sits out of sight but safe. Want that?
+> **You:** delete the angry email from the Klingon Diplomatic Corps
+> **Computer:** That one is on my never-delete list. I can archive it, so it sits out of sight but safe. Want that?
 > **You:** ok
-> **Ben-E:** Archived. It can't hurt you now.
+> **Computer:** Archived. It can't challenge you to a duel now.
 
-**11:20.** Anything outward-facing waits for your say-so:
+**11:20.** Anything outward-facing waits for the captain's say-so:
 
-> **You:** put "pottery glaze research" in my calendar tomorrow at 15:00
+> **You:** put "holodeck pottery research" in my calendar tomorrow at 15:00
 >
-> **Ben-E:** Approve?
+> **Computer:** Approve?
 > 📅 Create calendar event
-> "pottery glaze research"
+> "holodeck pottery research"
 > 🕒 Wed 14 Oct, 15:00-16:00
 >
 > Reply yes, no, or tell me what to change, or react 👍 / 👎 (5 min, then I assume no).
 >
 > **You:** yes but make it 16:00
-> **Ben-E:** Applied your change: startTime → 2026-10-14T16:00:00, endTime → 2026-10-14T17:00:00
+> **Computer:** Applied your change: startTime → 2026-10-14T16:00:00, endTime → 2026-10-14T17:00:00
 
 You can answer that question with `yes`, `sure, go ahead`, an edit like the one above, or a 👍 on the message. Everything the assistant did (archived, alerted, handled, approved) is kept in a log you can read with `npm run report`, and an archive is one command from being undone.
 
@@ -129,10 +129,6 @@ How to do each: [docs/ADAPTING.md](docs/ADAPTING.md).
 | [Safety](docs/SAFETY.md) | what it can and cannot do, and how that is enforced |
 | [Architecture](docs/ARCHITECTURE.md) | how it works, project layout, development |
 | [Adapting](docs/ADAPTING.md) | Proton and Mailbird, Gmail directly, other messengers, other tweaks |
-
-## Honest status
-
-A personal project that runs daily for its author. It works, its safety-critical logic is unit-tested, and it is opinionated. It is **macOS only**, built for **one user**, and it works only while your Mac is awake. Read the code before trusting it with your inbox, and check Anthropic's current terms for using your plan this way.
 
 ## License
 
