@@ -16,6 +16,67 @@ It is a small, readable harness (about 2,500 lines of TypeScript plus tests, no 
 | **Daily brief** | On the first heartbeat after 07:00 (late is fine, once per day) it sweeps what is left, tidies your tasks, reviews your calendar, preps meetings, and delivers one brief by **email and Signal** (one message per section). It builds on yesterday's brief, kept in a local file. |
 | **Approvals on your phone** | Anything outward-facing (send, forward, calendar changes, sharing) asks first. Answer with `yes` / `no`, a natural sentence ("sure, go ahead"), a 👍/👎 **reaction**, or an edit ("yes but make it 16:00"). |
 
+## A day in the life (all names are fictional)
+
+**07:00.** The Mac wakes, the heartbeat resumes after its night off and finds 21 emails that arrived overnight. It triages them in one batch, archives the 19 that are clearly noise, and, because the daily brief has not gone out yet, folds anything urgent into the brief instead of buzzing your phone. Then the daily brief runs and arrives on Signal as one message per section (and by email):
+
+> **🎯 Focus**
+> **Answer Prof. Quibblesworth about the pigeon-detection grant before 11:00.** She has asked twice and the second email just says "?".
+> - Dentist moved to Thursday (again). Calendar updated, nothing to do.
+>
+> **📥 Needs you**
+> - Mortimer, Acme Yoghurt Labs: wants a yes or no on "the probiotic pivot" (draft ready)
+> - Landlord: the cat "has opinions" about the new sofa, reply owed for 3 days (draft ready)
+> - Tax office: form 7B-stroke-6, due Friday (task added)
+>
+> **📅 Meetings**
+> - 09:30 Standup, Rubber Duck Debugging Guild (no prep needed)
+> - 14:00 Pitch to Bartholomew Capital, "Uber for umbrellas" (prep -> link)
+> - 17:30 Pottery overlaps the Q3 Synergy Brunch. Suggest moving the brunch to 11:00 (not changed)
+>
+> **✅ Tasks**
+> - ⚠️ overdue: renew passport (4 days)
+> - due today: invoice the Llama Dental Cooperative
+> - 6 more later this week
+>
+> **⏳ Waiting on**
+> - The plumber: no reply in 6 days, 3rd follow-up. Want a nudge draft?
+>
+> **📡 Radar**
+> - Zurich: Alpine Cheese-Tech Meetup, 21 Oct 18:00, register by 18 Oct. Fits your climate-food interest (Fondue Futures Weekly)
+> - London: "Carbon-Neutral Croissants" closes a 2M seed round. Another bakery pivot to watch (Bakery Ventures Weekly)
+> - AI: a new model can now say "it depends" in 14 languages. Your lawyers are nervous (The Gradient Descent Gazette)
+>
+> **🧹 Housekeeping**
+> Archived 19 overnight: 11 newsletters (Tuber Weekly, Fondue Futures Weekly, +9), 6 notifications (mostly a CI bot being dramatic), 2 cold outreach (counted, not listed). +2 tasks, 1 prep page, 1 conflict flagged.
+
+**10:42.** A new email comes in while you are in a meeting. The heartbeat classifies it, and since the brief is already out, it sends exactly one message:
+
+> 📥 1 email needs you:
+> - Dr. Fennimore: Need your decision on the proposal by noon (client waiting on a yes or no)
+
+**11:15.** A scheduling request arrives. It is routine, so the Sonnet handler checks your calendar and leaves a draft in the thread. It never sends:
+
+> 🤝 Handled 1:
+> Anna Keller: drafted a reply offering Tue 15:00 or Wed 10:30, both free
+
+**11:20.** You message the agent and it needs your say-so for something outward-facing:
+
+> **You:** put "pottery glaze research" in my calendar tomorrow at 15:00
+>
+> Approve?
+> 📅 Create calendar event
+> "pottery glaze research"
+> 🕒 Wed 14 Oct, 15:00-16:00
+>
+> Reply yes, no, or tell me what to change, or react 👍 / 👎 (5 min, then I assume no).
+>
+> **You:** yes but make it 16:00
+>
+> Applied your change: startTime → 2026-10-14T16:00:00, endTime → 2026-10-14T17:00:00
+
+Everything it did (what it archived, alerted, handled, approved) is in `state/audit.jsonl`, and `npm run report` lists it.
+
 ## How it works
 
 ```mermaid
