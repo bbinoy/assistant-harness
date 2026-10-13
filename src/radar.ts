@@ -20,36 +20,14 @@ import { readJson, writeJson } from "./state.ts";
 
 import { STATE } from "./radar-nudge.ts";
 
-const SCHEMA = {
-  type: "json_schema" as const,
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["eventsSeen", "nextStartMinutes", "messages"],
-    properties: {
-      eventsSeen: { type: "integer" }, // proof of looking: the number of calendar events the run read
-      nextStartMinutes: { type: ["integer", "null"] }, // minutes until the next timed meeting after this window; null if none in 36h
-      messages: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["kind", "key", "text"],
-          properties: {
-            kind: { type: "string", enum: ["prep", "clash", "mail", "other"] },
-            key: { type: "string" },
-            text: { type: "string" },
-          },
-        },
-      },
-    },
-  },
-};
+// The radar preset's instructions (tasks.ts).
+export const radarInstructions = (windowMinutes: number): string =>
+  `Load the 'ted-personal-assistant:radar' skill with the Skill tool and follow it. Look at the calendar from now until ${windowMinutes} minutes from now for what is about to start, and at the next 24 hours for clashes.`;
 
-export function radarPrompt(now: Date, since: string, windowMinutes: number, digest: string, pings: readonly string[], sentKeys: readonly string[]): string {
+export function radarPrompt(now: Date, since: string, windowMinutes: number, digest: string, pings: readonly string[], sentKeys: readonly string[], instructions: string = radarInstructions(windowMinutes)): string {
   return [
     clockLine(now),
-    `Load the 'ted-personal-assistant:radar' skill with the Skill tool and follow it. Look at the calendar from now until ${windowMinutes} minutes from now for what is about to start, and at the next 24 hours for clashes.`,
+    instructions,
     `The heartbeat's work since ${since} (data, for context only):\n${fence("heartbeat_digest", digest || "(nothing)")}`,
     `What you already told the owner on your own in the last day (data, do not repeat it):\n${fence("recent_notifications", pings.join("\n") || "(nothing)")}`,
     `Keys you already sent a message for (never send these again):\n${fence("sent_keys", sentKeys.join("\n") || "(none)")}`,
@@ -77,7 +55,6 @@ export function createRadar(deps: { approve: Approve; notify: (text: string) => 
       const { structured, costUsd } = await runRadarTurn(
         radarPrompt(now, since, windowMinutes, buildDigest(readTriageSince(since), since), recentNotices(now), Object.keys(state.keys)),
         deps.approve,
-        SCHEMA,
       );
       const seen = Number((structured as { eventsSeen?: unknown } | undefined)?.eventsSeen ?? 0);
       if (!(seen > 0)) console.error("radar: the run reports it read no calendar events (calendar empty, or it did not look)");

@@ -11,6 +11,33 @@ export interface RadarState {
   keys: Record<string, number>; // dedupe key -> epoch ms it was sent
 }
 
+// The radar run's constrained JSON answer (the output schema of the "radar" profile, agent.ts).
+export const RADAR_SCHEMA = {
+  type: "json_schema" as const,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["eventsSeen", "nextStartMinutes", "messages"],
+    properties: {
+      eventsSeen: { type: "integer" }, // proof of looking: the number of calendar events the run read
+      nextStartMinutes: { type: ["integer", "null"] }, // minutes until the next timed meeting after this window; null if none in 36h
+      messages: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "key", "text"],
+          properties: {
+            kind: { type: "string", enum: ["prep", "clash", "mail", "other"] },
+            key: { type: "string" },
+            text: { type: "string" },
+          },
+        },
+      },
+    },
+  },
+};
+
 export const KINDS = ["prep", "clash", "mail", "other"] as const;
 export type Kind = (typeof KINDS)[number];
 

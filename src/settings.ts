@@ -63,8 +63,13 @@ export function loadSettings(env: Env) {
     // and logs, you still decide; off: never.
     autoApprove: oneOf(env, "AUTO_APPROVE", "broad", ["off", "shadow", "chat", "broad"] as const),
 
-    briefStartHour: num(env, "BRIEF_START_HOUR", 7, 0, 23),
+    briefStartHour: num(env, "BRIEF_START_HOUR", 7, 0, 23), // legacy scheduler: when the brief starts. Gate scheduler: only what the gate's default rules say ("from this hour")
     briefMaxAttempts: num(env, "BRIEF_MAX_ATTEMPTS", 3, 1, 10),
+    // Who decides WHEN the brief and the radar run. "gate": the owner's gate (src/gate.ts, wake.ts) chooses, by its default rules
+    // and the notes; code keeps the HOW and a deterministic backstop for the brief. "legacy": the old fixed schedulers (src/brief.ts
+    // shouldRun, src/radar-rules.ts isDue). One env change switches back.
+    scheduler: oneOf(env, "SCHEDULER", "gate", ["gate", "legacy"] as const),
+    briefBackstopHour: num(env, "BRIEF_BACKSTOP_HOUR", 9, 0, 24), // gate scheduler: no brief logged today by this hour (local): run it anyway. 24: never
 
     // What the model can see (policy.ts, hiddenTools): every tool it sees is re-sent on every
     // model call, so hide what your skills never use. A skill that needs a hidden tool will
@@ -103,7 +108,6 @@ export function loadSettings(env: Env) {
     // Wake-ups (src/gate.ts, src/wake.ts): on every heartbeat tick a small model looks at each conversation whose
     // "next look" has come and decides whether to do something unprompted ("every morning post a fun fact").
     wakeups: oneOf(env, "WAKEUPS", "on", ["on", "off"] as const) === "on",
-    maxWakeActsPerDay: num(env, "MAX_WAKE_ACTS_PER_DAY", 4, 0, 50), // per conversation
 
     dailyBudgetUsd: num(env, "DAILY_BUDGET_USD", 20, 0, 10_000),
 
@@ -118,10 +122,9 @@ export function loadSettings(env: Env) {
     ttsVoice: env.TTS_VOICE || "am_onyx",
     ttsSpeed: num(env, "TTS_SPEED", 0.95, 0.5, 2),
     // Group chats (own-account mode, src/group.ts): it takes part in any group the owner is in, speaking only
-    // when @mentioned or replied to, at most this many times an hour per group.
+    // when it fits (see PARTICIPATION in persona.ts).
     groupParticipation: oneOf(env, "GROUP_PARTICIPATION", "auto", ["auto", "tagged"] as const), // auto: the assistant judges every message; tagged: only when @mentioned or replied to
     groupDebounceSeconds: num(env, "GROUP_DEBOUNCE_SECONDS", 4, 0, 60), // wait for a burst of messages to end before judging
-    groupRepliesPerHour: num(env, "GROUP_REPLIES_PER_HOUR", 12, 1, 200),
     signalAttachmentsDir: `${env.HOME ?? ""}/.local/share/signal-cli/attachments`,
 
     launchdLabel: env.LAUNCHD_LABEL || `com.${env.USER ?? "user"}.ted-personal-assistant`,

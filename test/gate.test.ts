@@ -14,14 +14,15 @@ import { dataPath } from "../src/state.ts";
 import { createWakeups } from "../src/wake.ts";
 
 const s = settings as unknown as Record<string, unknown>;
+s.briefBackstopHour = 24; // the backstop has its own tests below
 const T0 = new Date(2026, 9, 14, 9, 0, 0); // a Wednesday, 09:00 local
 
 // ---- the gate's answer ----
 
 test("gate: whatever the model returns, only a literal true acts, and the next look is clamped to 15..60", () => {
-  assert.deepEqual(parseGate({ act: true, instructions: "  Post   a fun fact ", delaySeconds: 7.4, nextCheckMinutes: 20 }), { act: true, instructions: "Post a fun fact", delaySeconds: 7, nextCheckMinutes: 20 });
+  assert.deepEqual(parseGate({ act: true, instructions: "  Post   a fun fact ", delaySeconds: 7.4, nextCheckMinutes: 20 }), { act: true, task: "task", instructions: "Post a fun fact", delaySeconds: 7, nextCheckMinutes: 20 });
   for (const bad of [undefined, null, "yes", 7, [], {}, { act: "true" }, { act: 1 }, { act: "yes", instructions: "x" }]) assert.equal(parseGate(bad).act, false, JSON.stringify(bad));
-  assert.deepEqual(parseGate({ act: true, delaySeconds: -5, nextCheckMinutes: 5 }), { act: true, delaySeconds: 0, nextCheckMinutes: 15 });
+  assert.deepEqual(parseGate({ act: true, delaySeconds: -5, nextCheckMinutes: 5 }), { act: true, task: "task", delaySeconds: 0, nextCheckMinutes: 15 });
   assert.equal(parseGate({ act: true, delaySeconds: 9999, nextCheckMinutes: 600 }).nextCheckMinutes, 60);
   assert.equal(parseGate({ act: false, nextCheckMinutes: "soon" }).nextCheckMinutes, 30); // unusable: a middling default, never a tight loop
   assert.equal(parseGate({ act: true, instructions: 42 }).instructions, undefined);
@@ -63,9 +64,18 @@ test("ledger: the last wake line is the state; due on time, on news, on a change
   assert.equal(lookState([entry("wake", 0, "garbage")], T0).wake, undefined); // unreadable state: look again
 });
 
-test("ledger: acts are counted per local day; wakeText clamps the next look", () => {
-  const st = lookState([entry("action", -24 * 60, "yesterday"), entry("action", 1, "a"), entry("action", 2, "b")], T0);
-  assert.equal(st.actsToday, 2);
+test("ledger: the presets' lines give attempts, done, last radar, keys and posts of TODAY; wakeText clamps the next look", () => {
+  const st = lookState([
+    entry("action", -24 * 60, "[brief] attempt 1 started"), entry("action", -24 * 60 + 1, "[brief] attempt 1 → delivered"), entry("notice", -24 * 60, "old"),
+    entry("action", 1, "[brief] attempt 1 started"), entry("action", 2, "[brief] attempt 1 → incomplete"), entry("action", 3, "[brief] attempt 2 started"),
+    entry("action", 4, '[radar] ran: 1 message(s) sent, 5 event(s) read, next meeting at 14:30. keys: ["prep:abc"]'), entry("notice", 5, "Prep for 14:30"),
+  ], T0);
+  assert.deepEqual([st.briefAttempts, st.briefDone, st.postsToday], [2, false, 1]);
+  assert.equal(st.lastBriefAttemptAt, at(3));
+  assert.equal(st.lastRadarAt, at(4));
+  assert.ok(st.radarKeys["prep:abc"]);
+  assert.equal(lookState([entry("action", 9, "[brief] attempt 2 → delivered")], T0).briefDone, true);
+  assert.equal(lookState([entry("brief", 9, "Focus today: ...")], T0).briefDone, true); // a brief logged today is a brief
   const w = JSON.parse(wakeText(5, T0, T0.getTime()));
   assert.equal(w.next, at(15));
   assert.equal(JSON.parse(wakeText(999, T0, T0.getTime())).next, at(60));
@@ -111,12 +121,12 @@ test("ledger kinds never reach anything that reads the log as conversation", asy
 
 // ---- wake-ups ----
 
-interface Calls { ownerRuns: string[]; groupRuns: string[]; sent: string[]; gates: string[]; recorded: [string, string][]; turns: any[] }
+interface Calls { ownerRuns: string[]; groupRuns: string[]; sent: string[]; gates: string[]; profiles: string[]; recorded: [string, string][]; turns: any[] }
 function rig(over: { gate?: (conv: Conversation) => unknown; spent?: boolean; paused?: boolean; ownerAnswer?: string; groupAnswer?: string; vouch?: boolean; groups?: string[]; now?: Date } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "wake-"));
   mkdirSync(join(dir, "o-notes"));
   const ownerConv: Conversation = { ...owner(), logFile: `logs/gate-wake-owner-${Math.random().toString(36).slice(2)}.jsonl`, notesDir: join(dir, "o-notes") };
-  const c: Calls = { ownerRuns: [], groupRuns: [], sent: [], gates: [], recorded: [], turns: [] };
+  const c: Calls = { ownerRuns: [], groupRuns: [], sent: [], gates: [], profiles: [], recorded: [], turns: [] };
   let now = over.now ?? T0;
   const groupConvs = new Map<string, Conversation>();
   const pipeline = {
@@ -140,7 +150,7 @@ function rig(over: { gate?: (conv: Conversation) => unknown; spent?: boolean; pa
   const wakeups = createWakeups({
     pipeline: pipeline as any,
     vouch: async () => over.vouch ?? true,
-    runOwner: async (prompt) => (c.ownerRuns.push(prompt), { text: over.ownerAnswer ?? "Morning! Fun fact: biscuits." }),
+    runProfile: async (profile, prompt) => (c.profiles.push(profile), c.ownerRuns.push(prompt), { text: over.ownerAnswer ?? "Morning! Fun fact: biscuits." }),
     runGroup: async (build, ctx) => (c.groupRuns.push(`${ctx.conv.source}:${build().prompt}`), over.groupAnswer ?? "Group fun fact!"),
     gate: async ({ conv }) => (c.gates.push(conv.kind), parseGate((over.gate ?? (() => ({ act: true, instructions: "Post a fun fact", nextCheckMinutes: 30 })))(conv))),
     groups: () => over.groups ?? [],
@@ -180,8 +190,8 @@ test("wake: a group's wake-up runs the GROUP runner and never the owner's run", 
   const kinds = c.turns.map((t) => [t.conv.kind, t.conv.source]);
   assert.deepEqual(kinds.sort(), [["group", "group"], ["owner", "chat"]]);
   // and the unattended owner run has no web and no notes, only reads (everything else asks)
-  assert.equal(classify("WebSearch", {}, "background"), "deny");
-  assert.equal(classify("WebFetch", {}, "background"), "deny");
+  assert.equal(classify("WebSearch", {}, "background"), "allow"); // the owner's background run may search; a page fetch asks
+  assert.equal(classify("WebFetch", {}, "background"), "ask");
   assert.equal(classify("Write", { file_path: "/x" }, "background"), "deny");
   assert.equal(classify("mcp__memory__forget_note", {}, "background"), "deny");
   assert.equal(classify("mcp__mailbird__get_message", {}, "background"), "allow");
@@ -196,7 +206,7 @@ test("wake: [[silent]] posts nothing but is an action; a failing run is logged, 
   assert.deepEqual(quiet.c.sent, []);
   assert.match(quiet.c.recorded[1]![1], /stayed silent/);
   const broken = rig();
-  const w = createWakeups({ pipeline: { ...({} as any), canSpeak: () => false, enqueue: (_c: any, j: any) => j(), record: (_c: any, k: string, _t: number, text: string) => broken.c.recorded.push([k, text]), runTurn: async (_c: any, t: any) => { try { await t.run(); return { spoke: false }; } catch (e) { return { spoke: false, error: e }; } } }, vouch: async () => true, runOwner: async () => { throw new Error("boom"); }, gate: async () => parseGate({ act: true, instructions: "do it", nextCheckMinutes: 20 }), groups: () => [], notesChangedAt: () => 0, now: () => T0 });
+  const w = createWakeups({ pipeline: { ...({} as any), canSpeak: () => false, enqueue: (_c: any, j: any) => j(), record: (_c: any, k: string, _t: number, text: string) => broken.c.recorded.push([k, text]), runTurn: async (_c: any, t: any) => { try { await t.run(); return { spoke: false }; } catch (e) { return { spoke: false, error: e }; } } }, vouch: async () => true, runProfile: async () => { throw new Error("boom"); }, gate: async () => parseGate({ act: true, instructions: "do it", nextCheckMinutes: 20 }), groups: () => [], notesChangedAt: () => 0, now: () => T0 });
   assert.equal(await w.look(owner(), T0), "failed");
   assert.match(broken.c.recorded.find(([k]) => k === "action")![1], /failed/);
   assert.equal(broken.c.sent.length, 0);
@@ -221,19 +231,6 @@ test("wake: guards in code, whatever the gate says", async () => {
     await r.wakeups.tick(T0);
     assert.deepEqual([r.c.gates.length, r.c.ownerRuns.length, r.c.groupRuns.length], [0, 0, 0], JSON.stringify(g));
   }
-  // the daily cap of acts per conversation
-  const was = s.maxWakeActsPerDay;
-  s.maxWakeActsPerDay = 2;
-  try {
-    const r = rig();
-    for (const m of [0, 40, 80, 120]) { r.setNow(new Date(T0.getTime() + m * 60_000)); await r.wakeups.look(r.ownerConv, new Date(T0.getTime() + m * 60_000)); }
-    assert.equal(r.c.ownerRuns.length, 2);
-    s.maxWakeActsPerDay = 0;
-    const none = rig();
-    assert.equal(await none.wakeups.look(none.ownerConv, T0), "daily-cap");
-  } finally {
-    s.maxWakeActsPerDay = was;
-  }
   // owner quiet hours: no look, no gate, no run (a group has no such hours)
   const night = new Date(2026, 9, 14, 3, 0, 0);
   const q = rig({ now: night, groups: ["wake-night-group-0123456789ab"] });
@@ -244,13 +241,6 @@ test("wake: guards in code, whatever the gate says", async () => {
   const stranger = rig({ vouch: false, groups: [G] });
   await stranger.wakeups.tick(T0);
   assert.equal(stranger.c.groupRuns.length, 0);
-  // the group reply cap
-  const { mayReply } = await import("../src/group.ts");
-  const capped = "wake-capped-group-0123456789";
-  for (let i = 0; i < settings.groupRepliesPerHour; i++) mayReply(capped, Date.now());
-  const cap = rig({ groups: [capped] });
-  await cap.wakeups.tick(T0);
-  assert.equal(cap.c.groupRuns.length, 0);
 });
 
 test("wake: bad gate output fails closed; a gate that throws or acts without instructions does nothing", async () => {

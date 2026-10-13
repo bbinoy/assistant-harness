@@ -132,8 +132,10 @@ export function classify(tool: string, input: Record<string, unknown>, source: S
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
   if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && (isNotePath(input.file_path) || (tool === "Read" && isReadableData(input.file_path))) ? "allow" : "deny";
   if (tool === FORGET_NOTE || tool === SEARCH_LOGS || tool === UNDO_DREAM) return source === "chat" ? "allow" : "deny";
-  if (tool === WEB_SEARCH) return source === "chat" ? "allow" : "deny";
-  if (tool === WEB_FETCH) return source === "chat" ? "ask" : "deny";
+  // The owner's chat and the owner's unattended background run (a gate task, not the mail handler) may search; opening a
+  // page asks. A search query is a small exfiltration channel, accepted because every write and every page fetch still asks.
+  if (tool === WEB_SEARCH) return source === "chat" || source === "background" ? "allow" : "deny";
+  if (tool === WEB_FETCH) return source === "chat" || source === "background" ? "ask" : "deny";
   if (tool === "Skill" || isReadTool(tool)) return "allow"; // which skills load is limited by the SDK's skills allowlist (agent.ts)
   return UNATTENDED_WRITES[source].has(tool) ? "allow" : "ask";
 }

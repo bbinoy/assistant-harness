@@ -43,7 +43,7 @@ export interface HeartbeatHooks {
   alert: (text: string) => Promise<void>; // tell the owner something (plain text)
   handle: (items: HandleItem[]) => void; // queue mail for the handler
   briefDue: () => boolean; // today's brief is still due: it will report urgent mail itself
-  onTick: () => void; // tick-driven work (the daily brief)
+  onTick: () => void; // tick-driven jobs (wake-ups, dream, brief, radar): independent of the mail check, never awaited
 }
 
 const seenKey = (m: { conversationId: string; lastMessageId?: number; messageId?: number }) =>
@@ -215,12 +215,14 @@ export function startHeartbeat(hooks: HeartbeatHooks) {
   let running = false;
   let failing = false;
 
-  const tick = async () => {
-    if (running || isPaused()) return; // ticks never overlap
+  // The mail check is one job. Wake-ups, the dream, the brief and the radar (hooks.onTick, main.ts) are others: every
+  // timer fire starts them all, none waits for or depends on another, and a failing or hanging mail check (Mailbird
+  // down, a slow handler) never skips them. Each has its own re-entrancy guard.
+  const mailCheck = async () => {
+    if (running || isPaused()) return; // mail ticks never overlap
     // Night: no mail work at all (no Mailbird calls, no model turns). Everything that arrived
-    // is picked up together by the first tick after quietEndHour. Only the brief may still
-    // fire, so a Mac that wakes late still gets that day's brief.
-    if (inQuietHours(new Date(), settings.quietStartHour, settings.quietEndHour)) return hooks.onTick();
+    // is picked up together by the first tick after quietEndHour.
+    if (inQuietHours(new Date(), settings.quietStartHour, settings.quietEndHour)) return;
     running = true;
     try {
       const mail = await checkMail(mb);
@@ -241,7 +243,14 @@ export function startHeartbeat(hooks: HeartbeatHooks) {
     } finally {
       running = false;
     }
-    if (!failing) hooks.onTick(); // the brief needs the mail tools, so only when they answered
+  };
+  const tick = () => {
+    try {
+      hooks.onTick(); // starts its jobs without waiting for them
+    } catch (e) {
+      console.error("heartbeat: tick jobs failed to start:", (e as Error).message);
+    }
+    void mailCheck().catch((e) => console.error("heartbeat: mail check failed:", (e as Error).message));
   };
 
   setTimeout(tick, 20_000); // first tick shortly after start

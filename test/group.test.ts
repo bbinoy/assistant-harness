@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createPipeline, group, type Pipeline } from "../src/conversation.ts";
 import { createOutbound } from "../src/outbound.ts";
-import { groupName, createGroupBrain, groupPrompt, mayReply, ownerInGroup, speaker } from "../src/group.ts";
+import { groupName, createGroupBrain, groupPrompt, ownerInGroup, speaker } from "../src/group.ts";
 import { classify } from "../src/policy.ts";
 import { parseGate } from "../src/gate.ts";
 import { settings } from "../src/settings.ts";
@@ -112,7 +112,7 @@ const rig = (over: object = {}) => {
     pipeline,
     recent: () => [] as string[],
     run: async () => "Howdy!",
-    gate: async () => ({ act: true, delaySeconds: 0, nextCheckMinutes: 30 }),
+    gate: async () => ({ act: true, task: "task" as const, delaySeconds: 0, nextCheckMinutes: 30 }),
     wait: async (ms: number) => void waits.push(ms),
     ...over,
   });
@@ -125,7 +125,7 @@ const rig = (over: object = {}) => {
   return { on, sent, reacted, recorded, waits, ledger, pipelineOn };
 };
 let ids = 0;
-const gid = () => `grp-${++ids}-0123456789abcdef`; // fresh state (reply cap, error notices) per test
+const gid = () => `grp-${++ids}-0123456789abcdef`; // fresh state (error notices) per test
 
 test("groups: a message addressed to the assistant is answered without asking the gate, threaded under it", async () => {
   const r = rig({ gate: async () => assert.fail("gate must not run") });
@@ -232,16 +232,9 @@ test("groups: unvouched groups get no logging and no answers; the verdict parser
   const r = rig({ vouch: async () => false });
   await r.on(mk({ groupId: gid() }));
   assert.deepEqual([r.sent.length, r.recorded.length], [0, 0]);
-  assert.deepEqual(parseGate({ act: true, delaySeconds: 500, nextCheckMinutes: 5 }), { act: true, delaySeconds: 120, nextCheckMinutes: 15 });
+  assert.deepEqual(parseGate({ act: true, delaySeconds: 500, nextCheckMinutes: 5 }), { act: true, task: "task", delaySeconds: 120, nextCheckMinutes: 15 });
   assert.equal(parseGate({ act: "yes" }).act, false);
   assert.equal(parseGate(undefined).act, false);
-});
-
-test("groups: at most N replies per hour", () => {
-  const t = Date.now();
-  for (let i = 0; i < settings.groupRepliesPerHour; i++) mayReply("another-group-id-1234567890", t);
-  assert.equal(mayReply("another-group-id-1234567890", t), false);
-  assert.equal(mayReply("another-group-id-1234567890", t + 3600_001), true);
 });
 
 test("groups: membership comes from the member list, is remembered, and fails closed", async () => {

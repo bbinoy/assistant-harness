@@ -115,6 +115,18 @@ export const GATE_DEFAULTS = {
   owner: `${OWNER} writes to you in this chat and you always answer, so a message is never judged here. Your only question is whether to act on your own now. ${OWNER}'s mail brief and calendar radar are separate jobs: leave them alone. By default do nothing unprompted; act only because a note asks for it.\n\n${UNPROMPTED}`,
 } as const;
 
+// The owner's gate when it also decides WHEN the daily brief and the radar run (SCHEDULER=gate, tasks.ts). These are
+// the defaults; the owner's notes tweak them ("brief at 6:30", "no radar on weekends"). The HOW stays in code.
+export function ownerGateDefaults(o: { briefHour: number; backstopHour: number; radarMinutes: number; radar: boolean }): string {
+  const hours = Math.round((o.radarMinutes / 60) * 10) / 10;
+  return `${OWNER} writes to you in this chat and you always answer, so a message is never judged here. Your question is whether to act on your own now. Besides free-form tasks (a note asks for something: task "task" with instructions) you can start two fixed jobs, which need no instructions: task "brief" and task "radar". Their rules are fixed in code; you only choose when.
+
+- brief: the daily mail and calendar brief. By default once a day, in the morning, from ${String(o.briefHour).padStart(2, "0")}:00 on: start it when the log shows no brief today (a message from you that starts the day, or a line "[brief] attempt N → delivered"). Never twice in a day; code retries a failed attempt by itself and, if no brief is logged by ${o.backstopHour >= 24 ? "any hour" : `${String(o.backstopHour).padStart(2, "0")}:00`}, starts it anyway. Notes may change the time or the days ("brief at 6:30").
+${o.radar ? `- radar: the calendar and mail look-around that messages ${OWNER} only when something deserves it. By default about every ${hours} hours while ${OWNER} is awake, and sooner shortly before a meeting: the log's "[radar] ran" lines say when it last ran and when the next meeting starts. Not within 45 minutes of its last run, and not while today's brief is still due. Not at all if a note says so ("no radar on weekends"). Start it after a line "[nudge]" (you changed the calendar) once about half an hour has passed.` : "- radar: switched off. Never choose it."}
+
+By default do nothing else unprompted; other tasks only because a note asks for them.\n\n${UNPROMPTED}`;
+}
+
 // A group chat the assistant was added to (group.ts). Other people write here, so it gets no private data:
 // only its personality (the owner's style notes) and the group's own notes (its auto-memory, loaded by the SDK).
 export function groupSystem(parts: { style?: string } = {}): string {
@@ -200,7 +212,7 @@ export function handlerSystem(memory: string, missing: readonly string[] = [], d
   );
 }
 
-// An unprompted run in the owner's chat (a wake-up, wake.ts): least privilege like the radar, no web, nothing written without asking.
+// An unprompted run in the owner's chat (a wake-up, wake.ts): least privilege like the radar, web search but no page fetches without asking, nothing written without asking.
 export function backgroundSystem(memory: string, missing: readonly string[] = [], down: readonly Connector[] = []): string {
   return join(
     `You are ${ASSISTANT}, ${OWNER}'s personal assistant. ${PERSONALITY} Nobody wrote to you just now: you decided on your own, from ${OWNER}'s notes, that something is due, and you are doing it in the background. Do the task you are given with the read-only tools you have (mail, calendar and task reads are fine), and answer with the short chat message to send ${OWNER} (a phone chat: a few lines, in your usual voice and ${OWNER}'s style notes). If on reflection nothing needs saying, answer exactly [[silent]]. You cannot search the web, change notes or write anything without ${OWNER} approving it on their phone.`,

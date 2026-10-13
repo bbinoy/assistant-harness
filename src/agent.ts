@@ -1,6 +1,7 @@
 import { AuthError, failure, RateLimitError } from "./errors.ts";
 import { sendApprovalText, type DraftView } from "./proposals.ts";
 import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
+import { RADAR_SCHEMA } from "./radar-rules.ts";
 import { basename } from "node:path";
 import { isJudgeable, judgeAction, mayAutoApprove, type Verdict } from "./autojudge.ts";
 import { readFileSync } from "node:fs";
@@ -11,7 +12,7 @@ import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
 import { describeCall } from "./format.ts";
 import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
-import { isIndex, isNotePath, LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, parseNote, readNotes } from "./notes.ts";
+import { isIndex, isNotePath, type Category, LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, parseNote, readNotes } from "./notes.ts";
 import { createMemoryServer } from "./memory-tools.ts";
 import { backgroundSystem, briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem } from "./persona.ts";
 import { classify, hiddenTools, isReadTool } from "./policy.ts";
@@ -92,6 +93,7 @@ export interface RunOptions {
   // `notify` announces every change on the phone: the owner's chat only; a group's reply says what was saved.
   memory?: { dir: string; groupId?: string; notify?: (text: string) => Promise<void> };
   seenAt?: string; // groups: stored with the session, see ChatSession.seenAt
+  skills?: readonly string[]; // the skills offered (default: all bundled ones, OFFERED_SKILLS)
   maxTurns: number;
   maxBudgetUsd: number; // hard per-run spend cap. Per RUN, not per session: the SDK does not count the cost a resumed session already had (checked), so owner and groups alike need no adjustment here. The previous total is subtracted only when reporting cost (consume)
   outputFormat?: Options["outputFormat"]; // constrained JSON output
@@ -109,6 +111,48 @@ const down = () => disconnected(readConnectors());
 // The only skills the model can load. The SDK enforces this list (anything else is refused with
 // "not in this session's skills allowlist"); Skill calls never reach canUseTool.
 const OFFERED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].map((s) => `ted-personal-assistant:${s}`);
+
+// ---- run profiles ----
+// HOW a run is allowed to work, fixed in code and named: the policy source (policy.ts: which tools are allowed, asked,
+// denied), the system prompt, the skills offered, the turn and budget limits and the output schema. A Task (tasks.ts)
+// names one; the gate can choose a task but never edit a profile. `notes` are the note categories injected as data.
+export type ProfileName = "brief" | "radar" | "background" | "group";
+export interface RunProfile {
+  readonly source: Source;
+  readonly maxTurns: number;
+  readonly maxBudgetUsd: number;
+  readonly skills: readonly string[];
+  readonly outputSchema?: Options["outputFormat"];
+  readonly notes: readonly Category[];
+}
+export const PROFILES: Readonly<Record<ProfileName, RunProfile>> = {
+  // Unattended daily brief: a fresh session each run, a bigger budget, no banter.
+  brief: { source: "brief", maxTurns: 120, maxBudgetUsd: 5.0, skills: OFFERED_SKILLS, notes: ["triage", "people", "scheduling", "context", "brief", "style", "setup", "voice"] },
+  // The proactive radar: a fresh session each time; it answers with constrained JSON.
+  radar: { source: "radar", maxTurns: 30, maxBudgetUsd: 1.0, skills: OFFERED_SKILLS, outputSchema: RADAR_SCHEMA, notes: ["people", "scheduling", "context", "style", "brief", "setup", "voice"] },
+  // An unprompted free-form run in the owner's chat (a wake-up): the radar's rights (reads; anything else asks on the phone),
+  // web search allowed (page fetches ask), no memory tools (policy.ts, source "background").
+  background: { source: "background", maxTurns: 20, maxBudgetUsd: 1.0, skills: OFFERED_SKILLS, notes: ["people", "scheduling", "context", "style", "brief", "setup", "voice"] },
+  // A group's run: its own resumed session, its own notes folder as memory, nothing of the owner's (policy source "group").
+  group: { source: "group", maxTurns: 8, maxBudgetUsd: 0.5, skills: OFFERED_SKILLS, notes: [] },
+};
+
+export type OwnerProfile = Exclude<ProfileName, "group">;
+function profileSystem(name: OwnerProfile): string {
+  const notes = memoryFor(PROFILES[name].notes);
+  const missing = missingSetup(readNotes(), down());
+  return name === "brief" ? briefSystem(notes, missing, down()) : name === "radar" ? radarSystem(notes, missing, down()) : backgroundSystem(notes, missing, down());
+}
+
+// The options of an owner profile's run (a fresh session).
+export function profileOptions(name: OwnerProfile, extra: { onToolSuccess?: RunOptions["onToolSuccess"] } = {}): RunOptions {
+  const p = PROFILES[name];
+  return { source: p.source, systemPrompt: profileSystem(name), skills: p.skills, maxTurns: p.maxTurns, maxBudgetUsd: p.maxBudgetUsd, outputFormat: p.outputSchema, onToolSuccess: extra.onToolSuccess };
+}
+
+// One run under a named owner profile: always a fresh session.
+export const runProfile = (name: OwnerProfile, prompt: string, approve: Approve, extra: { onToolSuccess?: RunOptions["onToolSuccess"] } = {}): Promise<AgentReply> =>
+  runAgent(prompt, approve, profileOptions(name, extra));
 
 interface Resume {
   resume?: string; // session to continue (chat only)
@@ -245,7 +289,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     // Built-ins: Skill, and for chat Read / Write / Edit (confined to the notes folder by
     // policy.ts) and WebSearch / WebFetch (search freely, open a page only after approval). No Bash. Everything else the agent can do is an MCP tool (Mailbird,
     // Notion, Calendar...), gated by canUseTool.
-    tools: isolated ? ["Read", "Write", "Edit", "WebSearch"] : opts.memory ? ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"] : ["Skill"],
+    tools: isolated ? ["Read", "Write", "Edit", "WebSearch"] : opts.memory ? ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"] : opts.source === "background" ? ["Skill", "WebSearch", "WebFetch"] : ["Skill"],
     // "user" loads user-scope MCP servers (Mailbird) and CLAUDE.md; the skills offered are
     // limited to the bundled ones below.
     // Not "project": there is no project here.
@@ -253,7 +297,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     // The bundled skills, loaded from the repo; only these are offered to the model (the owner's
     // other skills would cost context on every call and are none of its business).
     plugins: isolated ? undefined : [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
-    skills: isolated ? undefined : OFFERED_SKILLS,
+    skills: isolated ? undefined : (opts.skills ? [...opts.skills] : OFFERED_SKILLS),
     disallowedTools: isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
     canUseTool,
     hooks,
@@ -309,12 +353,13 @@ export async function runAgent(prompt: string, approve: Approve, opts: RunOption
 // No warm process: unlike the owner's chat a group is bursty and many, and a warm Claude Code process per
 // group would cost memory for nothing. (The owner's chat keeps one, below.)
 export const groupRunOptions = (conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, systemPrompt: string): RunOptions => ({
-  source: "group",
+  source: PROFILES.group.source,
   systemPrompt,
   sessionFile: conv.sessionFile,
   memory: { dir: conv.notesDir, groupId: conv.groupId },
-  maxTurns: 8,
-  maxBudgetUsd: 0.5,
+  skills: PROFILES.group.skills,
+  maxTurns: PROFILES.group.maxTurns,
+  maxBudgetUsd: PROFILES.group.maxBudgetUsd,
 });
 
 export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: string, build: (since?: string) => { prompt: string; seenAt?: string }): Promise<AgentReply> {
@@ -387,42 +432,10 @@ export async function ask(prompt: string, approve: Approve, notify: (text: strin
   return consume(query({ prompt, options: buildOptions(approve, o, r.resume) }), o, r.previousCost);
 }
 
-// Unattended daily brief: a fresh session each run, a bigger budget, no banter.
-export function runBriefTurn(
-  prompt: string,
-  approve: Approve,
-  onToolSuccess: (tool: string, input: unknown) => void,
-): Promise<AgentReply> {
-  return runAgent(prompt, approve, {
-    source: "brief",
-    systemPrompt: briefSystem(memoryFor(["triage", "people", "scheduling", "context", "brief", "style", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
-    maxTurns: 120,
-    maxBudgetUsd: 5.0,
-    onToolSuccess,
-  });
-}
-
-// The proactive radar: a fresh session each time; it answers with constrained JSON.
-export function runRadarTurn(prompt: string, approve: Approve, outputFormat: Options["outputFormat"]): Promise<AgentReply> {
-  return runAgent(prompt, approve, {
-    source: "radar",
-    systemPrompt: radarSystem(memoryFor(["people", "scheduling", "context", "style", "brief", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
-    maxTurns: 30,
-    maxBudgetUsd: 1.0,
-    outputFormat,
-  });
-}
-
-// An unprompted run in the owner's chat (a wake-up from the gate, wake.ts): fresh session, the radar's rights
-// (reads; anything else asks on the phone), no web search, no memory tools (policy.ts, source "background").
-export function runBackgroundTurn(prompt: string, approve: Approve): Promise<AgentReply> {
-  return runAgent(prompt, approve, {
-    source: "background",
-    systemPrompt: backgroundSystem(memoryFor(["people", "scheduling", "context", "style", "brief", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
-    maxTurns: 20,
-    maxBudgetUsd: 1.0,
-  });
-}
+// The three owner profiles, as before (the legacy scheduler and the gate's presets both go through runProfile).
+export const runBriefTurn = (prompt: string, approve: Approve, onToolSuccess: (tool: string, input: unknown) => void): Promise<AgentReply> => runProfile("brief", prompt, approve, { onToolSuccess });
+export const runRadarTurn = (prompt: string, approve: Approve): Promise<AgentReply> => runProfile("radar", prompt, approve);
+export const runBackgroundTurn = (prompt: string, approve: Approve): Promise<AgentReply> => runProfile("background", prompt, approve);
 
 // Background handling of heartbeat-flagged mail: fresh session, least privilege (see policy.ts).
 export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void): Promise<AgentReply> {

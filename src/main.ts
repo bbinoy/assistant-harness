@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { createPipeline, group, owner, type Pipeline } from "./conversation.ts";
-import { ask, runBackgroundTurn, setDraftReader, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
+import { ask, runProfile, setDraftReader, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
@@ -133,24 +133,40 @@ handler.resume();
 
 const dreamer = createDreamer();
 const groupDreamer = createGroupDreamer();
-// The clock half of the gate: every tick, each conversation whose next look has come may be woken (wake.ts).
+// The dream tidies the notes the brief then reads; it runs at most once a day, only when you said something new, and a
+// failure just moves on.
+const dream = () => dreamer.run().then(() => groupDreamer.run()).catch(() => {});
+// The clock half of the gate: every tick, each conversation whose next look has come may be woken (wake.ts). With
+// SCHEDULER=gate (default) the owner's gate also decides when the brief and the radar run, with a deterministic backstop
+// for the brief; SCHEDULER=legacy keeps the old fixed schedulers (src/brief.ts, src/radar.ts).
 const wakeups = createWakeups({
   pipeline,
   vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
-  runOwner: (prompt) => runBackgroundTurn(prompt, approve),
+  runProfile: (profile, prompt, extra) => runProfile(profile, prompt, approve, extra),
+  presets: { sendBrief: out.sendBriefSummary, notify: say, beforeBrief: dream },
 });
 const radar = createRadar({ approve, notify: say, briefDue: isBriefDue });
+const legacy = settings.scheduler === "legacy";
+const briefDue = () => (legacy ? isBriefDue() : wakeups.briefPending());
+
+// Independent jobs: each starts on every tick in its own try/catch and none waits for another (the dream runs before the
+// brief: in legacy mode as the brief's first step, with the gate scheduler inside the brief preset).
+const job = (name: string, f: () => unknown) => {
+  try {
+    void Promise.resolve(f()).catch((e) => console.error(`${name}: tick failed:`, (e as Error).message));
+  } catch (e) {
+    console.error(`${name}: tick failed:`, (e as Error).message);
+  }
+};
 
 startHeartbeat({
   alert: notify,
   handle: handler.enqueue,
-  briefDue: isBriefDue,
+  briefDue,
   onTick: () => {
-    // The dream first (it tidies the notes the brief then reads), but never in the brief's way:
-    // it runs at most once a day, only when you said something new, and a failure just moves on.
-    const dreaming = isBriefDue() ? dreamer.run().then(() => groupDreamer.run()).catch(() => {}) : Promise.resolve();
-    void dreaming.then(() => maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify }));
-    void radar();
-    void wakeups.tick().catch((e) => console.error("wake: tick failed:", e.message));
+    job("wake", () => wakeups.tick());
+    if (!legacy) return; // the gate scheduler: the brief and the radar are started by the wake-ups' look at the owner's chat
+    job("brief", () => (isBriefDue() ? dream() : Promise.resolve()).then(() => maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify })));
+    job("radar", () => radar());
   },
 });
