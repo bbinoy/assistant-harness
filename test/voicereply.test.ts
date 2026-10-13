@@ -7,6 +7,7 @@ test("the voice option tells the model to write for the ear, and only when speec
   assert.ok(voiceOption(true).includes(SPOKEN_STYLE));
   assert.match(SPOKEN_STYLE, /short sentences/);
   assert.match(SPOKEN_STYLE, /numbers, dates, times/);
+  assert.match(SPOKEN_STYLE, /never any emoji/);
   assert.equal(voiceOption(false), "");
 });
 

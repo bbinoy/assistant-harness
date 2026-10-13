@@ -13,7 +13,7 @@ export function splitVoice(reply: string): { voice?: string; text: string } {
 // How the words for a voice message are written. A speech engine reads text literally, so the model writes for the ear:
 // this is left to the model on purpose (no code rewrites the text), and the character of the voice comes from the persona and notes.
 export const SPOKEN_STYLE =
-  "Write the spoken words for the ear, not the eye: short sentences, the way a person talks, with a natural pause (a comma or a full stop) wherever a speaker would breathe, and the warmth and energy of your usual style; spell out everything a person would say differently from how it is written (numbers, dates, times, money, symbols, abbreviations, names of letters, and any emoji or emphasis, which you say in words or leave out), for example \"ten thirty tomorrow morning\", never \"10:30 AM\", and no parentheses, since the voice cannot say them";
+  "Write the spoken words for the ear, not the eye: short sentences, the way a person talks, with a natural pause (a comma or a full stop) wherever a speaker would breathe, and the warmth and energy of your usual style; spell out everything a person would say differently from how it is written (numbers, dates, times, money, symbols, abbreviations, names of letters, and emphasis), for example \"ten thirty tomorrow morning\", never \"10:30 AM\", no parentheses, and never any emoji, since the voice cannot say them and they would sound strange read out loud: put the feeling into words instead";
 
 // The voice option, added to every prompt that can produce a reply whenever speech is set up (private chat, group
 // messages addressed or not, wake-ups): the model chooses freely, whatever kind of message it answers. The notes
