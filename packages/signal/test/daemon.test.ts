@@ -10,7 +10,7 @@ import { FakeSignalDaemon } from "../src/testing.ts";
 test("daemon: a daemon that already listens is reused, and stop() leaves it alone", async () => {
   const fake = await FakeSignalDaemon.start();
   try {
-    const d = await ensureSignalDaemon("+10000000000", fake.host, fake.port);
+    const d = await ensureSignalDaemon({ account: "+10000000000", host: fake.host, port: fake.port });
     assert.equal(d.started, false);
     d.stop();
     await new Promise((r) => setTimeout(r, 20));
@@ -35,9 +35,23 @@ test("daemon: a signal-cli that dies at start is an error, not a hang", { skip: 
         s.close(() => resolve(p));
       });
     });
-    await assert.rejects(ensureSignalDaemon("+10000000000", "127.0.0.1", port), /exited before it opened its port/);
+    await assert.rejects(ensureSignalDaemon({ account: "+10000000000", host: "127.0.0.1", port }), /exited before it opened its port/);
   } finally {
     process.env.PATH = oldPath;
     rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+test("daemon: a host other than this machine is refused unless allowed", async () => {
+  for (const host of ["0.0.0.0", "192.168.1.5", "example.com", ""]) {
+    await assert.rejects(ensureSignalDaemon({ account: "+10000000000", host, port: 1 }), /refusing to run signal-cli/);
+  }
+  // allowed hosts get past the guard (nothing listens on port 1 of ::1/localhost, so only the later steps could fail: use a fake)
+  const fake = await FakeSignalDaemon.start();
+  try {
+    assert.equal((await ensureSignalDaemon({ account: "+10000000000", host: "LOCALHOST", port: fake.port })).started, false);
+    assert.equal((await ensureSignalDaemon({ account: "+10000000000", host: fake.host, port: fake.port, allowNonLoopback: true })).started, false);
+  } finally {
+    await fake.close();
   }
 });

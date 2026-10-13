@@ -2,7 +2,7 @@
 export { SignalClient, parseQuote, parseAudio, parseImage, withMentions, interpretEnvelope, MAX_AUDIO_BYTES, MAX_IMAGE_BYTES } from "./client.ts";
 export type { CloseInfo, Quote, IncomingMessage, IncomingReaction, AudioRef, ImageRef } from "./client.ts";
 export { silentLogger, type Logger } from "./logger.ts";
-export { ensureSignalDaemon, type SignalDaemon } from "./daemon.ts";
+export { ensureSignalDaemon, type SignalDaemon, type DaemonOptions } from "./daemon.ts";
 export { synthesize, ttsReady, MAX_SPOKEN_CHARS, type TtsConfig } from "./tts.ts";
 export { synthesizeWith, providerReady, type TtsProviderConfig, type TtsFallback } from "./tts-provider.ts";
 export { isSafeUrl, sniffAudio } from "./tts-remote.ts";

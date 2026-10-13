@@ -127,7 +127,7 @@ signal.onReaction((r) => {
 
 // Policy of this app, not of the signal package: if Signal goes away we exit, and launchd restarts the whole agent
 // cleanly instead of leaving a process with no Signal connection. A signal we are asked to stop on takes the daemon down too.
-const daemon = await ensureSignalDaemon(config.signalAccount, settings.signalHost, settings.signalPort, openLog("logs/signal-daemon.log"), console);
+const daemon = await ensureSignalDaemon({ account: config.signalAccount, host: settings.signalHost, port: settings.signalPort, logFd: openLog("logs/signal-daemon.log"), logger: console });
 void daemon.exited.then(({ code, signal: sig }) => {
   console.error(`signal-cli exited (code=${code} signal=${sig}); exiting so launchd restarts us`);
   process.exit(1);

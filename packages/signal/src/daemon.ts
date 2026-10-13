@@ -11,6 +11,17 @@ function portOpen(host: string, port: number): Promise<boolean> {
   });
 }
 
+export interface DaemonOptions {
+  account: string; // the signal-cli account to run as
+  host: string; // where it listens; must be this machine unless allowNonLoopback is set
+  port: number;
+  logFd?: number; // where the daemon's output goes (a file descriptor opened for appending); default: discarded
+  logger?: Logger;
+  allowNonLoopback?: boolean; // you know the socket is unauthenticated and have put your own protection around it
+}
+
+const LOOPBACK = ["127.0.0.1", "::1", "[::1]", "localhost"];
+
 // A running daemon, as ensureSignalDaemon reports it.
 export interface SignalDaemon {
   started: boolean; // false: one was already listening and we reuse it (we do not own it, stop() does nothing)
@@ -20,14 +31,18 @@ export interface SignalDaemon {
 
 // Makes sure a signal-cli daemon is listening, starting it if needed. Installs no process handlers and never exits
 // the process: what to do when the daemon dies (restart, exit, ...) and when to stop it is the caller's decision.
-// `logFd`: where the daemon's output goes (a file descriptor opened for appending); default: discarded.
-export async function ensureSignalDaemon(account: string, host: string, port: number, logFd?: number, log: Logger = silentLogger): Promise<SignalDaemon> {
+// Refuses a host that is not this machine: signal-cli's socket has no authentication, so anyone who can reach it can send as the account.
+export async function ensureSignalDaemon(opts: DaemonOptions): Promise<SignalDaemon> {
+  const { account, host, port, logFd } = opts;
+  const log = opts.logger ?? silentLogger;
+  if (!opts.allowNonLoopback && !LOOPBACK.includes(host.toLowerCase())) {
+    throw new Error(`refusing to run signal-cli on ${host}: its socket is unauthenticated, so only 127.0.0.1, ::1 or localhost are allowed (set allowNonLoopback to override)`);
+  }
   if (await portOpen(host, port)) {
     log.info("signal-cli daemon already running, reusing it");
     return { started: false, stop() {}, exited: new Promise(() => {}) };
   }
   const out = logFd ?? "ignore";
-  // The socket is unauthenticated: anything that can reach it can send as the account, so keep host on this machine.
   const child = spawn("signal-cli", ["-a", account, "daemon", "--tcp", `${host}:${port}`, "--no-receive-stdout"], {
     stdio: ["ignore", out, out],
   });
