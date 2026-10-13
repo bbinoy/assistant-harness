@@ -12,10 +12,12 @@ import { fileURLToPath } from "node:url";
 
 const run = promisify(execFile);
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "../scripts/kokoro-say.py");
-const TIMEOUT_MS = 90_000;
+const TIMEOUT_MS = 240_000; // synthesis runs at roughly 10 to 20 times real time; this is generous even for MAX_SPOKEN_CHARS
 const EXTRA_PATH = "/opt/homebrew/bin:/usr/local/bin";
 
-export const MAX_SPOKEN_CHARS = 700; // longer than this is not a voice message, it is a lecture
+// Measured: about 1,250 characters are one minute of speech (2,145 characters came out as 102 seconds, made in 26 s),
+// so this is roughly three minutes. Longer than that is not a voice message, it is a lecture.
+export const MAX_SPOKEN_CHARS = 3500;
 
 export interface TtsConfig {
   dir: string; // holds venv/, kokoro-v1.0.onnx and voices-v1.0.bin
