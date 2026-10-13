@@ -55,7 +55,7 @@ test("tts remote: audio is recognised by content type or by its first bytes, any
   assert.equal(sniffAudio("application/json", new TextEncoder().encode('{"error":1}')), undefined);
 });
 
-test("elevenlabs: sends only the words, the key as a header, and returns an m4a", { skip: !hasFfmpeg && "ffmpeg missing" }, async () => {
+test("elevenlabs: sends only the words, the key as a header, and returns an m4a", { skip: !hasFfmpeg && "ffmpeg is not installed, so this encoding test is skipped" }, async () => {
   const m = mock(() => audio("audio/mpeg"));
   const file = await synthesizeElevenLabs("Hello there.", { apiKey: "KEY-123456", voiceId: "voice 1", modelId: "model-x", timeoutMs: 5000, baseUrl: "http://localhost:1", fetchImpl: m.fetchImpl });
   try {
@@ -71,7 +71,7 @@ test("elevenlabs: sends only the words, the key as a header, and returns an m4a"
   }
 });
 
-test("http: the contract body and optional bearer token; fields left out when unset", { skip: !hasFfmpeg && "ffmpeg missing" }, async () => {
+test("http: the contract body and optional bearer token; fields left out when unset", { skip: !hasFfmpeg && "ffmpeg is not installed, so this encoding test is skipped" }, async () => {
   const m = mock(() => audio());
   const a = await synthesizeHttp("Hi.", { url: "https://tts.example.com/say", token: "TOKEN-abcdef", voice: "ted", referenceId: "ref-1", timeoutMs: 5000, fetchImpl: m.fetchImpl });
   const b = await synthesizeHttp("Hi.", { url: "https://tts.example.com/say", timeoutMs: 5000, fetchImpl: m.fetchImpl });

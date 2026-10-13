@@ -1,7 +1,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import net from "node:net";
 import { SignalClient } from "../src/client.ts";
+import { FakeSignalDaemon, FakeRpcError, type FakeRequest } from "../src/testing.ts";
 
 // Until the client stops exiting the process when its socket closes, the tests that end by closing the fake must not
 // take the test runner down with them.
@@ -9,50 +9,12 @@ const realExit = process.exit;
 process.exit = ((code?: number) => (code === 1 ? undefined : realExit(code))) as typeof process.exit; // only the client's exit(1)
 console.error = () => {};
 
-// A throw-away signal-cli: a TCP server on a free port that speaks line-delimited JSON-RPC.
-type Req = { id: number; method: string; params: any };
-class RpcError {
-  message: string;
-  constructor(message: string) {
-    this.message = message;
-  }
-}
-async function fake(answer: (r: Req) => unknown = () => ({})) {
-  const requests: Req[] = [];
-  const sockets = new Set<net.Socket>();
-  const server = net.createServer((s) => {
-    sockets.add(s);
-    s.setEncoding("utf8");
-    let buf = "";
-    s.on("data", (c: string) => {
-      buf += c;
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const r = JSON.parse(buf.slice(0, nl)) as Req;
-        buf = buf.slice(nl + 1);
-        requests.push(r);
-        const result = answer(r);
-        if (result instanceof RpcError) s.write(JSON.stringify({ jsonrpc: "2.0", id: r.id, error: { code: -1, message: result.message } }) + "\n");
-        else if (result !== undefined) s.write(JSON.stringify({ jsonrpc: "2.0", id: r.id, result }) + "\n");
-      }
-    });
-    s.on("close", () => sockets.delete(s));
-  });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const port = (server.address() as net.AddressInfo).port;
-  return {
-    port,
-    requests,
-    connections: () => sockets.size,
-    push: (o: object) => sockets.forEach((s) => s.write(JSON.stringify(o) + "\n")),
-    raw: (t: string) => sockets.forEach((s) => s.write(t)),
-    close: () => new Promise<void>((r) => (sockets.forEach((s) => s.destroy()), server.close(() => r()))),
-  };
-}
+type Req = FakeRequest;
+const RpcError = FakeRpcError;
 
 const ME = "+10000000000";
 const PEER = { number: "+10000000001", aci: "11111111-2222-3333-4444-555555555555" };
-const receive = (envelope: object) => ({ jsonrpc: "2.0", method: "receive", params: { envelope } });
+const wrap = (envelope: object) => ({ jsonrpc: "2.0", method: "receive", params: { envelope } });
 const until = async (f: () => boolean) => {
   for (let i = 0; i < 400 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
   assert.ok(f(), "timed out waiting");
@@ -63,10 +25,10 @@ const open: { close: () => Promise<void> }[] = [];
 afterEach(async () => void (await Promise.all(open.splice(0).map((d) => d.close()))));
 
 async function connected(peer?: typeof PEER, answer?: (r: Req) => unknown) {
-  const d = await fake(answer ?? ((r) => (r.method === "send" ? { timestamp: 1234 } : {})));
+  const d = await FakeSignalDaemon.start(answer ?? ((r) => (r.method === "send" ? { timestamp: 1234 } : {})));
   const c = new SignalClient("127.0.0.1", d.port, ME, peer);
   await c.connect();
-  await until(() => d.connections() > 0); // the server sees the connection a moment after the client does
+  await until(() => d.connections > 0); // the server sees the connection a moment after the client does
   open.push(d);
   return { d, c, done: () => d.close() };
 }
@@ -75,7 +37,7 @@ test("client: framing handles several lines in one chunk and one line split over
   const { d, c, done } = await connected();
   const got: string[] = [];
   c.onMessage((m) => got.push(m.text));
-  const env = (t: string) => JSON.stringify(receive({ sourceNumber: ME, syncMessage: { sentMessage: { destinationNumber: ME, message: t, timestamp: 1 } } }));
+  const env = (t: string) => JSON.stringify(wrap({ sourceNumber: ME, syncMessage: { sentMessage: { destinationNumber: ME, message: t, timestamp: 1 } } }));
   d.raw(env("one") + "\n" + env("two") + "\n");
   const third = env("three") + "\n";
   d.raw(third.slice(0, 20));
@@ -91,7 +53,7 @@ test("client: an unparseable line is skipped and later lines still work", async 
   const got: string[] = [];
   c.onMessage((m) => got.push(m.text));
   d.raw("{not json\n");
-  d.push(receive({ sourceNumber: ME, syncMessage: { sentMessage: { destinationNumber: ME, message: "ok", timestamp: 2 } } }));
+  d.push({ sourceNumber: ME, syncMessage: { sentMessage: { destinationNumber: ME, message: "ok", timestamp: 2 } } });
   await until(() => got.length === 1);
   await done();
 });
@@ -102,8 +64,8 @@ test("client: responses are matched to requests by id, even out of order", async
   const a = c.send("a");
   const b = c.send("b");
   await until(() => held.length === 2);
-  d.push({ jsonrpc: "2.0", id: held[1]!.id, result: { timestamp: 22 } });
-  d.push({ jsonrpc: "2.0", id: held[0]!.id, result: { timestamp: 11 } });
+  d.reply(held[1]!.id, { timestamp: 22 });
+  d.reply(held[0]!.id, { timestamp: 11 });
   assert.deepEqual(await Promise.all([a, b]), [11, 22]);
   await done();
 });
@@ -193,7 +155,7 @@ test("client: an incoming reaction reaches the reaction handler", async () => {
   const { d, c, done } = await connected(PEER);
   const got: string[] = [];
   c.onReaction((r) => got.push(r.emoji));
-  d.push(receive({ sourceNumber: PEER.number, dataMessage: { timestamp: 7, reaction: { emoji: "👍", targetSentTimestamp: 5, targetAuthorNumber: ME } } }));
+  d.push({ sourceNumber: PEER.number, dataMessage: { timestamp: 7, reaction: { emoji: "👍", targetSentTimestamp: 5, targetAuthorNumber: ME } } });
   await until(() => got.length === 1);
   await done();
 });

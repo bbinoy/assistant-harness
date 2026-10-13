@@ -4,7 +4,8 @@
   "description": "A small, dependency-free client for signal-cli's JSON-RPC daemon: Note to Self or a separate assistant account, quotes, reactions, groups, read receipts, typing, voice notes in (local whisper.cpp) and out (local Kokoro).",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "license": "MIT",
   "engines": {
