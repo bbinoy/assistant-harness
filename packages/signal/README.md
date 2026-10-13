@@ -48,6 +48,6 @@ await signal.connect();
 
 ## Files
 
-`src/client.ts` the client and `interpretEnvelope` · `src/daemon.ts` daemon supervision · `src/transcribe.ts` speech to text · `src/tts.ts` + `scripts/kokoro-say.py` text to speech · `test/` run with `npm test` in this folder.
+`src/client.ts` the client and `interpretEnvelope` · `src/daemon.ts` daemon supervision · `src/transcribe.ts` speech to text · `src/tts.ts` + `scripts/kokoro-say.py` local text to speech · `src/tts-provider.ts` (`synthesizeWith`) picks Kokoro or the optional remote `tts-elevenlabs.ts` / `tts-http.ts` · `test/` run with `npm test` in this folder.
 
 Not yet published to npm; the name and scope are placeholders.

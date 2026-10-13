@@ -20,7 +20,7 @@ const hasFfmpeg = (() => {
 })();
 
 // A real, tiny WAV (0.1 s of silence, 8 kHz mono, 16 bit).
-function wav(): Uint8Array {
+function wav(): Buffer {
   const n = 800;
   const b = Buffer.alloc(44 + n * 2);
   b.write("RIFF", 0); b.writeUInt32LE(36 + n * 2, 4); b.write("WAVEfmt ", 8);
@@ -34,7 +34,7 @@ function mock(respond: () => Response | Promise<Response>): { fetchImpl: typeof 
   const calls: Call[] = [];
   return { calls, fetchImpl: (async (url: string, init: RequestInit) => (calls.push({ url: String(url), init }), respond())) as unknown as typeof fetch };
 }
-const audio = (type = "audio/wav") => new Response(wav(), { status: 200, headers: { "content-type": type } });
+const audio = (type = "audio/wav") => new Response(new Uint8Array(wav()), { status: 200, headers: { "content-type": type } });
 
 test("tts remote: https is required, http only for this machine", () => {
   assert.ok(isSafeUrl("https://tts.example.com/say"));
