@@ -1,0 +1,27 @@
+import { synthesizeRemote, type Fetch } from "./tts-remote.ts";
+
+// Optional speech from a server of your own (a serverless GPU running F5-TTS or Chatterbox, say). The contract is
+// in docs/REMOTE-TTS.md: POST JSON {text, voice?, reference_id?}, optional bearer token, audio bytes back.
+// The reference recording of a cloned voice stays on that server; here it is only named by `reference_id`.
+
+export interface HttpTtsConfig {
+  url: string; // https, or http on this machine
+  token?: string; // from .env only
+  voice?: string;
+  referenceId?: string;
+  timeoutMs: number;
+  fetchImpl?: Fetch;
+}
+
+export const synthesizeHttp = (text: string, c: HttpTtsConfig): Promise<string> =>
+  synthesizeRemote(
+    {
+      url: c.url,
+      headers: c.token ? { authorization: `Bearer ${c.token}` } : {},
+      body: { text, ...(c.voice ? { voice: c.voice } : {}), ...(c.referenceId ? { reference_id: c.referenceId } : {}) },
+      secrets: c.token ? [c.token] : [],
+      timeoutMs: c.timeoutMs,
+      fetchImpl: c.fetchImpl,
+    },
+    "Remote speech server",
+  );

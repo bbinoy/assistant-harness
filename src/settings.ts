@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isVoiceSpec } from "@ted-personal-assistant/signal";
+import { isSafeUrl, isVoiceSpec, type TtsProviderConfig } from "@ted-personal-assistant/signal";
 
 // Every tunable in one place, read from the environment (see .env.example) and validated
 // when the agent starts. A typo fails loudly instead of silently becoming NaN: an interval
@@ -34,7 +34,34 @@ function list(env: Env, name: string, fallback: readonly string[], valid: RegExp
   return items;
 }
 
+// The speech engine (TTS_PROVIDER): Kokoro here, or an optional remote one. Remote settings are checked at start-up:
+// a missing key or a plain-http address to another machine stops the agent instead of leaking text or failing later.
+function ttsProvider(env: Env, kokoro: { dir: string; voice: string; speed: number }): TtsProviderConfig {
+  const provider = oneOf(env, "TTS_PROVIDER", "kokoro", ["kokoro", "elevenlabs", "http"] as const);
+  const fallback = oneOf(env, "TTS_FALLBACK", "none", ["none", "kokoro"] as const);
+  const timeoutMs = num(env, "TTS_TIMEOUT_SECONDS", 60, 5, 300) * 1000;
+  const need = (name: string): string => {
+    const v = env[name]?.trim();
+    if (!v) throw new Error(`${name} is required with TTS_PROVIDER=${provider}`);
+    return v;
+  };
+  if (provider === "elevenlabs") {
+    return { provider, fallback, kokoro, elevenlabs: { apiKey: need("ELEVENLABS_API_KEY"), voiceId: need("ELEVENLABS_VOICE_ID"), modelId: env.ELEVENLABS_MODEL_ID?.trim() || "eleven_multilingual_v2", timeoutMs } };
+  }
+  if (provider === "http") {
+    const url = need("TTS_HTTP_URL");
+    if (!isSafeUrl(url)) throw new Error("TTS_HTTP_URL must be an https:// address (http:// only for localhost)");
+    return { provider, fallback, kokoro, http: { url, token: env.TTS_HTTP_TOKEN?.trim() || undefined, voice: env.TTS_HTTP_VOICE?.trim() || undefined, referenceId: env.TTS_HTTP_REFERENCE_ID?.trim() || undefined, timeoutMs } };
+  }
+  return { provider, fallback, kokoro };
+}
+
 export function loadSettings(env: Env) {
+  const kokoro = {
+    dir: env.TTS_DIR || `${env.HOME ?? ""}/.cache/ted-personal-assistant/kokoro`,
+    voice: env.TTS_VOICE && isVoiceSpec(env.TTS_VOICE) ? env.TTS_VOICE : "am_onyx",
+    speed: num(env, "TTS_SPEED", 0.95, 0.5, 2),
+  };
   // The data root holds three folders: state/ (bookkeeping), logs/ and memory/ (what the
   // model reads). Overridable so tests never touch the real data.
   const dataDir = env.HARNESS_DATA_DIR ? resolve(env.HARNESS_DATA_DIR) : resolve(fileURLToPath(new URL("../", import.meta.url)));
@@ -123,9 +150,11 @@ export function loadSettings(env: Env) {
     whisperModel: env.WHISPER_MODEL || `${env.HOME ?? ""}/.cache/ted-personal-assistant/ggml-small.bin`,
     // Spoken replies to voice messages (src/voicereply.ts): local text to speech with Kokoro (scripts/setup-tts.sh).
     voiceReplies: oneOf(env, "VOICE_REPLIES", "on", ["on", "off"] as const) === "on",
-    ttsDir: env.TTS_DIR || `${env.HOME ?? ""}/.cache/ted-personal-assistant/kokoro`,
-    ttsVoice: env.TTS_VOICE && isVoiceSpec(env.TTS_VOICE) ? env.TTS_VOICE : "am_onyx", // one voice, or a blend like am_adam:0.6,am_onyx:0.4
-    ttsSpeed: num(env, "TTS_SPEED", 0.95, 0.5, 2),
+    ttsDir: kokoro.dir,
+    ttsVoice: kokoro.voice, // one voice, or a blend like am_adam:0.6,am_onyx:0.4
+    ttsSpeed: kokoro.speed,
+    // Optional remote speech (docs/REMOTE-TTS.md): sends the spoken words to a third party or to your own server.
+    tts: ttsProvider(env, kokoro),
     // Group chats (own-account mode, src/group.ts): it takes part in any group the owner is in, speaking only
     // when it fits (see PARTICIPATION in persona.ts).
     groupParticipation: oneOf(env, "GROUP_PARTICIPATION", "auto", ["auto", "tagged"] as const), // auto: the assistant judges every message; tagged: only when @mentioned or replied to

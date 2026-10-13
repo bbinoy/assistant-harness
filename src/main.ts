@@ -24,7 +24,7 @@ import { preparePicture } from "./image.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { openLog } from "./state.ts";
-import { ensureSignalDaemon, SignalClient, synthesize, transcribe, ttsReady, voiceReady, type IncomingMessage } from "@ted-personal-assistant/signal";
+import { ensureSignalDaemon, SignalClient, providerReady, synthesizeWith, transcribe, voiceReady, type IncomingMessage } from "@ted-personal-assistant/signal";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 
@@ -87,8 +87,8 @@ const pipeline: Pipeline = createPipeline({
   picture: (m) => preparePicture(join(settings.signalAttachmentsDir, m.image!.id)), // by file name inside signal-cli's folder; the id was checked
   transcript,
   speech: {
-    ready: () => settings.voiceReplies && signal.separateAccount && ttsReady(settings.ttsDir).ok,
-    synth: (words) => synthesize(words, { dir: settings.ttsDir, voice: settings.ttsVoice, speed: settings.ttsSpeed }),
+    ready: () => settings.voiceReplies && signal.separateAccount && providerReady(settings.tts).ok,
+    synth: (words) => synthesizeWith(words, settings.tts),
   },
   approvals,
   vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
