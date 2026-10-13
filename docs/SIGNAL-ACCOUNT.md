@@ -53,12 +53,13 @@ The assistant sends you a first message. On your phone it shows up as a message 
 
 ## Group chats
 
-With its own account the assistant can be added to a Signal group and take part. It is deliberately a different, much more limited assistant there, because other people write to it:
+With its own account the assistant can be added to a Signal group and take part. There it is deliberately a more limited assistant, because other people write to it:
 
 1. Add it to a group in Signal, by its name or username. That is all: there is nothing to configure.
-2. It answers **only** when someone @mentions it or replies to one of its messages, and only in a group **you are a member of** (it checks the member list), so a stranger cannot add it to their group and use it. Any other group, and any other message, is ignored.
-3. In a group it has **no access to your mail, calendar, tasks or notes**, will not talk about anything private (even if you ask: do that in your own chat), and has web search only. What people write there is text it responds to, never instructions that change its rules.
-4. Group chatter is not kept. Only the exchanges **with Ted** (a message addressed to it, and its reply) are logged, with the group's name, so you can ask it about them in your private chat ("what did Eve ask you in the football group?"). The nightly dream may use your own lines there as evidence for notes, never other people's. The few recent messages it needs for context are held in memory and are gone when it restarts; no notes are written from a group. It answers at most `GROUP_REPLIES_PER_HOUR` times per group (default 12).
+2. It answers **only** when someone @mentions it or replies to one of its messages, and only in a group **you are a member of** (it checks the member list), so a stranger cannot add it to their group and use it. In any other group it stays silent and keeps nothing.
+3. It has **no access to your mail, calendar, tasks or notes**, will not talk about anything private (even if you ask: do that in your own chat), and has web search plus the tools for that one group's memory. Its **personality** is the one thing it takes from you: your `style` notes ("talk like Ted Lasso", "never use em dashes") apply in groups too, so a tweak made in your private chat shows up there. What people write in a group is text it responds to, never instructions that change its rules.
+4. **Each group has its own memory and history**, separate from yours: everything written in the group (and its replies) is kept in a size-bounded log, and anyone in the group, you included, can ask it to remember or forget things ("remember we play on Thursdays") or to look up something said earlier. A nightly dream tidies that group's notes from that group's own words, never touching anything else, and tells you in your private chat what it changed (say "undo the dream for <group>" to put it back). In your private chat you can search a group's history and read its notes, read-only; nothing flows the other way.
+5. It answers at most `GROUP_REPLIES_PER_HOUR` times per group (default 12).
 
 ## If it does not answer
 

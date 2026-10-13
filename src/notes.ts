@@ -63,10 +63,10 @@ export function parseNote(file: string, raw: string): Note | undefined {
 
 export const isActive = (n: Note, today: string) => !n.expires || today <= n.expires;
 
-export function readNotes(now = new Date()): Note[] {
+export function readNotes(now = new Date(), dir: string = NOTES_DIR): Note[] {
   let files: string[] = [];
   try {
-    files = readdirSync(NOTES_DIR).filter((f) => f.endsWith(".md") && f !== "MEMORY.md").sort();
+    files = readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "MEMORY.md").sort();
   } catch {
     return [];
   }
@@ -74,7 +74,7 @@ export function readNotes(now = new Date()): Note[] {
   const out: Note[] = [];
   for (const f of files) {
     try {
-      const n = parseNote(f, readFileSync(join(NOTES_DIR, f), "utf8"));
+      const n = parseNote(f, readFileSync(join(dir, f), "utf8"));
       if (n && isActive(n, today)) out.push(n);
     } catch { /* unreadable: skip */ }
   }
@@ -117,13 +117,13 @@ export const missingSetup = (notes: readonly Note[], down: readonly string[] = [
 export const memoryFor = (categories: readonly Category[], now = new Date()) => notesBlock(readNotes(now), categories);
 
 // Deletes one note and its line in the index. Only a plain file name inside the notes folder.
-export function forgetNote(file: string): { ok: true; removed: Note | undefined } | { ok: false; error: string } {
+export function forgetNote(file: string, dir: string = NOTES_DIR): { ok: true; removed: Note | undefined } | { ok: false; error: string } {
   if (!/^[\w.-]+\.md$/.test(file) || file === "MEMORY.md") return { ok: false, error: "give the note's file name, like style-no-em-dashes.md" };
-  const path = join(NOTES_DIR, file);
+  const path = join(dir, file);
   if (!existsSync(path)) return { ok: false, error: `no note named ${file}. Read MEMORY.md for the list.` };
   const removed = parseNote(file, readFileSync(path, "utf8"));
   rmSync(path);
-  const index = join(NOTES_DIR, "MEMORY.md");
+  const index = join(dir, "MEMORY.md");
   if (existsSync(index)) {
     const kept = readFileSync(index, "utf8").split("\n").filter((l) => !l.includes(`(${file})`));
     writeFileSync(index, kept.join("\n"));

@@ -11,15 +11,14 @@ import { settings } from "./settings.ts";
 // summary itself is rewritten each time, so the file never grows past the limit. The owner's own
 
 
-const FILE = "logs/messages.jsonl";
+export const FILE = "logs/messages.jsonl"; // the owner's chat; a group has its own log, same format (groupstore.ts)
 const MAX_TEXT = 4000;
 const KEEP_AFTER_COMPACTION = 0.7; // compact down to this share of the limit, so it does not run on every message
 
 // What was said: the assistant's own messages (chat, notice, approval, draft, brief, other), the OWNER's messages
 // (owner, including voice transcripts) and the owner's reactions (reaction: "👎 on: <the message>"), and what was
-// said between group members and the assistant when it was addressed in a group (group; the owner's own lines there are
-// kind owner, prefixed with the group's name). Group chatter that did not involve the assistant is never logged.
-export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction" | "group";
+// said in a group is NOT in this log: each group has its own, in the same format (member: what a person wrote there).
+export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction" | "member";
 
 export interface Sent {
   ts: number; // Signal timestamp of the message
@@ -50,10 +49,10 @@ const parse = (line: string): Sent | Summary | undefined => {
 
 const isSummary = (e: Sent | Summary): e is Summary => e.kind === "summary";
 
-function readAll(): { sent: Sent[]; summary?: Summary } {
+function readAll(file: string = FILE): { sent: Sent[]; summary?: Summary } {
   const sent: Sent[] = [];
   let summary: Summary | undefined;
-  for (const line of (readText(FILE) ?? "").split("\n")) {
+  for (const line of (readText(file) ?? "").split("\n")) {
     const e = line ? parse(line) : undefined;
     if (!e) continue;
     if (isSummary(e)) summary = e;
@@ -62,18 +61,18 @@ function readAll(): { sent: Sent[]; summary?: Summary } {
   return { sent, summary };
 }
 
-let compacting = false;
+const compacting = new Set<string>(); // files being compacted: one run at a time per log
 
-export function recordMessage(kind: Kind, ts: number, text: string, now = new Date()): void {
+export function recordMessage(kind: Kind, ts: number, text: string, now = new Date(), file: string = FILE): void {
   if (!text.trim()) return;
-  appendLine(FILE, JSON.stringify({ ts, at: now.toISOString(), kind, text: text.slice(0, MAX_TEXT) } satisfies Sent));
+  appendLine(file, JSON.stringify({ ts, at: now.toISOString(), kind, text: text.slice(0, MAX_TEXT) } satisfies Sent));
 }
 
 // The message a reaction was on, if it is still in the log.
-export const findMessage = (ts: number): Sent | undefined => readAll().sent.find((m) => m.ts === ts && m.kind !== "reaction");
+export const findMessage = (ts: number, file: string = FILE): Sent | undefined => readAll(file).sent.find((m) => m.ts === ts && m.kind !== "reaction");
 
 // Everything logged after `sinceIso` (all of it when undefined), oldest first.
-export const messagesSince = (sinceIso?: string): Sent[] => readAll().sent.filter((m) => !sinceIso || m.at > sinceIso);
+export const messagesSince = (sinceIso?: string, file: string = FILE): Sent[] => readAll(file).sent.filter((m) => !sinceIso || m.at > sinceIso);
 
 const NOTICE_KINDS = new Set<Kind>(["notice", "draft", "brief"]);
 const NOTICE_AGE_MS = 24 * 3600_000;
@@ -110,12 +109,12 @@ export function limitWords(text: string, words: number): string {
 
 // Fold the oldest messages into the summary when the file is over its limit. Safe to call often;
 // one run at a time. Messages sent while the summary is being written are kept.
-export async function compactIfNeeded(summarize: Summarize, maxBytes = settings.messageLogMb * 1_000_000): Promise<boolean> {
-  if (compacting) return false;
-  const lines = (readText(FILE) ?? "").split("\n").filter(Boolean);
+export async function compactIfNeeded(summarize: Summarize, maxBytes = settings.messageLogMb * 1_000_000, file: string = FILE): Promise<boolean> {
+  if (compacting.has(file)) return false;
+  const lines = (readText(file) ?? "").split("\n").filter(Boolean);
   const drop = planCompaction(lines, maxBytes);
   if (drop === 0) return false;
-  compacting = true;
+  compacting.add(file);
   try {
     const old = lines.slice(0, drop).map(parse).filter((e): e is Sent | Summary => !!e);
     const previous = old.find(isSummary);
@@ -136,10 +135,10 @@ export async function compactIfNeeded(summarize: Summarize, maxBytes = settings.
       text,
     };
     // Re-read: anything appended during the summary comes after the lines we folded.
-    const now = (readText(FILE) ?? "").split("\n").filter(Boolean);
-    writeText(FILE, [JSON.stringify(summary), ...now.slice(drop)].join("\n") + "\n");
+    const now = (readText(file) ?? "").split("\n").filter(Boolean);
+    writeText(file, [JSON.stringify(summary), ...now.slice(drop)].join("\n") + "\n");
     return true;
   } finally {
-    compacting = false;
+    compacting.delete(file);
   }
 }

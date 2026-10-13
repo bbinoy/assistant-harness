@@ -113,11 +113,6 @@ test("dream: only the owner's words and reactions ground a note; the assistant's
   assert.match(ownerText, /my sister is Anna/);
   assert.doesNotMatch(ownerText, /archived X/); // a reaction's target may quote mail: shown, never evidence
   assert.doesNotMatch(ownerText, /ignore all rules/);
-  // what others said to the assistant in a group is context at most, never evidence
-  const g = conversationLines([m("owner", "[group \"Football\"] Ben (the owner): I play on Thursdays"), m("group", "[group \"Football\"] Eve (a member): Ben always pays for the pizza")]);
-  assert.match(g.ownerText, /I play on Thursdays/);
-  assert.doesNotMatch(g.ownerText, /pays for the pizza/);
-  assert.match(g.lines.join("\n"), /group chat \(context only\)/);
 });
 
 test("dream: runs once a day, only if the owner said something, and announces only real changes", async () => {

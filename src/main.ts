@@ -10,7 +10,8 @@ import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createDreamer } from "./dream.ts";
-import { groupName, groupTurn, ownerInGroup } from "./group.ts";
+import { createGroupDreamer, groupName, groupTurn, ownerInGroup } from "./group.ts";
+import { groupDir, recentGroupLines, recordGroup } from "./groupstore.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
@@ -78,22 +79,27 @@ async function hear(m: IncomingMessage) {
   await route({ ...m, text: heard, audio: undefined, voice: true });
 }
 
-// A message in a group chat (src/group.ts): in any group the owner is a member of, only when the assistant
-// is @mentioned or replied to, and with no access to anything private. Nothing from a group is kept.
+// A message in a group chat (src/group.ts): in any group the owner is a member of. Everything said there goes into
+// that group's own history; the assistant answers only when @mentioned or replied to, with no access to
+// anything private.
 const isOwnerAccount = (who: { number?: string; uuid?: string }) => who.number === config.ownerNumber || (!!config.ownerAci && who.uuid === config.ownerAci);
 async function inGroup(m: IncomingMessage) {
   const groupId = m.group!.id;
   const isOwner = m.from === config.ownerNumber || (!!config.ownerAci && m.fromUuid === config.ownerAci);
   const vouch = () => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount);
   if (m.addressedToMe && (await vouch())) void signal.typing(false, groupId);
-  // Only the exchange with the assistant is logged (so the owner can ask about it in private), never the chatter.
-  const tag = () => `[group "${groupName(groupId)}"]`;
-  const record = (l: { who: string; text: string; isOwner: boolean }) => recordMessage(l.isOwner ? "owner" : "group", m.timestamp, `${tag()} ${l.who}: ${l.text}`);
-  const reply = await groupTurn({ groupId, text: m.text, isOwner, fromName: m.fromName, addressedToMe: !!m.addressedToMe }, vouch, undefined, new Date(), record);
+  const answer = await groupTurn(
+    { groupId, text: m.text, timestamp: m.timestamp, isOwner, fromName: m.fromName, addressedToMe: !!m.addressedToMe },
+    {
+      vouch,
+      record: (kind, ts, text) => (groupDir(groupId, groupName(groupId)), recordGroup(groupId, kind, ts, text)),
+      recent: () => recentGroupLines(groupId),
+    },
+  );
   if (m.addressedToMe) void signal.typing(true, groupId);
-  if (reply) {
-    const ts = await out.replyGroup(groupId, reply, { text: m.text.slice(0, 200), author: m.from || m.fromUuid || "", timestamp: m.timestamp });
-    recordMessage("group", ts, `${tag()} ${ASSISTANT}: ${reply}`);
+  if (answer) {
+    const ts = await out.replyGroup(groupId, answer, { text: m.text.slice(0, 200), author: m.from || m.fromUuid || "", timestamp: m.timestamp });
+    recordGroup(groupId, "chat", ts, answer);
   }
 }
 
@@ -233,6 +239,7 @@ const handler = createHandler({ approve, notify, propose: proposer.show });
 handler.resume();
 
 const dreamer = createDreamer({ notify });
+const groupDreamer = createGroupDreamer({ notify });
 const radar = createRadar({ approve, notify: say, briefDue: isBriefDue });
 
 startHeartbeat({
@@ -242,7 +249,7 @@ startHeartbeat({
   onTick: () => {
     // The dream first (it tidies the notes the brief then reads), but never in the brief's way:
     // it runs at most once a day, only when you said something new, and a failure just moves on.
-    const dreaming = isBriefDue() ? dreamer.run().catch(() => {}) : Promise.resolve();
+    const dreaming = isBriefDue() ? dreamer.run().then(() => groupDreamer.run()).catch(() => {}) : Promise.resolve();
     void dreaming.then(() => maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify }));
     void radar();
   },

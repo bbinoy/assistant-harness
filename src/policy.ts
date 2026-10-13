@@ -82,6 +82,7 @@ export function isReadableData(path: unknown, dirs: readonly string[] = [setting
 }
 
 const FORGET_NOTE = "mcp__memory__forget_note";
+const GROUP_TOOLS = new Set(["mcp__group__remember_note", "mcp__group__forget_note", "mcp__group__search_history"]);
 const SEARCH_LOGS = "mcp__memory__search_logs";
 const UNDO_DREAM = "mcp__memory__undo_dream";
 
@@ -117,8 +118,9 @@ const WEB_SEARCH = "WebSearch";
 const WEB_FETCH = "WebFetch";
 
 export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
-  // A group chat holds other people: no private data, no writes, no pages. Web search only.
-  if (source === "group") return tool === WEB_SEARCH ? "allow" : "deny";
+  // A group chat holds other people: no private data, no pages. Web search and the tools for that one
+  // group's own notes and history (group.ts), nothing else.
+  if (source === "group") return tool === WEB_SEARCH || GROUP_TOOLS.has(tool) ? "allow" : "deny";
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
   if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && (isNotePath(input.file_path) || (tool === "Read" && isReadableData(input.file_path))) ? "allow" : "deny";

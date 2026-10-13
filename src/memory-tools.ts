@@ -31,11 +31,18 @@ export function createMemoryServer(record: (line: string) => void) {
       ),
       tool(
         "undo_dream",
-        "Put the memory notes back as they were before the latest nightly dream (which merges, adds and drops notes). Only when the OWNER asked to undo it. Say in your reply what came back.",
-        {},
-        async () => {
+        "Put the memory notes back as they were before the latest nightly dream (which merges, adds and drops notes). Only when the OWNER asked to undo it. For a group's notes, pass the group's name. Say in your reply what came back.",
+        { group: z.string().optional().describe("The group's name, to undo that group's latest dream instead of your own notes") },
+        async ({ group }) => {
           const { undoLatest } = await import("./dream.ts"); // lazy: dream.ts reaches agent.ts, which imports this file
-          const r = undoLatest();
+          let scope;
+          if (group) {
+            const { listGroups, groupScope } = await import("./groupstore.ts");
+            const found = listGroups().find((g) => g.name.toLowerCase() === group.trim().toLowerCase());
+            if (!found) return reply(`no group named ${group}. Known: ${listGroups().map((g) => g.name).join(", ") || "none"}`, true);
+            scope = groupScope(found.id);
+          }
+          const r = undoLatest(scope);
           if (!r.ok) return reply(r.error, true);
           record(`↩️ undid the dream (${r.restored} notes restored)`);
           return reply(`Restored ${r.restored} notes to how they were before the dream.`);

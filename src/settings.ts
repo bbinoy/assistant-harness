@@ -91,6 +91,7 @@ export function loadSettings(env: Env) {
 
     // The log of messages the assistant sent (messages.ts) is bounded by size; older messages become one summary.
     messageLogMb: num(env, "MESSAGE_LOG_MB", 1, 0.01, 100),
+    groupLogMb: num(env, "GROUP_LOG_MB", 0.5, 0.01, 100), // per group, the same size-bounding
     summaryWords: num(env, "SUMMARY_WORDS", 60, 10, 400),
 
     // What background runs may read of the owner's notes (chat reads them as files, on demand), and the
