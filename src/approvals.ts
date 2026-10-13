@@ -41,6 +41,7 @@ export interface Answer {
 let pending: ((d: Decision) => void) | undefined;
 let pendingLabel = "";
 let pendingTimestamp = 0; // timestamp of the "Approve?" message, what a reaction must target
+let pendingBackground = false; // asked by an unattended run (wake-up, preset, handler): the owner is not in a conversation with it
 let pendingCall: { tool: string; input: Record<string, unknown> } | undefined;
 let chain: Promise<unknown> = Promise.resolve();
 
@@ -64,15 +65,19 @@ export function answerReaction(emoji: string, targetTimestamp: number): "approve
 }
 
 // Feed an incoming owner message while an approval may be pending.
-//   "none"      - nothing pending: a normal message
+//   "none"      - nothing pending (or the pending one is a background approval and this is not an answer to it): a normal message
 //   "approved" / "declined" - consumed as the answer
 //   "feedback"  - consumed as feedback on the denied call
 // `onJudging` fires just before the (slower) model judge starts, for an ack.
-export async function answer(text: string, onJudging: () => void): Promise<Answer> {
+// `quote`: the message the owner's message replies to. A BACKGROUND approval (nobody is chatting with that run) answers only to
+// an explicit yes / no / 👍 / 👎 or to a reply that quotes the approval message itself; every other message is chat and must
+// get a chat answer, not be swallowed as feedback on a call the owner never saw coming.
+export async function answer(text: string, onJudging: () => void, quote?: { timestamp: number }): Promise<Answer> {
   const current = pending;
   const call = pendingCall;
   if (!current || !call) return { outcome: "none" };
   const t = normalise(text);
+  if (pendingBackground && !YES.has(t) && !NO.has(t) && !(quote && pendingTimestamp !== 0 && quote.timestamp === pendingTimestamp)) return { outcome: "none" };
   if (YES.has(t)) {
     current({ approved: true });
     return { outcome: "approved" };
@@ -111,6 +116,7 @@ export function request(
   description: string,
   call: { tool: string; input: Record<string, unknown> },
   signal?: AbortSignal,
+  opts: { background?: boolean } = {},
 ): Promise<Decision> {
   const run = async (): Promise<Decision> => {
     if (signal?.aborted) return { approved: false };
@@ -122,6 +128,7 @@ export function request(
         pendingLabel = "";
         pendingTimestamp = 0;
         pendingCall = undefined;
+        pendingBackground = false;
         discardJudge();
         resolve(d);
       };
@@ -131,9 +138,12 @@ export function request(
       pending = finish;
       pendingLabel = description.split("\n")[0] ?? "";
       pendingCall = call;
+      pendingBackground = !!opts.background;
       console.log(`approval requested: ${pendingLabel}`);
-      prepareJudge(); // warm the judge while the owner reads the question
-      const hint = isModifiable(call.tool) ? "Reply yes, no, or tell me what to change" : "Reply yes or no";
+      if (!opts.background) prepareJudge(); // warm the judge while the owner reads the question (a background approval is judged only for a quoted reply: rare)
+      const hint = opts.background
+        ? "Reply yes or no (or reply to this message to change something)"
+        : isModifiable(call.tool) ? "Reply yes, no, or tell me what to change" : "Reply yes or no";
       send(`Approve?\n${description}\n\n${hint}, or react 👍 / 👎 (5 min, then I assume no).`)
         .then((ts) => {
           if (pending === finish) pendingTimestamp = ts;

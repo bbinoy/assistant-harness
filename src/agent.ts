@@ -432,10 +432,9 @@ export async function ask(prompt: string, approve: Approve, notify: (text: strin
   return consume(query({ prompt, options: buildOptions(approve, o, r.resume) }), o, r.previousCost);
 }
 
-// The three owner profiles, as before (the legacy scheduler and the gate's presets both go through runProfile).
+// The owner profiles, as before (the legacy scheduler and the gate's presets both go through runProfile).
 export const runBriefTurn = (prompt: string, approve: Approve, onToolSuccess: (tool: string, input: unknown) => void): Promise<AgentReply> => runProfile("brief", prompt, approve, { onToolSuccess });
 export const runRadarTurn = (prompt: string, approve: Approve): Promise<AgentReply> => runProfile("radar", prompt, approve);
-export const runBackgroundTurn = (prompt: string, approve: Approve): Promise<AgentReply> => runProfile("background", prompt, approve);
 
 // Background handling of heartbeat-flagged mail: fresh session, least privilege (see policy.ts).
 export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void): Promise<AgentReply> {
@@ -448,27 +447,33 @@ export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?:
   });
 }
 
+// The options of the /compact run. A group's session was built under the group's isolation (buildOptions: no user settings,
+// no connectors, no skills or plugins, auto-memory = its own notes folder), and its compaction must load nothing more than
+// that: it is the same session, resumed. The owner's compaction is unchanged.
+export function compactOptions(sessionId: string | undefined, source: Source, notesDir?: string): Options {
+  const isolated = source === "group";
+  return {
+    model: settings.model,
+    resume: sessionId,
+    tools: [],
+    settingSources: [],
+    ...(isolated ? { strictMcpConfig: true, settings: notesDir ? { autoMemoryEnabled: true, autoMemoryDirectory: notesDir } : { autoMemoryEnabled: false } } : {}),
+    maxTurns: 2,
+    maxBudgetUsd: 1.0,
+    canUseTool: async () => ({ behavior: "deny", message: "No tools during compaction." }),
+  };
+}
+
 // After a turn has been answered (any conversation, `file` is its session): if its context grew past
 // CHAT_COMPACT_TOKENS, compact the session in place by sending the SDK's own /compact command on the resumed
 // session. Called from the conversation's serial queue, so the next message waits. Never throws.
-export async function compactChatIfNeeded(file: string = SESSION_FILE, source: Source = "chat"): Promise<void> {
+export async function compactChatIfNeeded(file: string = SESSION_FILE, source: Source = "chat", notesDir?: string): Promise<void> {
   try {
     const saved = readJson<ChatSession>(file, { costUsd: 0 });
     if (planSession(saved, new Date(), chatPlanOpts()) !== "resume then compact") return;
     console.log(`${source}: context is ${saved.lastContextTokens} tokens, compacting`);
     let boundary: { pre_tokens: number; post_tokens?: number } | undefined;
-    for await (const message of query({
-      prompt: "/compact",
-      options: {
-        model: settings.model,
-        resume: saved.sessionId,
-        tools: [],
-        settingSources: [],
-        maxTurns: 2,
-        maxBudgetUsd: 1.0,
-        canUseTool: async () => ({ behavior: "deny", message: "No tools during compaction." }),
-      },
-    })) {
+    for await (const message of query({ prompt: "/compact", options: compactOptions(saved.sessionId, source, notesDir) })) {
       if (message.type === "system" && message.subtype === "compact_boundary") boundary = message.compact_metadata;
       if (message.type !== "result") continue;
       recordCost(message.total_cost_usd - saved.costUsd);

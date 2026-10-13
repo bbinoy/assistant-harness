@@ -15,4 +15,6 @@ export function splitVoice(reply: string): { voice?: string; text: string } {
 // can overrule this default ("never use voice", "voice for pep talks").
 export const VOICE_INVITE =
   "you may answer by voice by starting your reply with [[voice]] and then only the words to say aloud, short and plain (no markdown, emoji, links or lists); good for warm, personal or spoken-style replies such as a pep talk or a joke; keep exact, long or detailed answers (times, figures, links, lists) in text. If the notes say how to use voice (or never to), follow them";
+// Added to the words when a reply the model chose to speak had to go out as text, since the model may have announced a voice message.
+export const VOICE_FAILED_NOTE = "(voice didn't work this time, sending text)";
 export const voiceOption = (canSpeak: boolean): string => (canSpeak ? `Voice: ${VOICE_INVITE}.` : "");

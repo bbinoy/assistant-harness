@@ -8,7 +8,7 @@ import { FILE as OWNER_LOG, findMessage, type Kind } from "./messages.ts";
 import { NOTES_DIR } from "./notes.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
-import { splitVoice, voiceOption } from "./voicereply.ts";
+import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
 import { MAX_SPOKEN_CHARS, type IncomingMessage, type IncomingReaction, type Quote } from "@ted-personal-assistant/signal";
 
@@ -105,7 +105,7 @@ export interface PipelineDeps {
   runOwner: (prompt: string, ownerMessage: string) => Promise<{ text: string; costUsd?: number }>;
   transcript: (m: IncomingMessage) => Promise<string>; // throws a sentence the sender can be told
   speech: { ready: () => boolean; synth: (words: string) => Promise<string> }; // spoken replies: local TTS, a file
-  approvals: { answer: (text: string, working: () => void) => Promise<{ outcome: "none" | "approved" | "modified" | "declined" | "feedback"; changes?: { field: string; value: unknown }[] }>; answerReaction: (emoji: string, ts: number) => string };
+  approvals: { answer: (text: string, working: () => void, quote?: { timestamp: number }) => Promise<{ outcome: "none" | "approved" | "modified" | "declined" | "feedback"; changes?: { field: string; value: unknown }[] }>; answerReaction: (emoji: string, ts: number) => string };
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group?
   isOwner: (who: { from: string; fromUuid?: string }) => boolean;
   admitGroup: (conv: Conversation, m: GroupMessage) => Promise<void>; // the participation gate (group.ts)
@@ -114,6 +114,7 @@ export interface PipelineDeps {
   now?: () => number;
   wait?: (ms: number) => Promise<void>; // the settling pause (tests)
   settleMs?: () => number; // how long a burst must be quiet before it is answered (default: settings.settleSeconds)
+  settleMaxMs?: () => number; // the longest a burst may wait since its first message, however long it keeps going (default: settings.settleMaxSeconds)
 }
 
 // What a settled burst hands its owner: whether a newer message has taken over, and the one queued run that takes every
@@ -143,15 +144,20 @@ export function createPipeline(deps: PipelineDeps) {
   // Burst handling, the same for every conversation: after each message wait a short settling pause; a newer message
   // restarts it and takes over, so a burst is ONE turn. Messages that arrive while that turn is queued join it; ones that
   // arrive while a run is in progress wait in the queue and make the next turn. Messages are kept here, in the order they came.
+  // The pause is capped: once the first message of a burst has waited settleMaxSeconds, the burst is processed even if
+  // people are still typing (what arrives after that joins the next turn).
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   const wait = deps.wait ?? sleep;
-  const bursts = new Map<string, { epoch: number; pending: unknown[]; queued: boolean }>();
+  const bursts = new Map<string, { epoch: number; pending: unknown[]; queued: boolean; firstAt?: number }>();
   async function burst<T>(conv: Conversation, item: T, settled: (b: Batch<T>) => Promise<void>): Promise<void> {
     const st = bursts.get(conv.key) ?? { epoch: 0, pending: [], queued: false };
     bursts.set(conv.key, st);
+    if (!st.pending.length) st.firstAt = now();
     st.pending.push(item);
     const mine = ++st.epoch;
-    await wait(deps.settleMs ? deps.settleMs() : settings.settleSeconds * 1000);
+    const maxMs = deps.settleMaxMs ? deps.settleMaxMs() : settings.settleMaxSeconds * 1000;
+    const left = Math.max(0, maxMs - (now() - (st.firstAt ?? now())));
+    await wait(Math.min(deps.settleMs ? deps.settleMs() : settings.settleSeconds * 1000, left));
     if (st.epoch !== mine || st.queued || !st.pending.length) return; // a newer message took over, or a queued run will take this one too
     await settled({
       stale: () => st.epoch !== mine,
@@ -159,6 +165,7 @@ export function createPipeline(deps: PipelineDeps) {
         st.queued = true;
         return enqueue(conv, async () => {
           st.queued = false;
+          st.firstAt = undefined;
           const items = st.pending.splice(0) as T[];
           if (items.length) await job(items);
         });
@@ -195,10 +202,12 @@ export function createPipeline(deps: PipelineDeps) {
   async function deliver(conv: Conversation, replied: string, t: Pick<Turn, "target" | "threadUnder" | "hadQuote" | "reaction" | "kind"> & { started: number }): Promise<{ spoke: boolean; reacted: boolean }> {
     const chosen = splitVoice(replied);
     let spoken = false;
-    if (chosen.voice && canSpeak() && chosen.voice.length <= MAX_SPOKEN_CHARS) spoken = await speak(conv, chosen.voice);
+    let speechFailed = false;
+    if (chosen.voice && canSpeak() && chosen.voice.length <= MAX_SPOKEN_CHARS) speechFailed = !(spoken = await speak(conv, chosen.voice));
     // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
     const { reaction, text } = splitReaction(spoken ? "" : chosen.text);
-    const words = SILENT.test(text) ? "" : text;
+    const said = SILENT.test(text) ? "" : text;
+    const words = said && speechFailed ? `${said}\n\n${VOICE_FAILED_NOTE}` : said; // the model may have announced a voice message
     const quote = t.threadUnder && (conv.threadAlways || shouldThread(!!t.hadQuote, now() - t.started)) ? t.threadUnder : undefined;
     if (words) await out.reply(words, { kind: t.kind ?? "chat", quote, groupId: conv.groupId });
     if (reaction && t.target) void signal.react(reaction, t.target, conv.groupId);
@@ -281,7 +290,7 @@ export function createPipeline(deps: PipelineDeps) {
     // While an approval is pending, a message may be its answer. That must skip the queue.
     // A spoken "yes" is never an approval.
     const target = { author: m.from, timestamp: m.timestamp };
-    const { outcome, changes } = m.voice ? { outcome: "none" as const, changes: undefined } : await deps.approvals.answer(m.text, () => status(conv, "⏳", target));
+    const { outcome, changes } = m.voice ? { outcome: "none" as const, changes: undefined } : await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote);
     if (outcome !== "none") {
       console.log(`approval ${outcome}${changes ? ` (${changes.map((c) => c.field).join(", ")})` : ""}`);
       void signal.react({ approved: "👍", modified: "👍", declined: "👎", feedback: "💬" }[outcome], target, conv.groupId);
