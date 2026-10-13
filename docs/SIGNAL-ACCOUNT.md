@@ -23,12 +23,12 @@ signal-cli -a +10000000001 verify 123456       # the code you received
 signal-cli -a ACCOUNT_KEY register --recovery-key RECOVERY_KEY
 ```
 
-This logs the Android app out; signal-cli becomes the account's device. The exact steps follow signal-cli's current documentation and issue [#2124](https://github.com/AsamK/signal-cli/issues/2124); both Signal Login and this flow are new, so check there if something differs.
+The recovery key is the 64-character key under Signal's Settings → Backups, and the account key is shown under Settings → Account. Type them into a terminal prompt rather than pasting them anywhere shared, for example `read -s "?Recovery key: " RK` then `signal-cli -a "$ACCOUNT" register --recovery-key "$RK"`. This logs the Android app out; signal-cli becomes the account's device (so the phone can be wiped afterwards). The exact steps follow signal-cli's current documentation and issue [#2124](https://github.com/AsamK/signal-cli/issues/2124); both Signal Login and this flow are new, so check there if something differs.
 
 ## 2. Give it a name (and optionally a username)
 
 ```bash
-signal-cli -a ACCOUNT updateProfile --given-name "Number One" --avatar ~/Pictures/number-one.png
+signal-cli -a ACCOUNT updateProfile --given-name "Number One" --avatar ~/Pictures/number-one.png   # run it BEFORE step 3: once the assistant is running, signal-cli holds the account and a second command would hang
 signal-cli -a ACCOUNT updateAccount -u numberone      # optional: you can then find it by username
 ```
 
@@ -43,7 +43,13 @@ SIGNAL_OWNER_NUMBER=+10000000000     # you, as before
 SIGNAL_ACCOUNT=+10000000001          # the assistant (number, or the account key from B)
 ```
 
-Restart it (`launchctl kickstart -k gui/$(id -u)/<your LAUNCHD_LABEL>`, or `npm run daemon` again), then on your phone find the assistant by its number or username, start a chat, and say hi. `npm run doctor` shows which channel is in use.
+Restart the agent (`launchctl kickstart -k gui/$(id -u)/<your LAUNCHD_LABEL>`, or `npm run daemon` again) and check `npm run doctor` says it is using the assistant's own account. Then start the chat:
+
+```bash
+npm run signal:hello
+```
+
+The assistant sends you a first message. On your phone it shows up as a message request from the assistant's profile name; accept it and say hi. (An account without a phone number cannot be found by number; if you gave it a username in step 2, you can also search for that.)
 
 ## If it does not answer
 

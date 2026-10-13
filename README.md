@@ -14,7 +14,7 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
   - 📆 **Organises your calendar.** Creates calendar entries from emails and meetings, keeps an eye on conflicts and helps you to resolve them, and makes sure meetings are prepared.
   - 📰 **Summarises your newsletters into a short news digest**: Actually interested in the newsletters you subscribed to but started ignoring them after a while? Number One gives you the top 3 nuggets based on your preferences, and archives the newsletters for you.
 - 🤝 **Is helpful**
-  - 💬 **Listens to your messages on Signal.** Message yourself on Signal (or, optionally, a separate Signal account of its own, see [docs/SIGNAL-ACCOUNT.md](docs/SIGNAL-ACCOUNT.md)) and talk to your mail, calendar and tasks in plain language. It has a personality (warm, folksy and relentlessly optimistic, in the style of Ted Lasso, by default; change it to taste).
+  - 💬 **Listens to your messages on Signal.** Chat with it like a contact and talk to your mail, calendar and tasks in plain language. **Recommended: give it its own Signal account** (a name, a picture, "typing…" while it works; [how, in 10 minutes](docs/SIGNAL-ACCOUNT.md)). It feels far more like talking to an assistant than messaging yourself, which is what the zero-setup default (Signal's *Note to Self*) does. It has a personality (warm, folksy and relentlessly optimistic, in the style of Ted Lasso, by default; change it to taste).
   - ✋ **Is proactive.** Reaches out to you on Signal if something needs your attention: urgent mail right away, and every couple of hours a look at your calendar for meetings about to start (with their prep) and clashes.
   - 🧠 **Remembers your instructions.** "Anything from the kids' school is urgent." "Dr. Weber is a client, write to him formally." "No meetings before 10." "Never use em dashes." Say it once in chat and it shapes how mail is sorted, how drafts read and when meetings are proposed. 
   - 🙋 **Asks for your approval.** Sending, scheduling and sharing always wait for your OK, by reply, by a natural sentence, or by tapping 👍 on the question.
@@ -114,7 +114,7 @@ You can answer that question with `yes`, `sure, go ahead`, an edit like the one 
 
 ## Why you can trust it with your inbox
 
-- **It only obeys you.** Just your own "Note to Self" thread, from your own number. Anything else is ignored.
+- **It only obeys you.** Just your own number, in your private chat with it (your "Note to Self", or its own Signal chat with you). Groups and everyone else are ignored.
 - **It cannot delete or send on its own.** Mail is only archived, and archiving is reversible. Sending, forwarding and calendar changes ask first. Some actions (deleting, trading, attaching your local files) are simply blocked.
 - **Memory cannot grant power.** What you ask it to remember shapes tone, priorities and sorting, never permissions. Every change to memory is mentioned in the assistant's reply, so a mistake is one message from undone. Only a chat you started can change it (not an email, not the background jobs), and the assistant is told never to save something because an email said so.
 - **Background work gets the least power.** The part that handles mail while you are not looking may only leave reply drafts; anything more, it has to ask.
@@ -154,6 +154,8 @@ cp .env.example .env && chmod 600 .env     # add your Signal number and names
 npm run doctor                              # checks everything is in place
 npm run install:launchd                     # starts it now and at every login
 ```
+
+**Strongly recommended:** give the assistant its own Signal account before you start, so you chat with a contact instead of with yourself: [docs/SIGNAL-ACCOUNT.md](docs/SIGNAL-ACCOUNT.md) (a spare number, or Signal Login on Android with no number). Without it, everything works in Note to Self.
 
 Then message the assistant "set up" in Signal: it finds your calendars and Notion pages, learns how you write from your sent mail (if you allow it), and saves what it learns as notes. No files to edit.
 

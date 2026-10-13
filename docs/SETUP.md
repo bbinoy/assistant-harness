@@ -9,7 +9,7 @@ This is a personal project that runs daily for its author. It works, its safety-
 - **macOS** (launchd supervises the agent; Mailbird is the mail client). Linux would work for everything except those two.
 - **Node 24+** (TypeScript runs directly, there is no build step).
 - **[Claude Code](https://docs.claude.com/en/docs/claude-code/overview)** installed and logged in (`claude auth login`). The agent uses your stored login so it can reach your claude.ai connectors (Notion, Google Calendar, Gmail…). *Check Anthropic's current terms for using your plan for personal automation like this.* An API key or `claude setup-token` also work but cannot use those connectors (see `HARNESS_AUTH` in `.env.example`).
-- **[signal-cli](https://github.com/AsamK/signal-cli)** (`brew install signal-cli`), linked to your Signal account as a secondary device.
+- **[signal-cli](https://github.com/AsamK/signal-cli)** (`brew install signal-cli`). Either linked to your own Signal account as a secondary device (Note to Self, the default), or, better, registered as the assistant's own account ([SIGNAL-ACCOUNT.md](SIGNAL-ACCOUNT.md)).
 - **A mail client with an MCP server.** This repo uses [Mailbird](https://www.getmailbird.com/); see [Why a local mail client](ADAPTING.md#why-the-default-is-a-local-client) and [ADAPTING.md](ADAPTING.md) if you use Gmail only.
 - Optional: Notion and Google Calendar connected under *claude.ai → Settings → Connectors*, for the task and calendar parts of the brief.
 
@@ -41,7 +41,7 @@ Send yourself a message on Signal. The first heartbeat tick only records a **bas
 
 The skills the agent works with ship in the repo, in `plugin/skills/`, and are loaded straight from there: there is nothing to install or copy. They hold no personal details. What they need to know about you (which calendars to check, where your Notion task list and meeting pages are, how you write) lives in your memory notes, and the agent sets those up with you in the chat.
 
-Prefer a separate contact over chatting with yourself? The assistant can have its own Signal account with its own name; see [SIGNAL-ACCOUNT.md](SIGNAL-ACCOUNT.md). It is optional and you can switch later.
+**Recommended: give the assistant its own Signal account**, so you chat with a contact that has a name and a picture, and see "typing…", instead of with yourself in Note to Self. It takes about ten minutes: [SIGNAL-ACCOUNT.md](SIGNAL-ACCOUNT.md). Everything works in Note to Self without it, and you can switch at any time (set or remove `SIGNAL_ACCOUNT`).
 
 After the agent is running, send it **"set up"** on Signal. It walks you through one item at a time, and you can skip any:
 
