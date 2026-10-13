@@ -20,8 +20,8 @@ export function chunk(text: string, limit = CHUNK_LIMIT): string[] {
   return out;
 }
 
-// `record` is told about every message sent (kind, Signal timestamp, text): the message log.
-export function createOutbound(signal: SignalClient, record?: (kind: MessageKind, ts: number, text: string) => void) {
+// `record` is told about every message sent (kind, Signal timestamp, text, group id if it went to a group): the message log.
+export function createOutbound(signal: Pick<SignalClient, "send">, record?: (kind: MessageKind, ts: number, text: string, groupId?: string) => void) {
   // Everything we send to Note to Self comes back to us as an incoming message, and must not
   // be answered. Each message is registered BEFORE sending, by text (the echo can arrive
   // before the send returns its timestamp), then by timestamp. Entries expire after a while.
@@ -41,37 +41,28 @@ export function createOutbound(signal: SignalClient, record?: (kind: MessageKind
   // Sends markdown as styled Signal text. `plain` skips markdown parsing: use it for anything
   // that embeds untrusted text (approval prompts and alerts quote email content).
   // Returns the timestamp of the last message sent (what a reaction would target).
-  // `quote` threads the reply under a message of the owner's (first chunk only).
-  async function reply(text: string, opts: { plain?: boolean; quote?: Quote; kind?: MessageKind } = {}): Promise<number> {
+  // `quote` threads the reply under a message (first chunk only). `groupId` sends to that group instead
+  // of the owner's chat; a group's messages never come back as the owner's, so they are not echo-registered
+  // (that would swallow a message of the owner's with the same text).
+  async function reply(text: string, opts: { plain?: boolean; quote?: Quote; kind?: MessageKind; groupId?: string } = {}): Promise<number> {
     let last = 0;
     let quote = opts.quote;
     for (const part of chunk(text)) {
       const r = opts.plain ? { text: part, styles: [] } : renderMarkdown(part);
-      remember(`x:${r.text}`);
-      last = await signal.send(r.text, toSignalStyles(r.styles), quote);
+      if (!opts.groupId) remember(`x:${r.text}`);
+      last = await signal.send(r.text, toSignalStyles(r.styles), quote, opts.groupId ? { groupId: opts.groupId } : undefined);
       quote = undefined;
-      remember(`t:${last}`);
-      record?.(opts.kind ?? "other", last, r.text);
+      if (!opts.groupId) remember(`t:${last}`);
+      record?.(opts.kind ?? "other", last, r.text, opts.groupId);
     }
     return last;
   }
 
-  // A message in a group chat. The caller logs the exchange (main.ts); returns the timestamp of the last part.
-  async function replyGroup(groupId: string, text: string, quote?: Quote): Promise<number> {
-    let q = quote;
-    let last = 0;
-    for (const part of chunk(text)) {
-      last = await signal.send(part, [], q, { groupId });
-      q = undefined;
-    }
-    return last;
-  }
-
-  // A voice message (an audio file). What was said is logged as text, so the log stays searchable.
-  async function sendVoice(file: string, spoken: string): Promise<number> {
-    const ts = await signal.send("", [], undefined, { attachments: [file] });
-    remember(`t:${ts}`);
-    record?.("chat", ts, `🔊 ${spoken}`);
+  // A voice message (an audio file), to the owner's chat or a group. What was said is logged as text, so the log stays searchable.
+  async function sendVoice(file: string, spoken: string, groupId?: string): Promise<number> {
+    const ts = await signal.send("", [], undefined, { attachments: [file], ...(groupId ? { groupId } : {}) });
+    if (!groupId) remember(`t:${ts}`);
+    record?.("chat", ts, `🔊 ${spoken}`, groupId);
     return ts;
   }
 
@@ -91,5 +82,5 @@ export function createOutbound(signal: SignalClient, record?: (kind: MessageKind
     }
   }
 
-  return { reply, replyPlain, replyGroup, sendVoice, sendBrief, sendBriefSummary, isOwnEcho };
+  return { reply, replyPlain, sendVoice, sendBrief, sendBriefSummary, isOwnEcho };
 }

@@ -72,9 +72,13 @@ The model decides **what** deserves an interruption; code decides whether it **m
 
 The skills are an SDK **plugin** that lives in the repo (`plugin/`, loaded with the `plugins` option, offered to the model with the `skills` option, so nothing in `~/.claude/skills` leaks in or costs context). They are written for anyone: calendars, Notion pages and writing style are read from the owner's `setup-calendars`, `setup-tasks`, `setup-meetings`, `voice-writing` notes. `src/notes.ts` knows these four required files (`SETUP_ITEMS`); the system prompts list the missing ones. In chat the agent then offers to run the `setup` skill, which finds things with the connectors (list calendars, search Notion, optionally read sent mail to learn the owner's voice), asks one small question at a time and saves each answer as a note. Runs with nobody to ask (brief, handler) skip what they cannot do without it and say so in one line. Which connectors a run could see (Notion, Google Calendar, mail) is recorded from its start-up message in `state/connectors.json` (`src/connectors.ts`), so a missing connector is reported as "not connected", with how to fix it, and never as "not set up"; setup items that depend on it are not listed as missing. Nothing personal is ever in the repo.
 
+## One pipeline for every conversation
+
+The private chat and each group go through the same code (`src/conversation.ts`, tested against a fake Signal client in `test/conversation.test.ts`). A `Conversation` is plain data made only by `owner()` and `group(id)`: it fixes the Signal target, the policy source (`chat` or `group`, so owner-only tools stay owner-only), the log, the notes folder, whether the participation gate and approvals apply. Everything else is shared: read receipts, voice messages in and out, quote context and threading, reactions, `[[silent]]`, typing, the error notice (rate-limited in groups) and one turn at a time per conversation. In groups the gate's debounce and "newest message wins" logic (`src/group.ts`) wait outside that queue, and the run itself goes through it. Approval answers stay a step before the owner's queue.
+
 ## Replies and threads
 
-Signal's reply (quote) works in both directions. When you reply to one of the assistant's messages (an alert, the brief's summary), the quoted text is passed to the chat as fenced data, so "move this one" has something to refer to. The assistant threads its own answer under your message only when that helps: you were already replying to something, or the answer took more than 20 seconds, so other messages may sit in between. Otherwise it answers plainly, to keep the Note to Self thread uncluttered.
+Signal's reply (quote) works in both directions. When you reply to one of the assistant's messages (an alert, the brief's summary), the quoted text is passed to the chat as fenced data, so "move this one" has something to refer to. The assistant threads its own answer under your message only when that helps: you were already replying to something, or the answer took more than 20 seconds, so other messages may sit in between. Otherwise it answers plainly, to keep the Note to Self thread uncluttered. In a group it always threads its answer under the message that addressed it, and a quoted message reaches it as fenced data too.
 
 The model can also answer with an emoji reaction instead of text for a thanks, an ok or a joke: it starts its reply with `[[react: 👍]]` (exactly one emoji, only at the very start; `src/reaction.ts`). The reaction goes on your message and replaces the ✅ status, and any text after it is still sent.
 
@@ -99,7 +103,7 @@ What is left is model time: a tool question is two or three model calls of 2 to 
 ## Project layout
 
 ```
-src/main.ts          wiring: Signal in, chat turns, heartbeat, brief, approvals
+src/main.ts          wiring: Signal in (to the conversation pipeline), heartbeat, brief, approvals
 packages/signal/     @ted-personal-assistant/signal: signal-cli JSON-RPC client, daemon supervision, local voice transcription (a workspace package, usable on its own)
 src/markdown.ts      Markdown → Signal text styles (UTF-16 offsets)
 src/outbound.ts      sending, chunking, echo guard
@@ -126,6 +130,7 @@ src/radar.ts         the proactive radar: periodic calendar and mail look-around
 src/radar-rules.ts   when the radar is due, which of its messages may be sent (pure, tested)
 src/messages.ts      the log of every message the assistant sent (with Signal timestamps): reaction lookup, "what I told you" context, size-bounded with a model-written summary of the oldest
 src/summarize.ts     the small model that writes that summary
+src/conversation.ts  the one pipeline for the private chat and every group: read receipt, voice in/out, record, run, [[react]]/[[voice]]/[[silent]], quote threading, typing, error notice, a serial queue per conversation. A conversation is data made only by owner() and group(id)
 src/group.ts         group chats: a participant with no private data; a cheap gate judges every message and reaction, always answers when addressed; its tools, nightly dream and prompt
 src/groupstore.ts    a group's own notes and history, in the same formats as the owner's but in separate folders
 src/voicereply.ts    the [[voice]] marker: the model chooses to answer by voice (the speech engine is packages/signal/src/tts.ts)

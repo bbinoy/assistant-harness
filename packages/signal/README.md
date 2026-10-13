@@ -34,7 +34,7 @@ await signal.connect();
 - `onMessage(h)` receives `IncomingMessage { from, text, timestamp, direct, quote?, audio?, group?, addressedToMe?, fromUuid?, fromName? }`. `direct` means a private one-to-one conversation with the bot (Note to Self, or its own chat), never a group. Mentions arrive as `@name` in `text`.
 - `onReaction(h)` receives `IncomingReaction { from, emoji, targetTimestamp, targetAuthor?, isRemove, direct }`. `isOwnReaction(r)` recognises the bot's own reactions when they echo back (in Note to Self they look exactly like the person's).
 - `send(text, textStyle?, quote?, { attachments?, groupId? })` returns the sent message's timestamp. `textStyle` is signal-cli's `start:length:STYLE` strings; `quote` threads a reply; an audio attachment is shown as a voice message; `groupId` sends to a group instead.
-- `react(emoji, { author, timestamp })`, `markRead(timestamp)` (the "seen" check), `typing(stop?, groupId?)`: best effort, never throw. `markRead` and `typing` are own-account mode only.
+- `react(emoji, { author, timestamp }, groupId?)`, `markRead(timestamp, from?)` (the "seen" check; `from` is the message's author, which in a group is not the peer), `typing(stop?, groupId?)`: best effort, never throw. `markRead` and `typing` are own-account mode only.
 - `groups()` lists the groups the bot is in with their members (number and account id).
 - `separateAccount` tells which mode you are in.
 

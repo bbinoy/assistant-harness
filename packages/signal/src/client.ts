@@ -197,11 +197,12 @@ export class SignalClient {
   }
 
   // Tells the person we have read their message (the "seen" check under it). Own-account mode only:
-  // in Note to Self there is nobody else to tell. Best effort.
-  async markRead(timestamp: number): Promise<void> {
+  // in Note to Self there is nobody else to tell. `from` is the message's author (default: the peer);
+  // in a group the receipt goes to whoever wrote it, not to the group. Best effort.
+  async markRead(timestamp: number, from?: string): Promise<void> {
     if (!this.peer) return;
     try {
-      await this.call("sendReceipt", { recipient: [this.peer], targetTimestamp: [timestamp], type: "read" });
+      await this.call("sendReceipt", { recipient: [from || this.peer], targetTimestamp: [timestamp], type: "read" });
     } catch (e) {
       console.error("read receipt failed:", (e as Error).message);
     }
@@ -303,12 +304,12 @@ export class SignalClient {
 
   // Reacts to a message with an emoji. A new reaction from us on the same
   // message replaces the previous one, so this doubles as a status indicator.
-  // Best-effort: a failed reaction is logged, never thrown.
-  async react(emoji: string, target: { author: string; timestamp: number }): Promise<void> {
+  // Best-effort: a failed reaction is logged, never thrown. In a group, pass its id.
+  async react(emoji: string, target: { author: string; timestamp: number }, groupId?: string): Promise<void> {
     this.ownReactions.set(`${target.timestamp}:${emoji}`, Date.now() + 5 * 60_000);
     try {
       await this.call("sendReaction", {
-        ...this.to(),
+        ...(groupId ? { groupId } : this.to()),
         emoji,
         targetAuthor: target.author,
         targetTimestamp: target.timestamp,
