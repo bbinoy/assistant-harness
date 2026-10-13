@@ -1,3 +1,4 @@
+// Starts and supervises `signal-cli daemon` on localhost, so the client has something to connect to.
 import { spawn } from "node:child_process";
 import net from "node:net";
 

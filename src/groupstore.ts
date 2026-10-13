@@ -20,25 +20,27 @@ import { summarizeWithHaiku } from "./summarize.ts";
 
 export const GROUPS_DIR = join(settings.memoryDir, "groups");
 export const GROUP_CATEGORIES = ["people", "context", "scheduling", "style"] as const;
-export const GROUP_NOTE_CHARS = 600; // members write these: shorter than the owner's
-export const GROUP_MAX_NOTES = 40;
 
 export const groupKey = (groupId: string): string => createHash("sha256").update(groupId).digest("hex").slice(0, 12);
 export const groupLogFile = (groupId: string): string => `logs/group-${groupKey(groupId)}.jsonl`;
 
 // The group's folder (made on first use); the name is kept up to date in meta.json.
+const named = new Map<string, string>(); // group id -> the name written in meta.json, so it is not re-read per message
 export function groupDir(groupId: string, name?: string): string {
   const dir = join(GROUPS_DIR, groupKey(groupId));
+  if (named.has(groupId) && (!name || named.get(groupId) === name) && existsSync(join(dir, "notes"))) return dir;
   mkdirSync(join(dir, "notes"), { recursive: true, mode: 0o700 });
   const meta = join(dir, "meta.json");
   const known = existsSync(meta) ? (JSON.parse(readFileSync(meta, "utf8")) as { name?: string }) : undefined;
-  if (!known || (name && known.name !== name)) writeFileSync(meta, JSON.stringify({ id: groupId, name: name ?? known?.name ?? "" }), { mode: 0o600 });
+  const final = name || known?.name || "";
+  if (!known || known.name !== final) writeFileSync(meta, JSON.stringify({ id: groupId, name: final }), { mode: 0o600 });
+  named.set(groupId, final);
   return dir;
 }
 
 export const groupScope = (groupId: string): Scope => {
   const dir = groupDir(groupId);
-  return { notesDir: join(dir, "notes"), backupsDir: join(dir, "backup"), categories: GROUP_CATEGORIES, index: false, maxNotes: GROUP_MAX_NOTES };
+  return { notesDir: join(dir, "notes"), backupsDir: join(dir, "backup"), categories: GROUP_CATEGORIES, index: false, maxNotes: settings.memoryMaxNotes };
 };
 
 export interface KnownGroup {
@@ -92,18 +94,18 @@ const NOTE_FILE = new RegExp(`^(${GROUP_CATEGORIES.join("|")})-[a-z0-9][a-z0-9-]
 
 export const groupNotes = (groupId: string, now = new Date()): Note[] => readNotes(now, join(groupDir(groupId), "notes"));
 
-// A member asked the assistant to remember something. Anyone in the group may, so this is bounded
-// instead of trusted: the right shape of name, a short text, a limited number of notes.
+// A member asked the assistant to remember something. The same limits as the owner's notes: a valid
+// file name, a note no longer than MAX_NOTE_CHARS, at most MEMORY_MAX_NOTES notes.
 export function saveGroupNote(groupId: string, n: { file: string; description: string; text: string; expires?: string }, now = new Date()): { ok: true; replaced: boolean } | { ok: false; error: string } {
   const text = n.text.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "").trim();
   const description = n.description.replace(/\s+/g, " ").trim().slice(0, 160);
   if (!NOTE_FILE.test(n.file)) return { ok: false, error: `name the file <category>-<short-slug>.md, with a category of ${GROUP_CATEGORIES.join(", ")} (lower case, dashes)` };
   if (!text || !description) return { ok: false, error: "give a description and the text to remember" };
-  if (text.length > Math.min(GROUP_NOTE_CHARS, MAX_NOTE_CHARS)) return { ok: false, error: `keep a note under ${GROUP_NOTE_CHARS} characters; split it or shorten it` };
+  if (text.length > MAX_NOTE_CHARS) return { ok: false, error: `keep a note under ${MAX_NOTE_CHARS} characters; split it or shorten it` };
   if (n.expires !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(n.expires)) return { ok: false, error: "expires must be a date, YYYY-MM-DD" };
   const dir = join(groupDir(groupId), "notes");
   const replaced = existsSync(join(dir, n.file));
-  if (!replaced && readdirSync(dir).filter((f) => f.endsWith(".md")).length >= GROUP_MAX_NOTES) return { ok: false, error: "memory for this group is full: forget something first" };
+  if (!replaced && readdirSync(dir).filter((f) => f.endsWith(".md")).length >= settings.memoryMaxNotes) return { ok: false, error: "memory for this group is full: forget something first" };
   writeFileSync(join(dir, n.file), noteContent(n.file, description, text, n.expires, now), { mode: 0o600 });
   return { ok: true, replaced };
 }
@@ -112,7 +114,7 @@ export const forgetGroupNote = (groupId: string, file: string) => forgetNote(fil
 
 // Pure: the group's notes as fenced data for the group's prompt.
 export function groupNotesBlock(notes: readonly Note[]): string {
-  const lines = notes.map((n) => `- [${n.category}] ${n.file}: ${n.text.replace(/\s*\n\s*/g, " ").slice(0, GROUP_NOTE_CHARS)}${n.expires ? ` (until ${n.expires})` : ""}`);
+  const lines = notes.map((n) => `- [${n.category}] ${n.file}: ${n.text.replace(/\s*\n\s*/g, " ").slice(0, MAX_NOTE_CHARS)}${n.expires ? ` (until ${n.expires})` : ""}`);
   return lines.length ? lines.join("\n") : "";
 }
 

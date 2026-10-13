@@ -20,7 +20,7 @@ import { readJson, writeJson } from "./state.ts";
 //   - a merge may only shorten what it merges; an expired note is checked against its date;
 //   - setup and voice notes are not the dream's to change;
 //   - a cap on changes per run, and a snapshot first so "undo the dream" puts everything back.
-// Everything it did is announced on the phone. Nothing it reads is mail: the owner's messages
+// It works silently: what it did is in the log (and the snapshot lets the owner say "undo the dream"). Nothing it reads is mail: the owner's messages
 // are the only ground for a note, so a crafted email cannot plant a memory.
 
 const STATE = "state/dream.json";
@@ -329,8 +329,6 @@ export const describePlan = (plan: Plan): string[] => {
   return plan.actions.map((a) => (a.kind === "delete" ? `➖ forgot ${a.file} (${a.why})` : `${icon[a.kind]} ${a.file}: ${a.description}`));
 };
 
-export const dreamAnnouncement = (plan: Plan): string =>
-  `🌙 While you slept I tidied my memory:\n${describePlan(plan).join("\n")}\n\nSay "undo the dream" and I'll put it back.`;
 
 // ---- the daily run ----
 
@@ -339,7 +337,7 @@ interface DreamState {
   lastRunAt?: string; // when the last real run started: what it covered ends here
 }
 
-export function createDreamer(deps: { notify: (text: string) => Promise<void>; run?: Runner }) {
+export function createDreamer(deps: { run?: Runner } = {}) {
   let inFlight: Promise<void> | undefined;
   const runner = deps.run ?? realRunner;
 
@@ -361,7 +359,7 @@ export function createDreamer(deps: { notify: (text: string) => Promise<void>; r
       for (const r of plan.rejected) console.log(`dream: rejected ${r.file || "(no file)"}: ${r.why}`);
       audit("dream_run", snap ? "changed" : "no-change", "dream", { actions: plan.actions.length, rejected: plan.rejected.length });
       console.log(`dream: ${plan.actions.length} change(s), ${plan.rejected.length} rejected`);
-      if (snap) await deps.notify(dreamAnnouncement(plan));
+      if (snap) console.log(`dream: ${describePlan(plan).join("; ")}`); // silent: logged here and in audit.jsonl, undoable from chat
     } catch (e) {
       console.error("dream: failed:", (e as Error).message);
       audit("dream_run", "failed", "dream", { error: (e as Error).message.slice(0, 200) });

@@ -10,7 +10,8 @@ import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createDreamer } from "./dream.ts";
-import { createGroupDreamer, groupName, groupTurn, ownerInGroup } from "./group.ts";
+import { groupName, groupTurn, ownerInGroup } from "./group.ts";
+import { createGroupDreamer } from "./groupdream.ts";
 import { groupDir, recentGroupLines, recordGroup } from "./groupstore.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
@@ -21,7 +22,7 @@ import { Mailbird } from "./mailbird.ts";
 import { createProposer } from "./propose.ts";
 import { createRadar } from "./radar.ts";
 import { createOutbound } from "./outbound.ts";
-import { ASSISTANT, settings } from "./settings.ts";
+import { settings } from "./settings.ts";
 import { openLog } from "./state.ts";
 import { ensureSignalDaemon, MAX_SPOKEN_CHARS, SignalClient, synthesize, transcribe, ttsReady, voiceReady, type IncomingMessage, type IncomingReaction } from "@ted-personal-assistant/signal";
 
@@ -238,8 +239,8 @@ setInterval(() => prepareChat(approve, say), 25 * 60_000).unref();
 const handler = createHandler({ approve, notify, propose: proposer.show });
 handler.resume();
 
-const dreamer = createDreamer({ notify });
-const groupDreamer = createGroupDreamer({ notify });
+const dreamer = createDreamer();
+const groupDreamer = createGroupDreamer();
 const radar = createRadar({ approve, notify: say, briefDue: isBriefDue });
 
 startHeartbeat({

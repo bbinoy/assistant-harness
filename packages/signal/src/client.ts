@@ -1,5 +1,11 @@
 import net from "node:net";
 
+// The Signal client: a JSON-RPC 2.0 connection to a running `signal-cli daemon` (one JSON object per line over
+// TCP), plus the pure functions that turn what signal-cli reports into our own small types.
+//   interpretEnvelope  pure: a "receive" notification -> a message or a reaction (tested without any network)
+//   SignalClient       the connection: receive, send, react, read receipts, typing, group list
+// Two modes, picked by the constructor (see README): Note to Self, or the assistant's own account.
+
 // The message a reply points at (Signal's "reply" / quote).
 export interface Quote {
   text: string;

@@ -1,3 +1,4 @@
+// The public API of @ted-personal-assistant/signal. See README.md.
 export { SignalClient, parseQuote, parseAudio, withMentions, interpretEnvelope, MAX_AUDIO_BYTES } from "./client.ts";
 export type { Quote, IncomingMessage, IncomingReaction, AudioRef } from "./client.ts";
 export { ensureSignalDaemon } from "./daemon.ts";

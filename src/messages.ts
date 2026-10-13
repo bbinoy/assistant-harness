@@ -1,4 +1,5 @@
-import { readText, writeText, appendLine } from "./state.ts";
+import { statSync } from "node:fs";
+import { appendLine, dataPath, readText, writeText } from "./state.ts";
 import { settings } from "./settings.ts";
 
 // Every message the assistant sends on Signal, with its Signal timestamp: one append-only file.
@@ -111,6 +112,11 @@ export function limitWords(text: string, words: number): string {
 // one run at a time. Messages sent while the summary is being written are kept.
 export async function compactIfNeeded(summarize: Summarize, maxBytes = settings.messageLogMb * 1_000_000, file: string = FILE): Promise<boolean> {
   if (compacting.has(file)) return false;
+  try {
+    if (statSync(dataPath(file)).size <= maxBytes) return false; // the common case: nothing to read
+  } catch {
+    return false;
+  }
   const lines = (readText(file) ?? "").split("\n").filter(Boolean);
   const drop = planCompaction(lines, maxBytes);
   if (drop === 0) return false;

@@ -1,7 +1,7 @@
 {
   "name": "@ted-personal-assistant/signal",
   "version": "0.1.0",
-  "description": "A small, typed client for signal-cli's JSON-RPC daemon: Note to Self, quotes, reactions, voice notes (local whisper.cpp transcription), echo guards.",
+  "description": "A small, dependency-free client for signal-cli's JSON-RPC daemon: Note to Self or a separate assistant account, quotes, reactions, groups, read receipts, typing, voice notes in (local whisper.cpp) and out (local Kokoro).",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -14,6 +14,17 @@
     "signal",
     "signal-cli",
     "json-rpc",
-    "whisper"
-  ]
+    "whisper",
+    "kokoro",
+    "tts",
+    "signal-bot"
+  ],
+  "files": [
+    "src",
+    "scripts",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  }
 }

@@ -1,17 +1,14 @@
 import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { z } from "zod";
 import { audit } from "./audit.ts";
 import { clockLine } from "./brief.ts";
 import { overBudget, recordCost } from "./budget.ts";
-import { dreamOver, groupConversation, groupDreamPrompt, describePlan, readNoteFiles, realRunner as dreamRunner, type Runner as DreamRunner } from "./dream.ts";
 import { fence } from "./fence.ts";
-import { forgetGroupNote, groupHistorySince, groupNotes, groupNotesBlock, groupScope, listGroups, recentGroupLines, saveGroupNote, searchGroupHistory } from "./groupstore.ts";
+import { forgetGroupNote, groupNotes, groupNotesBlock, saveGroupNote, searchGroupHistory } from "./groupstore.ts";
 import { readNotes } from "./notes.ts";
-import { isPaused, localDay } from "./pause.ts";
+import { isPaused } from "./pause.ts";
 import { classify } from "./policy.ts";
-import { dreamSystem, groupSystem } from "./persona.ts";
+import { groupSystem } from "./persona.ts";
 import { OWNER, settings } from "./settings.ts";
 
 // Group chats. In its own Signal account the assistant can be added to a group. There it is a friendly
@@ -53,15 +50,6 @@ export function mayReply(groupId: string, now = Date.now(), perHour = settings.g
   return true;
 }
 
-// Members can plant notes, so writing them is bounded as well as validated (groupstore.ts): a few a hour.
-const wrote = new Map<string, number[]>();
-export function mayWriteNote(groupId: string, now = Date.now(), perHour = 12): boolean {
-  const recent = (wrote.get(groupId) ?? []).filter((t) => now - t < 3600_000);
-  if (recent.length >= perHour) return false;
-  wrote.set(groupId, [...recent, now]);
-  return true;
-}
-
 // Is the owner in this group? Looked up from signal-cli's member list, remembered for a few minutes.
 // Anything that goes wrong means no: a group we cannot vouch for gets no answers and no logging.
 const memberCache = new Map<string, { at: number; ok: boolean; name: string }>();
@@ -97,11 +85,10 @@ export function createGroupServer(groupId: string) {
         {
           file: z.string().describe("<category>-<short-slug>.md with a category of people, context, scheduling or style, e.g. people-eve.md"),
           description: z.string().describe("One line saying what the note is"),
-          text: z.string().describe("The fact, plainly, in third person, under 600 characters"),
+          text: z.string().describe("The fact, plainly, in third person, under 1200 characters"),
           expires: z.string().optional().describe("YYYY-MM-DD, for something temporary"),
         },
         async (a) => {
-          if (!mayWriteNote(groupId)) return reply("That is a lot of notes in a short time. Try again later.", true);
           const r = saveGroupNote(groupId, a);
           audit("group_note", r.ok ? (r.replaced ? "updated" : "saved") : "refused", "group");
           return r.ok ? reply(`${r.replaced ? "Updated" : "Saved"} ${a.file}.`) : reply(r.error, true);
@@ -197,51 +184,3 @@ export async function groupTurn(m: GroupMessage, deps: GroupDeps, now = new Date
     return undefined;
   }
 }
-
-// ---- each group's dream: the same tidy-up as the owner's, over that group's notes and words only ----
-
-const MIN_NEW_LINES = 3; // a group that said next to nothing since the last time is left alone
-const MAX_GROUPS_PER_NIGHT = 5;
-
-interface GroupDreamState {
-  day?: string;
-  lastRunAt?: string;
-}
-
-export function createGroupDreamer(deps: { notify: (text: string) => Promise<void>; run?: DreamRunner }) {
-  let inFlight: Promise<void> | undefined;
-
-  async function once(now: Date): Promise<void> {
-    if (!settings.dream || isPaused(now) || overBudget().over) return;
-    const today = localDay(now);
-    const told: string[] = [];
-    let dreamt = 0;
-    for (const g of listGroups()) {
-      if (dreamt >= MAX_GROUPS_PER_NIGHT) break;
-      const stateFile = join(g.dir, "dream.json");
-      let state: GroupDreamState = {};
-      try { state = JSON.parse(readFileSync(stateFile, "utf8")); } catch { /* first time */ }
-      if (state.day === today) continue;
-      const messages = groupHistorySince(g.id, state.lastRunAt);
-      const { memberText } = groupConversation(messages);
-      if (messages.filter((x) => x.kind === "member").length < MIN_NEW_LINES) continue;
-      writeFileSync(stateFile, JSON.stringify({ ...state, day: today }), { mode: 0o600 }); // before the run: no retry loops
-      dreamt++;
-      try {
-        const scope = groupScope(g.id);
-        const { plan, snapshot } = await dreamOver(scope, groupDreamPrompt(now, readNoteFiles(scope.notesDir), messages, g.name || "a group"), dreamSystem("group"), memberText, now, deps.run ?? dreamRunner);
-        writeFileSync(stateFile, JSON.stringify({ day: today, lastRunAt: now.toISOString() }), { mode: 0o600 });
-        for (const r of plan.rejected) console.log(`group dream: rejected ${r.file || "(no file)"}: ${r.why}`);
-        audit("group_dream", snapshot ? "changed" : "no-change", "dream", { actions: plan.actions.length, rejected: plan.rejected.length });
-        if (snapshot) told.push(`📝 ${g.name || "a group"}:\n${describePlan(plan).join("\n")}`);
-      } catch (e) {
-        console.error("group dream: failed:", (e as Error).message);
-        audit("group_dream", "failed", "dream", { error: (e as Error).message.slice(0, 200) });
-      }
-    }
-    if (told.length) await deps.notify(`🌙 I tidied what I remember about your groups:\n\n${told.join("\n\n")}\n\nSay "undo the dream for <group name>" and I'll put one back.`);
-  }
-
-  return { run: (now = new Date()) => (inFlight ??= once(now).finally(() => (inFlight = undefined))) };
-}
-

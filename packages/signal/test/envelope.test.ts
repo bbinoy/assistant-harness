@@ -51,3 +51,32 @@ test("an attachment-only voice message is a message with audio and no text", () 
   assert.equal(m.text, "");
   assert.deepEqual(m.audio, { id: "abc", size: 100 });
 });
+
+// ---- groups (own-account mode) ----
+const BOTACCT = "00000000-0000-4000-8000-000000000001";
+const GID = "Zm9vYmFyZm9vYmFyZm9vYmFy";
+const peerCh = { account: BOTACCT, peer: ME };
+import { withMentions } from "../src/client.ts";
+
+test("groups: a group message is never direct; it says whether it is addressed to the assistant", () => {
+  const plain = { sourceNumber: "+15555550105", sourceUuid: "u-1", sourceName: "Eve", timestamp: 1, dataMessage: { message: "hello all", timestamp: 1, groupInfo: { groupId: GID } } };
+  const m = interpretEnvelope(plain, peerCh).message!;
+  assert.equal(m.direct, false);
+  assert.equal(m.group?.id, GID);
+  assert.equal(m.addressedToMe, false);
+  assert.equal(m.fromName, "Eve");
+  const mention = { ...plain, dataMessage: { ...plain.dataMessage, message: "￼ what's the weather?", mentions: [{ uuid: BOTACCT, name: "Ted", start: 0, length: 1 }] } };
+  const mm = interpretEnvelope(mention, peerCh).message!;
+  assert.equal(mm.addressedToMe, true);
+  assert.equal(mm.text, "@Ted what's the weather?");
+  const reply = { ...plain, dataMessage: { ...plain.dataMessage, quote: { id: 5, author: BOTACCT, text: "earlier" } } };
+  assert.equal(interpretEnvelope(reply, peerCh).message!.addressedToMe, true);
+  const other = { ...plain, dataMessage: { ...plain.dataMessage, quote: { id: 5, author: "u-9", text: "x" } } };
+  assert.equal(interpretEnvelope(other, peerCh).message!.addressedToMe, false);
+  // in Note to Self mode groups are not ours at all
+  assert.equal(interpretEnvelope(plain, { account: ME }).message?.group, undefined);
+  // the owner writing in a group is still not "direct"
+  assert.equal(interpretEnvelope({ ...plain, sourceNumber: ME }, peerCh).message!.direct, false);
+  assert.equal(withMentions("a ￼ b", [{ start: 2, name: "Ted" }]), "a @Ted b");
+});
+

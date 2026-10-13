@@ -1,53 +1,53 @@
 # @ted-personal-assistant/signal
 
-A small, typed client for [signal-cli](https://github.com/AsamK/signal-cli)'s JSON-RPC daemon, extracted from the Ted personal assistant. Zero dependencies, Node 24+ (runs TypeScript directly).
+A small client for [signal-cli](https://github.com/AsamK/signal-cli)'s JSON-RPC daemon, for building a personal assistant or bot on Signal. No dependencies, Node 24+ (it runs TypeScript directly). Extracted from the Ted personal assistant; everything in this folder works on its own.
 
-It supports two ways of talking to a person, chosen by one constructor argument:
+## Two ways to talk to someone
 
-| Mode | The assistant is | The person sees | Constructed with |
+| Mode | The bot is | The person sees | Constructor |
 |---|---|---|---|
 | **Note to Self** (default) | a linked device of *their* Signal account | a chat with themselves | `new SignalClient(host, port, theirNumber)` |
-| **Own account** | a separate Signal account with its own name | a contact they chat with | `new SignalClient(host, port, assistantAccount, { number: theirNumber })` |
+| **Own account** | a separate Signal account with its own name | a contact (and it can join groups) | `new SignalClient(host, port, botAccount, { number: theirNumber })` |
 
-Own-account mode needs a Signal account for the assistant: a spare number, or Signal Login (no number, Android). See the app's [SIGNAL-ACCOUNT.md](../../docs/SIGNAL-ACCOUNT.md) for creating and naming it with signal-cli.
+Own-account mode needs a Signal account for the bot (a spare number, or Signal Login without one), created with signal-cli. The app's [SIGNAL-ACCOUNT.md](../../docs/SIGNAL-ACCOUNT.md) shows how.
 
 ## Use
 
 ```ts
 import { SignalClient, ensureSignalDaemon } from "@ted-personal-assistant/signal";
 
-const me = process.env.SIGNAL_NUMBER!;        // your number, international format
-const bot = process.env.SIGNAL_ACCOUNT;       // optional: the assistant's own account (number or account key)
+const me = process.env.SIGNAL_NUMBER!;     // you, international format
+const bot = process.env.SIGNAL_ACCOUNT;    // optional: the bot's own account (a number or an account id)
 
 await ensureSignalDaemon(bot ?? me, "127.0.0.1", 7583);   // starts and supervises `signal-cli daemon`
 const signal = new SignalClient("127.0.0.1", 7583, bot ?? me, bot ? { number: me } : undefined);
 
 signal.onMessage((m) => {
-  if (m.direct && m.from === me) signal.send(`you said: ${m.text}`); // YOU decide who may talk to it
-});
-signal.onReaction((r) => {
-  if (signal.isOwnReaction(r)) return;        // our own status icons come back as reactions
-  console.log(r.emoji, "on message", r.targetTimestamp, "by", r.targetAuthor);
+  if (m.direct && m.from === me) signal.send(`you said: ${m.text}`);   // YOU decide who may talk to it
 });
 await signal.connect();
 ```
 
 ## API
 
-- **`SignalClient`**
-  - `onMessage(h)`, `onReaction(h)`: `IncomingMessage { from, text, timestamp, direct, quote?, audio? }` and `IncomingReaction { from, emoji, targetTimestamp, isRemove, direct, targetAuthor? }`. **`direct`** means a one-to-one conversation with the assistant: your Note to Self (default mode) or the assistant's own chat with you (own-account mode). Groups and other people's chats are never `direct`. Filter on it and on `from`.
-  - `send(text, textStyle?, quote?)` → the sent message's timestamp. `textStyle` is signal-cli's `start:length:STYLE` strings; `quote` threads the reply under a message.
-  - `react(emoji, { author, timestamp })`: best effort; a new reaction replaces the previous one, so it works as a status icon. `isOwnReaction(r)` recognises our own reactions when they echo back (in Note to Self they look exactly like the person's).
-  - `markRead(timestamp)`: sends a read receipt (the "seen" check) for a message. Own-account mode only.
-  - `typing(stop?)`: the "typing…" indicator. Own-account mode only (Signal does not show it in Note to Self); a no-op otherwise.
-  - `separateAccount`: which mode you are in.
-- **`interpretEnvelope(envelope, { account, peer?, peerAci? })`**: the pure function behind the above, exported for tests. In Note to Self mode the person's messages arrive as something they sent from another device; in own-account mode they are ordinary incoming messages, matched to the person by number, or by account id (`peerAci`) when Signal hides their number.
-- **Voice notes**: attachments are parsed safely (`parseAudio`: plain file ids only, no paths, capped at 25 MB). `transcribe(file, modelPath)` turns audio into text locally with ffmpeg and whisper.cpp, nothing leaves the machine; `voiceReady(modelPath)` says what is missing.
-- **Speaking**: `synthesize(text, { dir, voice, speed })` makes a voice message (AAC) locally with [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) in its own Python environment (installed by the app's `scripts/setup-tts.sh`); `send("", [], undefined, { attachments: [file] })` sends it, and Signal shows it as a voice message. `ttsReady(dir)` says what is missing.
-- **`parseQuote`**, **`ensureSignalDaemon(account, host, port, logFd?)`**: the daemon listens on 127.0.0.1 only (its socket is unauthenticated); if it dies, the process exits so a supervisor can restart everything.
+**`SignalClient`**
+- `onMessage(h)` receives `IncomingMessage { from, text, timestamp, direct, quote?, audio?, group?, addressedToMe?, fromUuid?, fromName? }`. `direct` means a private one-to-one conversation with the bot (Note to Self, or its own chat), never a group. Mentions arrive as `@name` in `text`.
+- `onReaction(h)` receives `IncomingReaction { from, emoji, targetTimestamp, targetAuthor?, isRemove, direct }`. `isOwnReaction(r)` recognises the bot's own reactions when they echo back (in Note to Self they look exactly like the person's).
+- `send(text, textStyle?, quote?, { attachments?, groupId? })` returns the sent message's timestamp. `textStyle` is signal-cli's `start:length:STYLE` strings; `quote` threads a reply; an audio attachment is shown as a voice message; `groupId` sends to a group instead.
+- `react(emoji, { author, timestamp })`, `markRead(timestamp)` (the "seen" check), `typing(stop?, groupId?)`: best effort, never throw. `markRead` and `typing` are own-account mode only.
+- `groups()` lists the groups the bot is in with their members (number and account id).
+- `separateAccount` tells which mode you are in.
 
-## Safety
+**Groups** (own-account mode): a group message has `group: { id }` and `direct: false`. `addressedToMe` is true when it @mentions the bot or replies to one of its messages, so a bot can stay silent otherwise. The package never decides who may talk to the bot: check `from`/`fromUuid` and the group's members yourself.
 
-The client does not decide who may talk to your assistant. It reports `from` and `direct`; the application must check both against the one person it serves (the app does, in `src/guards.ts`). In own-account mode only the configured number or account id is ever `direct`.
+**Voice**
+- In: `parseAudio` accepts only a plain audio attachment id (no paths) under 25 MB; `transcribe(file, whisperModelPath)` turns it into text locally with ffmpeg and [whisper.cpp](https://github.com/ggerganov/whisper.cpp); `voiceReady(model)` says what is missing.
+- Out: `synthesize(text, { dir, voice, speed })` makes an AAC voice message locally with [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) (its Python environment and model live in `dir`; the app's `scripts/setup-tts.sh` installs them); `ttsReady(dir)` says what is missing. Send the file with `send("", [], undefined, { attachments: [file] })`.
 
-Not yet published to npm; the name and scope are placeholders. Tests: `npm test` at the repo root runs `test/*.test.ts` in this package too.
+**Also exported:** `interpretEnvelope(envelope, { account, peer?, peerAci? })` (the pure function behind the receiving side; start here to understand or test it), `withMentions`, `parseQuote`, `ensureSignalDaemon(account, host, port, logFd?)` (localhost only: signal-cli's socket is unauthenticated; if the daemon dies the process exits so a supervisor restarts everything).
+
+## Files
+
+`src/client.ts` the client and `interpretEnvelope` · `src/daemon.ts` daemon supervision · `src/transcribe.ts` speech to text · `src/tts.ts` + `scripts/kokoro-say.py` text to speech · `test/` run with `npm test` in this folder.
+
+Not yet published to npm; the name and scope are placeholders.

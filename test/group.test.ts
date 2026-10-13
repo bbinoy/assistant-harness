@@ -4,34 +4,10 @@ import { groupName, groupPrompt, groupTurn, mayReply, ownerInGroup, speaker } fr
 import { OWNER as OWNER_NAME } from "../src/settings.ts";
 import { classify } from "../src/policy.ts";
 import { settings } from "../src/settings.ts";
-import { interpretEnvelope, withMentions } from "@ted-personal-assistant/signal";
 
 const BOT = "00000000-0000-4000-8000-000000000001"; // the assistant's account id
 const OWNER = "+10000000000";
-const peer = { account: BOT, peer: OWNER };
 const GID = "Zm9vYmFyZm9vYmFyZm9vYmFy";
-
-test("groups: a group message is never direct; it says whether it is addressed to the assistant", () => {
-  const plain = { sourceNumber: "+15555550105", sourceUuid: "u-1", sourceName: "Eve", timestamp: 1, dataMessage: { message: "hello all", timestamp: 1, groupInfo: { groupId: GID } } };
-  const m = interpretEnvelope(plain, peer).message!;
-  assert.equal(m.direct, false);
-  assert.equal(m.group?.id, GID);
-  assert.equal(m.addressedToMe, false);
-  assert.equal(m.fromName, "Eve");
-  const mention = { ...plain, dataMessage: { ...plain.dataMessage, message: "￼ what's the weather?", mentions: [{ uuid: BOT, name: "Ted", start: 0, length: 1 }] } };
-  const mm = interpretEnvelope(mention, peer).message!;
-  assert.equal(mm.addressedToMe, true);
-  assert.equal(mm.text, "@Ted what's the weather?");
-  const reply = { ...plain, dataMessage: { ...plain.dataMessage, quote: { id: 5, author: BOT, text: "earlier" } } };
-  assert.equal(interpretEnvelope(reply, peer).message!.addressedToMe, true);
-  const other = { ...plain, dataMessage: { ...plain.dataMessage, quote: { id: 5, author: "u-9", text: "x" } } };
-  assert.equal(interpretEnvelope(other, peer).message!.addressedToMe, false);
-  // in Note to Self mode groups are not ours at all
-  assert.equal(interpretEnvelope(plain, { account: OWNER }).message?.group, undefined);
-  // the owner writing in a group is still not "direct"
-  assert.equal(interpretEnvelope({ ...plain, sourceNumber: OWNER }, peer).message!.direct, false);
-  assert.equal(withMentions("a ￼ b", [{ start: 2, name: "Ted" }]), "a @Ted b");
-});
 
 test("groups: web search and its own group's memory, nothing else", () => {
   assert.equal(classify("WebSearch", { query: "x" }, "group"), "allow");
@@ -100,7 +76,8 @@ import { applyPlan, groupConversation, planOps, undoLatest } from "../src/dream.
 import { forgetGroupNote, groupDir, groupLogFile, groupNotes, groupNotesBlock, groupScope, listGroups, recentGroupLines, saveGroupNote, searchGroupHistory } from "../src/groupstore.ts";
 import { recordMessage } from "../src/messages.ts";
 import { dataPath } from "../src/state.ts";
-import { createGroupServer, createGroupDreamer, mayWriteNote } from "../src/group.ts";
+import { createGroupServer } from "../src/group.ts";
+import { createGroupDreamer } from "../src/groupdream.ts";
 
 const G1 = "R3JvdXAxR3JvdXAxR3JvdXAx";
 const G2 = "R3JvdXAyR3JvdXAyR3JvdXAy";
@@ -121,15 +98,12 @@ test("group notes: anyone may save and forget, within bounds, and each group has
   assert.equal(groupNotes(G2).length, 0); // another group never sees it
   assert.match(groupNotesBlock(groupNotes(G1)), /vegan now/);
   for (const bad of [{ file: "../x.md" }, { file: "setup-calendars.md" }, { file: "people-EVE.md" }, { file: "people-x.txt" }, { file: "MEMORY.md" }]) assert.equal(saveGroupNote(G1, { description: "d", text: "t", ...bad }).ok, false, bad.file);
-  assert.equal(saveGroupNote(G1, { file: "context-long.md", description: "d", text: "x".repeat(700) }).ok, false);
+  assert.equal(saveGroupNote(G1, { file: "context-long.md", description: "d", text: "x".repeat(1300) }).ok, false); // the same limit as the owner's notes
   assert.equal(saveGroupNote(G1, { file: "context-x.md", description: "d", text: "t", expires: "tomorrow" }).ok, false);
   assert.equal(forgetGroupNote(G1, "people-eve.md").ok, true);
   assert.equal(groupNotes(G1).length, 0);
   assert.equal(forgetGroupNote(G1, "../../notes/style-ted-lasso.md").ok, false); // only plain names, inside the group's own folder
   assert.ok(!existsSync(`${groupDir(G1)}/../../notes/x`));
-  const t = Date.now();
-  for (let i = 0; i < 12; i++) mayWriteNote("burst-group", t);
-  assert.equal(mayWriteNote("burst-group", t), false);
 });
 
 test("group history: each group has its own log, searchable, with recent lines for context", () => {
@@ -168,20 +142,17 @@ test("group dream: works over one group's notes and words only, and can be undon
   assert.deepEqual(groupNotes(G1, new Date("2026-09-15")).map((n) => n.file), ["context-old.md"]);
 });
 
-test("group dream: nightly, only groups with enough new talk, one summary to the owner", async () => {
+test("group dream: nightly, only groups with enough new talk, silently", async () => {
   fresh();
   groupDir(G1, "Football");
   groupDir(G2, "Book club");
   const lines = ["a", "b", "c"];
   lines.forEach((t, i) => recordMessage("member", 10 + i, `Eve (a member): we play on Thursdays ${t} ${"x".repeat(20)}`, new Date(), groupLogFile(G1)));
   recordMessage("member", 99, "Zed (a member): one lonely line", new Date(), groupLogFile(G2));
-  const told: string[] = [];
   let calls = 0;
-  const dreamer = createGroupDreamer({ notify: async (t) => void told.push(t), run: async () => (calls++, { ops: [{ op: "write", file: "scheduling-games.md", description: "games", text: "Games are on Thursdays.", evidence: "we play on Thursdays" }] }) });
+  const dreamer = createGroupDreamer({ run: async () => (calls++, { ops: [{ op: "write", file: "scheduling-games.md", description: "games", text: "Games are on Thursdays.", evidence: "we play on Thursdays" }] }) });
   await dreamer.run(new Date());
   assert.equal(calls, 1); // the quiet group was left alone
-  assert.equal(told.length, 1);
-  assert.match(told[0]!, /Football/);
   assert.equal(groupNotes(G1).length, 1);
   await dreamer.run(new Date());
   assert.equal(calls, 1); // once a day

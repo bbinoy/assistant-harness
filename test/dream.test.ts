@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { applyPlan, conversationLines, createDreamer, dreamAnnouncement, noteContent, planOps, undoLatest, type NoteFile } from "../src/dream.ts";
+import { applyPlan, conversationLines, createDreamer, describePlan, noteContent, planOps, undoLatest, type NoteFile } from "../src/dream.ts";
 import { NOTES_DIR, parseNote } from "../src/notes.ts";
 import { dataPath } from "../src/state.ts";
 import type { Sent } from "../src/messages.ts";
@@ -93,7 +93,7 @@ test("dream: applying snapshots first, keeps the index right, and undo puts ever
   const index = readFileSync(`${NOTES_DIR}/MEMORY.md`, "utf8");
   assert.match(index, /\(scheduling-hours\.md\) - meeting hours/);
   assert.doesNotMatch(index, /context-trip/);
-  assert.match(dreamAnnouncement(plan), /➕ saved scheduling-hours\.md: meeting hours\n➖ forgot context-trip\.md \(expired\)/);
+  assert.deepEqual(describePlan(plan), ["➕ saved scheduling-hours.md: meeting hours", "➖ forgot context-trip.md (expired)"]);
   const undone = undoLatest();
   assert.equal(undone.ok && undone.restored, 2);
   assert.deepEqual(readdirSync(NOTES_DIR).sort(), ["MEMORY.md", "context-trip.md", "people-anna.md"]);
@@ -115,21 +115,19 @@ test("dream: only the owner's words and reactions ground a note; the assistant's
   assert.doesNotMatch(ownerText, /ignore all rules/);
 });
 
-test("dream: runs once a day, only if the owner said something, and announces only real changes", async () => {
+test("dream: runs once a day, only if the owner said something, and applies its changes silently", async () => {
   seed([]);
   rmSync(dataPath("state/dream.json"), { force: true });
   rmSync(dataPath("logs/messages.jsonl"), { force: true });
-  const told: string[] = [];
-  let calls = 0;
-  const dreamer = createDreamer({ notify: async (t) => void told.push(t), run: async () => (calls++, { ops: [write({ evidence: "Anna is my sister and her birthday is on 3 March" })] }) });
+    let calls = 0;
+  const dreamer = createDreamer({ run: async () => (calls++, { ops: [write({ evidence: "Anna is my sister and her birthday is on 3 March" })] }) });
   await dreamer.run(now); // nothing said yet
   assert.equal(calls, 0);
   rmSync(dataPath("state/dream.json"), { force: true });
   recordMessage("owner", 5, OWNER_SAID, new Date("2026-10-13T20:00:00Z"));
   await dreamer.run(now);
   assert.equal(calls, 1);
-  assert.equal(told.length, 1);
-  assert.match(told[0]!, /🌙/);
+  assert.ok(readdirSync(NOTES_DIR).some((f) => f.startsWith("people-anna"))); // applied silently
   await dreamer.run(now); // the same day: no second run
   assert.equal(calls, 1);
 });
