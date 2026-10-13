@@ -232,7 +232,7 @@ export function createGroupBrain(brain: Brain) {
 
   return async function onMessage(m: GroupMessage, now = new Date()): Promise<void> {
     if (!(await brain.vouch(m.groupId))) return;
-    const line = m.reaction ? `${speaker(m)} reacted ${m.reaction.emoji} to: ${m.reaction.on.slice(0, 200)}` : `${speaker(m)}: ${m.text.slice(0, MAX_TEXT)}`;
+    const line = m.reaction ? `${speaker(m)} reacted ${m.reaction.emoji.slice(0, 16)} to: ${m.reaction.on.slice(0, 200)}` : `${speaker(m)}: ${m.text.slice(0, MAX_TEXT)}`;
     if (!m.reaction && !m.text.trim()) return;
     brain.record(m.groupId, "member", m.timestamp, line);
     const direct = m.addressedToMe;
