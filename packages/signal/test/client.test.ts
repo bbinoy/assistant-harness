@@ -3,11 +3,6 @@ import assert from "node:assert/strict";
 import { SignalClient } from "../src/client.ts";
 import { FakeSignalDaemon, FakeRpcError, type FakeRequest } from "../src/testing.ts";
 
-// Until the client stops exiting the process when its socket closes, the tests that end by closing the fake must not
-// take the test runner down with them.
-const realExit = process.exit;
-process.exit = ((code?: number) => (code === 1 ? undefined : realExit(code))) as typeof process.exit; // only the client's exit(1)
-
 type Req = FakeRequest;
 const RpcError = FakeRpcError;
 
@@ -187,4 +182,43 @@ test("client: warnings go to the injected logger (and nowhere by default)", asyn
   assert.match(lines.join("|"), /read receipt failed: nope/);
   assert.match(lines.join("|"), /unparseable line/);
   assert.match(lines.join("|"), /reaction x failed: nope/);
+});
+
+test("client: when signal-cli goes away onClose fires once and pending requests are rejected", async () => {
+  const held: Req[] = [];
+  const { d, c } = await connected(undefined, (r) => (held.push(r), undefined));
+  const closes: { requested: boolean }[] = [];
+  c.onClose((info) => closes.push(info));
+  const p = c.send("x");
+  await until(() => held.length === 1);
+  d.dropConnections();
+  await assert.rejects(p, /socket closed/);
+  await until(() => closes.length === 1);
+  assert.equal(closes[0]!.requested, false);
+  await assert.rejects(c.send("y"), /closed/);
+});
+
+test("client: close() ends the connection on purpose", async () => {
+  const { d, c } = await connected();
+  const closes: { requested: boolean }[] = [];
+  c.onClose((info) => closes.push(info));
+  c.close();
+  c.close();
+  await until(() => closes.length === 1);
+  assert.equal(closes[0]!.requested, true);
+  await until(() => d.connections === 0);
+});
+
+test("client: a socket error after connecting is reported, not thrown", async () => {
+  const { d, c } = await connected();
+  const closes: { error?: Error }[] = [];
+  c.onClose((info) => closes.push(info));
+  d.resetConnections();
+  await until(() => closes.length === 1);
+  assert.ok(closes[0]!.error, "the reset is passed on");
+});
+
+test("client: sending before connect() says so", async () => {
+  const c = new SignalClient("127.0.0.1", 1, ME);
+  await assert.rejects(c.send("x"), /not connected/);
 });

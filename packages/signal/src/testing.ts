@@ -94,6 +94,11 @@ export class FakeSignalDaemon {
     for (const s of this.sockets) s.destroy();
   }
 
+  // Resets every connection (the client sees ECONNRESET, a socket error, then the close).
+  resetConnections() {
+    for (const s of this.sockets) s.resetAndDestroy();
+  }
+
   async close(): Promise<void> {
     this.dropConnections();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));

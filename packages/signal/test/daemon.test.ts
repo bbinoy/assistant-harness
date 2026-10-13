@@ -1,0 +1,43 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ensureSignalDaemon } from "../src/daemon.ts";
+import { FakeSignalDaemon } from "../src/testing.ts";
+
+test("daemon: a daemon that already listens is reused, and stop() leaves it alone", async () => {
+  const fake = await FakeSignalDaemon.start();
+  try {
+    const d = await ensureSignalDaemon("+10000000000", fake.host, fake.port);
+    assert.equal(d.started, false);
+    d.stop();
+    await new Promise((r) => setTimeout(r, 20));
+    // still listening
+    await new Promise<void>((resolve, reject) => net.connect(fake.port, fake.host).once("connect", function (this: net.Socket) { this.destroy(); resolve(); }).once("error", reject));
+  } finally {
+    await fake.close();
+  }
+});
+
+test("daemon: a signal-cli that dies at start is an error, not a hang", { skip: process.platform === "win32" && "needs a shell script" }, async () => {
+  // A stand-in `signal-cli` on PATH that exits at once.
+  const bin = mkdtempSync(join(tmpdir(), "fake-signal-cli-"));
+  writeFileSync(join(bin, "signal-cli"), "#!/bin/sh\nexit 3\n");
+  chmodSync(join(bin, "signal-cli"), 0o755);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}:${oldPath}`;
+  try {
+    const port = await new Promise<number>((resolve) => {
+      const s = net.createServer().listen(0, "127.0.0.1", () => {
+        const p = (s.address() as net.AddressInfo).port;
+        s.close(() => resolve(p));
+      });
+    });
+    await assert.rejects(ensureSignalDaemon("+10000000000", "127.0.0.1", port), /exited before it opened its port/);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(bin, { recursive: true, force: true });
+  }
+});

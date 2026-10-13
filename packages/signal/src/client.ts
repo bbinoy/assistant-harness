@@ -93,6 +93,12 @@ export interface IncomingReaction {
   fromName?: string;
 }
 
+// Why the connection ended: close() was called (requested), or signal-cli went away / the socket failed (error, if any).
+export interface CloseInfo {
+  requested: boolean;
+  error?: Error;
+}
+
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
 
 // Pure: a message's text with each mention (Signal puts a placeholder character there) written as @name.
@@ -179,6 +185,10 @@ export class SignalClient {
   private pending = new Map<number, Pending>();
   private handler: ((m: IncomingMessage) => void) | undefined;
   private reactionHandler: ((r: IncomingReaction) => void) | undefined;
+  private closeHandler: ((info: CloseInfo) => void) | undefined;
+  private closed = false;
+  private closeRequested = false;
+  private lastError: Error | undefined;
 
   // Reactions WE sent come back as incoming reactions (in Note to Self they look exactly like the
   // owner's own). Remembered for a few minutes so isOwnReaction can tell them apart.
@@ -262,19 +272,39 @@ export class SignalClient {
     this.reactionHandler = handler;
   }
 
+  // Called once when the connection ends, whether by close(), by signal-cli going away or by a socket error.
+  // There is no reconnect: the host decides (restart, or connect a new client).
+  onClose(handler: (info: CloseInfo) => void) {
+    this.closeHandler = handler;
+  }
+
+  // Ends the connection. Requests still waiting are rejected. Safe to call twice.
+  close() {
+    this.closeRequested = true;
+    this.socket?.destroy();
+  }
+
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const socket = net.connect(this.port, this.host);
       this.socket = socket;
+      this.closed = false;
+      this.closeRequested = false;
+      let connected = false;
       socket.setEncoding("utf8");
-      socket.once("connect", resolve);
-      socket.once("error", reject);
+      socket.once("connect", () => ((connected = true), resolve()));
+      // Before connecting, an error rejects connect(); after, it is logged and the "close" that follows is reported.
+      socket.on("error", (e) => {
+        this.lastError = e;
+        if (connected) this.log.error("signal socket error:", e.message);
+        else reject(e);
+      });
       socket.on("data", (chunk: string) => this.onData(chunk));
       socket.on("close", () => {
+        this.closed = true;
         for (const p of this.pending.values()) p.reject(new Error("socket closed"));
         this.pending.clear();
-        this.log.error("signal socket closed");
-        process.exit(1); // launchd (later) restarts us; fail loudly for now
+        if (connected) this.closeHandler?.({ requested: this.closeRequested, error: this.closeRequested ? undefined : this.lastError });
       });
     });
   }
@@ -316,6 +346,8 @@ export class SignalClient {
   }
 
   private call<T = any>(method: string, params: object): Promise<T> {
+    if (!this.socket || this.closed) return Promise.reject(new Error(this.socket ? "SignalClient is closed" : "SignalClient is not connected: call connect() first"));
+    const socket = this.socket;
     const id = this.nextId++;
     const line = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
     return new Promise<T>((resolve, reject) => {
@@ -327,7 +359,7 @@ export class SignalClient {
         resolve: (v) => (clearTimeout(timer), resolve(v)),
         reject: (e) => (clearTimeout(timer), reject(e)),
       });
-      this.socket!.write(line);
+      socket.write(line);
     });
   }
 
