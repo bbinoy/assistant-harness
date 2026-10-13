@@ -6,7 +6,7 @@ import { askGate, recordWake, styleLines, type Gate } from "./gate.ts";
 import { groupContext } from "./groupstore.ts";
 import { isPaused } from "./pause.ts";
 import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
-import { group, type Conversation, type Pipeline } from "./conversation.ts";
+import { group, type Batch, type Conversation, type Pipeline } from "./conversation.ts";
 import { quoteNote } from "./quote.ts";
 import { voiceOption } from "./voicereply.ts";
 import type { Quote } from "@ted-personal-assistant/signal";
@@ -105,7 +105,7 @@ export const realRunner: Runner = async (build, { conv, now, firstOutput }) => (
 
 
 export interface Brain {
-  pipeline: Pick<Pipeline, "enqueue" | "burst" | "burstQueued" | "wait" | "runTurn" | "record" | "canSpeak" | "react">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
+  pipeline: Pick<Pipeline, "enqueue" | "burst" | "burstQueued" | "wait" | "holdTyping" | "runTurn" | "record" | "canSpeak" | "react">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
   recent: (groupId: string) => string[]; // the tail of that history (for the gate; gate.ts logTail)
   context?: typeof groupContext; // what the run is shown (default: the group's log)
   run?: Runner;
@@ -153,9 +153,13 @@ export function createGroupBrain(brain: Brain) {
     };
     // Nothing to judge when the burst will not be answered anyway (paused, over budget) or a queued run already takes this message in.
     const early = !pending() && !isPaused(now) && !budgetSpent() && !pipeline.burstQueued(conv) ? judge() : undefined;
-    await pipeline.burst(conv, m, async (batch) => {
+    // What happens once the burst has settled. `showTyping` is called the moment it is decided to answer: right away when
+    // addressed, when the gate says act otherwise (never when it says no), so "typing…" covers the gate's delay and any wait
+    // behind an earlier turn.
+    const answer = async (batch: Batch<GroupMessage>, showTyping: () => void): Promise<void> => {
       if (isPaused(now) || budgetSpent()) return;
       const asked = pending();
+      if (asked) showTyping();
       let delay = 0;
       let hint: string | undefined;
       if (!asked) {
@@ -173,6 +177,7 @@ export function createGroupBrain(brain: Brain) {
         recordWake(pipeline, conv, v.nextCheckMinutes, r.looked); // the same gate also chose when to look next (wake.ts)
         if (v.reaction && m.author) pipeline.react(conv, v.reaction, { author: m.author, timestamp: m.timestamp }); // quick and cheap: no run
         if (!v.act) return;
+        showTyping();
         delay = v.delaySeconds;
         hint = v.instructions;
         if (delay) {
@@ -202,6 +207,19 @@ export function createGroupBrain(brain: Brain) {
         if (res.noticed) st.addressed = undefined;
         if (res.spoke) st.lastSpoke = Date.now();
       });
-    }, m.arrivedAt);
+    };
+    await pipeline.burst(
+      conv,
+      m,
+      async (batch) => {
+        let typing: (() => void) | undefined;
+        try {
+          await answer(batch, () => void (typing ??= pipeline.holdTyping(conv, batch.timing)));
+        } finally {
+          typing?.(); // however it ended: answered, silent, superseded or failed
+        }
+      },
+      m.arrivedAt,
+    );
   };
 }

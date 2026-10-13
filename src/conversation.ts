@@ -236,6 +236,33 @@ export function createPipeline(deps: PipelineDeps) {
     return { spoke: spoken || !!words, reacted: !!reaction };
   }
 
+  // "typing…" for a conversation, from the moment it is decided to answer (not when the model starts) until the reply is out.
+  // Holds are counted: the early one (the caller, while the gate's delay or an earlier turn is still running) and the turn's
+  // own overlap without a stop and a restart in between; the last release stops it. Whoever holds must release (finally).
+  // The one place that refreshes it (Signal clears it after a few seconds) and stops it, for the owner and every group.
+  const typers = new Map<string, { holds: number; timer?: ReturnType<typeof setInterval> }>();
+  function holdTyping(conv: Conversation, timing?: Timing): () => void {
+    let t = typers.get(conv.key);
+    if (!t) {
+      // In an own-account chat Signal shows "typing…" (not in Note to Self, where the client ignores it).
+      t = { holds: 0, timer: signal.separateAccount ? setInterval(() => void signal.typing(false, conv.groupId), 8000) : undefined };
+      typers.set(conv.key, t);
+      void signal.typing(false, conv.groupId);
+    }
+    timing?.mark("typing");
+    const mine = t;
+    mine.holds++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (--mine.holds > 0) return;
+      clearInterval(mine.timer);
+      typers.delete(conv.key);
+      void signal.typing(true, conv.groupId);
+    };
+  }
+
   const lastNotice = new Map<string, number>();
 
   // One run for one conversation: typing, the model, the reply, or a notice if it failed. Call it inside
@@ -243,13 +270,8 @@ export function createPipeline(deps: PipelineDeps) {
   async function runTurn(conv: Conversation, turn: Turn): Promise<TurnResult> {
     const started = now();
     const background = !!turn.reaction || !!turn.background; // a reaction or a wake-up is no conversation: no typing, no icons
-    if (!background) {
-      status(conv, "👀", turn.target); // 👀 working, ✅ answered, ⚠️ failed, each replacing the last
-      // In an own-account chat Signal shows "typing…" (not in Note to Self); refreshed until the reply is out.
-      void signal.typing(false, conv.groupId);
-      turn.timing?.mark("typing");
-    }
-    const typing = !background && signal.separateAccount ? setInterval(() => void signal.typing(false, conv.groupId), 8000) : undefined;
+    if (!background) status(conv, "👀", turn.target); // 👀 working, ✅ answered, ⚠️ failed, each replacing the last
+    const typing = background ? undefined : holdTyping(conv, turn.timing); // already showing if the decision to answer came earlier
     try {
       const { text, costUsd } = await turn.run({ firstOutput: () => turn.timing?.mark("first") });
       turn.timing?.set("run", now() - started);
@@ -274,8 +296,7 @@ export function createPipeline(deps: PipelineDeps) {
       }
       return { spoke: false, error: e, noticed };
     } finally {
-      clearInterval(typing);
-      if (!background) void signal.typing(true, conv.groupId);
+      typing?.();
       deps.afterTurn?.(conv);
     }
   }
@@ -344,27 +365,30 @@ export function createPipeline(deps: PipelineDeps) {
       if (outcome === "modified" && changes) await out.replyPlain(`Applied your change: ${changes.map((c) => `${c.field} → ${c.value}`).join(", ")}`);
       return;
     }
-    await burst(conv, m, (b) =>
-      b.run(async (items) => {
-        const timing = b.timing;
-        const ms = items.sort((a, c) => a.timestamp - c.timestamp);
-        const last = ms[ms.length - 1]!;
-        for (const x of ms) {
-          console.log(`owner message (${x.text.length} chars)`);
-          if (x.quote) console.log(`owner is replying to an earlier message (${x.quote.text.length} chars)`);
-        }
-        const prompt = ownerPrompt(ms);
-        await runTurn(conv, {
-          run: (hooks) => deps.runOwner(prompt, ms.map((x) => x.text).join("\n"), ms.flatMap((x) => x.picture ?? []).slice(-MAX_PICTURES), hooks),
-          target: { author: last.from, timestamp: last.timestamp },
-          threadUnder: { text: last.text.slice(0, 200), author: last.from, timestamp: last.timestamp },
-          hadQuote: ms.some((x) => x.quote),
-          announce: true,
-          timing,
+    await burst(conv, m, async (b) => {
+      const typing = holdTyping(conv, b.timing); // the owner is always answered: show it now, even while an earlier turn still runs
+      try {
+        await b.run(async (items) => {
+          const ms = items.sort((a, c) => a.timestamp - c.timestamp);
+          const last = ms[ms.length - 1]!;
+          for (const x of ms) {
+            console.log(`owner message (${x.text.length} chars)`);
+            if (x.quote) console.log(`owner is replying to an earlier message (${x.quote.text.length} chars)`);
+          }
+          const prompt = ownerPrompt(ms);
+          await runTurn(conv, {
+            run: (hooks) => deps.runOwner(prompt, ms.map((x) => x.text).join("\n"), ms.flatMap((x) => x.picture ?? []).slice(-MAX_PICTURES), hooks),
+            target: { author: last.from, timestamp: last.timestamp },
+            threadUnder: { text: last.text.slice(0, 200), author: last.from, timestamp: last.timestamp },
+            hadQuote: ms.some((x) => x.quote),
+            announce: true,
+            timing: b.timing,
+          });
         });
-      }),
-      arrived,
-    );
+      } finally {
+        typing();
+      }
+    }, arrived);
   }
 
   // Any reaction that is not an approval answer is feedback on a message. The model is told which message
@@ -419,7 +443,7 @@ export function createPipeline(deps: PipelineDeps) {
   // A quick reaction of our own, no run needed (the gate chose it).
   const react = (conv: Conversation, emoji: string, target: { author: string; timestamp: number }) => void signal.react(emoji, target, conv.groupId);
 
-  return { handleIncoming, enqueue, burst, burstQueued, wait, runTurn, deliver, record, canSpeak, react };
+  return { handleIncoming, enqueue, burst, burstQueued, wait, holdTyping, runTurn, deliver, record, canSpeak, react };
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>;

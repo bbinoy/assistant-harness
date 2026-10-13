@@ -105,7 +105,7 @@ const rig = (over: object = {}) => {
   const signal = {
     separateAccount: true,
     react: async (e: string, t: { author: string; timestamp: number }) => void (reacted.push(e), reactTargets.push(t)),
-    typing: async () => {},
+    typing: async (stop = false) => void (over as any).events?.push(stop ? "typing stop" : "typing start"),
     markRead: async () => {},
     send: async (text: string, _s: string[], q?: unknown, o?: { attachments?: string[] }) => (sent.push({ text: o?.attachments ? `[voice]` : text, quoted: !!q }), 1),
   };
@@ -525,6 +525,64 @@ test("groups: the old 'yes' is dropped when the newer message's verdict is 'no',
     await Promise.all([a, b]);
     assert.equal(ran, runs, `old ${oldAct}, new ${newAct}`);
   }
+});
+
+test("groups: typing starts the moment the gate says act (before its delay and the run), and stops after the reply", async () => {
+  const events: string[] = [];
+  const r = rig({
+    events,
+    wait: async (ms: number) => void events.push(`wait ${ms}`),
+    gate: async () => (events.push("gate"), verdict(true, { delaySeconds: 3 })),
+    run: async () => (events.push("run"), "Howdy!"),
+  });
+  await r.on(mk({ groupId: gid(), addressedToMe: false }));
+  const at = (e: string) => events.indexOf(e);
+  assert.ok(at("typing start") > at("gate") && at("typing start") < at("wait 3000"), events.join(", ")); // while the delay is waited out
+  assert.deepEqual(events.slice(at("wait 3000")), ["wait 3000", "run", "typing stop"]);
+  assert.equal(events.filter((e) => e.startsWith("typing")).length, 2); // one start, one stop: no flicker into the run
+});
+
+test("groups: typing never shows when the gate decides not to speak, or the run is a reaction-only no", async () => {
+  const events: string[] = [];
+  const r = rig({ events, gate: async () => verdict(false, { reaction: "😂" }), run: async () => assert.fail("no run") });
+  await r.on(mk({ groupId: gid(), addressedToMe: false }));
+  assert.deepEqual(events, []);
+  const broken = rig({ events, gate: async () => { throw new Error("x"); } });
+  await broken.on(mk({ groupId: gid(), addressedToMe: false }));
+  assert.deepEqual(events, []);
+});
+
+test("groups: an addressed message shows typing right after the settling pause, while an earlier turn is still running", async () => {
+  const events: string[] = [];
+  const g = gid();
+  const first = defer<string>();
+  let n = 0;
+  const r = rig({ events, gate: async () => assert.fail("addressed"), run: async () => (events.push(`run ${++n}`), n === 1 ? first.promise : "second") });
+  const a = r.on(mk({ groupId: g, timestamp: 1 }));
+  await tick();
+  const b = r.on(mk({ groupId: g, timestamp: 2, text: "@Ted again" }));
+  await tick();
+  assert.deepEqual(events, ["typing start", "run 1"]); // the second message is queued; typing just continues
+  first.resolve("one");
+  await Promise.all([a, b]);
+  assert.deepEqual(events, ["typing start", "run 1", "run 2", "typing stop"]); // never stopped in between
+});
+
+test("groups: typing from a superseded burst is released, and a wake-up or reaction never shows it", async () => {
+  const events: string[] = [];
+  const delay = defer<void>();
+  const verdicts = [verdict(true, { delaySeconds: 3 }), verdict(false)];
+  let asked = 0;
+  const g = gid();
+  const r = rig({ events, wait: (ms: number) => (ms === 3000 ? delay.promise : Promise.resolve()), gate: async () => verdicts[asked++]!, run: async () => assert.fail("superseded, then told to stay silent") });
+  const a = r.on(mk({ groupId: g, addressedToMe: false, timestamp: 1 }));
+  await tick();
+  assert.deepEqual(events, ["typing start"]); // waiting out the delay
+  const b = r.on(mk({ groupId: g, addressedToMe: false, timestamp: 2 }));
+  await tick();
+  delay.resolve();
+  await Promise.all([a, b]);
+  assert.deepEqual(events, ["typing start", "typing stop"]); // released when the delay found a newer message
 });
 
 test("groups: a gate slower than the settling pause is waited for; a failing gate stays silent; an addressed message never starts one", async () => {
