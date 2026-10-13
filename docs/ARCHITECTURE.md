@@ -66,6 +66,8 @@ The skills are an SDK **plugin** that lives in the repo (`plugin/`, loaded with 
 
 Signal's reply (quote) works in both directions. When you reply to one of the assistant's messages (an alert, a brief section), the quoted text is passed to the chat as fenced data, so "move this one" has something to refer to. The assistant threads its own answer under your message only when that helps: you were already replying to something, or the answer took more than 20 seconds, so other messages may sit in between. Otherwise it answers plainly, to keep the Note to Self thread uncluttered.
 
+The model can also answer with an emoji reaction instead of text for a thanks, an ok or a joke: it starts its reply with `[[react: 👍]]` (exactly one emoji, only at the very start; `src/reaction.ts`). The reaction goes on your message and replaces the ✅ status, and any text after it is still sent.
+
 ## Speed and cost
 
 Every model call re-sends the whole context, and most of it is fixed: the tool definitions and the skills list. So the main levers are what the model can see and keeping the prompt cache warm. Numbers below were measured in October 2026 with Sonnet.
@@ -118,6 +120,7 @@ src/memory-tools.ts  the chat-only `forget_note` tool (in-process MCP server)
 src/session.ts       when the chat session resumes, starts fresh or gets compacted (pure, tested)
 src/migrate.ts       one-time move of old state/ files into logs/ and memory/ (idempotent)
 src/fence.ts         fences untrusted or stored text as data inside a prompt
+src/reaction.ts      the model's emoji reactions: "[[react: 👍]]" at the start of a reply (pure, tested)
 src/quote.ts         Signal reply threading: quoted text in, threaded answers out (pure, tested)
 src/format.ts        readable approval text for each tool call (pure, tested)
 src/config.ts        required secrets and the owner's number, read from .env

@@ -1,5 +1,6 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { withQuoteContext, shouldThread } from "./quote.ts";
+import { splitReaction } from "./reaction.ts";
 import { ask, AuthError, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
@@ -82,8 +83,10 @@ async function chat(m: IncomingMessage) {
     const started = Date.now();
     const { text, costUsd } = await ask(withQuoteContext(m.text, m.quote), approve, say);
     console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
-    await out.reply(text, { quote: shouldThread(!!m.quote, Date.now() - started) ? { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp } : undefined });
-    void signal.react("✅", target);
+    // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
+    const { reaction, text: words } = splitReaction(text);
+    if (words) await out.reply(words, { quote: shouldThread(!!m.quote, Date.now() - started) ? { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp } : undefined });
+    void signal.react(reaction ?? "✅", target);
     await compactChatIfNeeded(); // after the reply is out; the next message waits for it
   } catch (e) {
     console.error("agent error:", (e as Error).message);
