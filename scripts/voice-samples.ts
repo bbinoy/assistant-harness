@@ -1,5 +1,5 @@
 // `node --env-file=.env scripts/voice-samples.ts SOURCE.txt OUT_DIR [--send]`: renders one text in several voice variants
-// (voices, blends, speeds, and the text rewritten by a small model with and without the spoken-style instructions) so they
+// (voices, speeds, and the text rewritten by a small model with and without the spoken-style instructions) so they
 // can be compared by ear. Audio goes to OUT_DIR (keep it outside the repo). With --send, each file is sent as a voice
 // message to the OWNER'S private chat only (never a group), captioned with the variant name, through the agent's own
 // signal-cli daemon. SOURCE is private text: pass it as an argument, never commit it.
@@ -32,12 +32,9 @@ const variants: { name: string; voice: string; speed: number; text: string }[] =
   { name: "02 adam, 0.95", voice: "am_adam", speed: 0.95, text: original },
   { name: "03 michael, 0.95", voice: "am_michael", speed: 0.95, text: original },
   { name: "04 british george, 0.95", voice: "bm_george", speed: 0.95, text: original },
-  { name: "05 blend onyx+adam, 0.95", voice: "am_onyx:0.5,am_adam:0.5", speed: 0.95, text: original },
-  { name: "06 blend adam 60 + michael 40, 1.05", voice: "am_adam:0.6,am_michael:0.4", speed: 1.05, text: original },
-  { name: "07 onyx, faster 1.1", voice: "am_onyx", speed: 1.1, text: original },
-  { name: "08 onyx, 0.95, text rewritten WITHOUT the style instructions", voice: "am_onyx", speed: 0.95, text: plain },
-  { name: "09 onyx, 0.95, text rewritten WITH the style instructions", voice: "am_onyx", speed: 0.95, text: styled },
-  { name: "10 blend adam 60 + michael 40, 1.05, rewritten WITH the style instructions", voice: "am_adam:0.6,am_michael:0.4", speed: 1.05, text: styled },
+  { name: "05 onyx, faster 1.1", voice: "am_onyx", speed: 1.1, text: original },
+  { name: "06 onyx, 0.95, text rewritten WITHOUT the style instructions", voice: "am_onyx", speed: 0.95, text: plain },
+  { name: "07 onyx, 0.95, text rewritten WITH the style instructions", voice: "am_onyx", speed: 0.95, text: styled },
 ];
 
 await mkdir(outDir, { recursive: true, mode: 0o700 });
