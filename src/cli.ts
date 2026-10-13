@@ -10,6 +10,7 @@ import { inQuietHours } from "./actions.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
+import { agreement } from "./autojudge.ts";
 import { disconnected, NAMES, readConnectors } from "./connectors.ts";
 import { missingSetup, readNotes } from "./notes.ts";
 import { migrateLegacyLayout } from "./migrate.ts";
@@ -32,10 +33,24 @@ const local = (iso: string) => {
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
+// How the approval judge (src/autojudge.ts) did against the owner's own answers.
+function judgeSummary(hours: number) {
+  const since = new Date(Date.now() - hours * 3600_000).toISOString();
+  const rows = readAudit((e) => e.decision === "judge-vs-owner" && e.ts > since).map((e) => ({ judge: e.meta?.judge as "auto" | "ask", ownerApproved: Boolean(e.meta?.ownerApproved) }));
+  if (rows.length === 0) return;
+  const a = agreement(rows);
+  console.log(`\nApproval judge (mode ${settings.autoApprove}), ${a.total} question(s) in the last ${hours}h:`);
+  console.log(`  would have skipped the question: ${a.judgedAuto}, of which you approved ${a.autoOwnerApproved} and DECLINED ${a.autoOwnerDeclined}`);
+  console.log(`  asked, and you approved anyway: ${a.judgedAskOwnerApproved}`);
+}
+
 async function report(hours: number) {
   const since = new Date(Date.now() - hours * 3600_000).toISOString();
   const rows = readAudit((e) => isTriage(e) && e.ts > since);
-  if (rows.length === 0) return console.log(`Nothing triaged in the last ${hours}h.`);
+  if (rows.length === 0) {
+    console.log(`Nothing triaged in the last ${hours}h.`);
+    return judgeSummary(hours);
+  }
   const order = ["archived", "alerted", "covered-by-brief", "queued-for-handler", "archive-deferred", "archive-failed", "alert-failed", "handler-queue-failed", "kept"];
   const decisions = [...order, ...new Set(rows.map((e) => e.decision).filter((d) => !order.includes(d)))];
   for (const decision of decisions) {
@@ -46,6 +61,7 @@ async function report(hours: number) {
       console.log(`  ${local(e.ts)}  ${(e.meta?.from ?? "").slice(0, 28).padEnd(28)} ${(e.meta?.subject ?? "").slice(0, 60).padEnd(60)} [${e.meta?.kind}] ${decision === "archived" ? e.meta?.id : ""}`);
     }
   }
+  judgeSummary(hours);
 }
 
 async function restore(id: string) {

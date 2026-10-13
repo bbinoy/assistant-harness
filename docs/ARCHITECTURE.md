@@ -48,6 +48,10 @@ Agent memory is usually described in layers. Here is where each one lives:
 
 **What stays out of memory:** safety rules (policy, suspicious-text isolation) and operational settings (quiet hours, intervals, the spend limit, model, names). Memory is written through a model, so it must never control those.
 
+## The approval judge
+
+Some approvals are redundant: you tell the assistant "put pottery in my calendar tomorrow at 15:00" and it then asks you to approve exactly that. `src/autojudge.ts` is a small Haiku second opinion for such cases. Code decides what may even be judged (`isJudgeable`: calendar events with no attendees; nothing that sends, forwards, shares or involves other people), the model only answers `auto` or `ask` as constrained JSON, and anything else is `ask`. Modes (`AUTO_APPROVE`): `off`; `shadow` (the default: it judges and logs while you still decide, so the audit log holds its verdict next to your answer and `npm run report` shows where it would have been right or wrong); `chat` (may skip the question in chat); `broad` (also for background runs, where it currently has too little context to verify a call). Every auto-approval is announced on your phone.
+
 ## Reply drafts, sent with a 👍
 
 When the background handler drafts an in-thread reply (a scheduling answer, say), the draft is shown on Signal ("✉️ Reply ready", To, Subject, the new text) and a 👍 on that message sends it (`src/propose.ts`, `src/proposals.ts`). No model is involved in sending: the draft's id is taken from the Mailbird tool result, its recipients and text are read back from Mailbird, and the owner's reaction is the send. Immediately before sending it is read again; if the recipients, a Cc, or any of the text (including the quoted part) changed since it was shown, nothing is sent and the current draft is shown again. A 👎 leaves the draft in the mailbox. To change something, reply to the message (the quoted text reaches the chat) and say what.
@@ -109,6 +113,7 @@ src/budget.ts        daily spend guard
 src/settings.ts      every tunable, validated at startup (pure loader, tested)
 src/state.ts         atomic, synchronous access to state/, logs/ and memory/ (tested)
 src/audit.ts         append-only audit log and its reader
+src/autojudge.ts     a small model's second opinion on a few approvals (floor in code; shadow mode by default)
 src/propose.ts       shows the handler's reply drafts on Signal, sends one on 👍 (no model in the send)
 src/proposals.ts     the draft-proposal rules: id from the tool result, "sent exactly as shown" check (pure, tested)
 src/radar.ts         the proactive radar: periodic calendar and mail look-around, sends only what matters

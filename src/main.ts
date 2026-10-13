@@ -1,7 +1,7 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { withQuoteContext, shouldThread } from "./quote.ts";
 import { splitReaction } from "./reaction.ts";
-import { ask, AuthError, RateLimitError, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
+import { ask, AuthError, RateLimitError, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
@@ -43,6 +43,7 @@ signal.onMessage((m) => {
 
 // The owner's Mailbird connection for proposals: a reply the handler drafted is shown on Signal and
 // sent with a 👍 (propose.ts). No model is involved in sending.
+setAutoApprovedNotice(say);
 const proposer = createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t), say });
 
 // A 👍 / 👎 on the pending "Approve?" message answers it; on a shown reply draft, 👍 sends it.
@@ -81,7 +82,7 @@ async function chat(m: IncomingMessage) {
   try {
     if (m.quote) console.log(`owner is replying to an earlier message (${m.quote.text.length} chars)`);
     const started = Date.now();
-    const { text, costUsd } = await ask(withQuoteContext(m.text, m.quote), approve, say);
+    const { text, costUsd } = await ask(withQuoteContext(m.text, m.quote), approve, say, m.text);
     console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
     // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
     const { reaction, text: words } = splitReaction(text);

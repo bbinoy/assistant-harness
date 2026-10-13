@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { isJudgeable, judgeAction, mayAutoApprove, type Verdict } from "./autojudge.ts";
 import { readFileSync } from "node:fs";
 import { query, startup, type CanUseTool, type HookCallbackMatcher, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { Decision } from "./approvals.ts";
@@ -69,6 +70,14 @@ function recordToolsSeen(tools: readonly string[]) {
   if (added.length) writeJson(TOOLS_SEEN, [...known, ...added]);
 }
 
+// What the owner just said in chat, for the approval judge. A module-level value because the warm
+// chat process is built before the message arrives; chat turns run one at a time.
+let chatOwnerMessage: string | undefined;
+
+// Where "done without asking" notices go (set by main).
+let autoApprovedNotice: ((text: string) => Promise<void>) | undefined;
+export const setAutoApprovedNotice = (fn: (text: string) => Promise<void>) => void (autoApprovedNotice = fn);
+
 export interface RunOptions {
   source: Source; // audit tag: who is acting
   systemPrompt: string;
@@ -125,8 +134,22 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
       audit(tool, "deny-policy", opts.source);
       return { behavior: "deny", message: `${tool} is blocked by policy (or its input is) and cannot be used.` };
     }
+    // A small model's second opinion, only for what code puts on the floor (autojudge.ts). In shadow
+    // mode it only logs; the owner is asked either way.
+    const description = describeCall(tool, input);
+    let judged: Verdict | undefined;
+    if (settings.autoApprove !== "off" && isJudgeable(tool, input)) {
+      judged = await judgeAction({ source: opts.source, description, ownerMessage: opts.source === "chat" ? chatOwnerMessage : undefined });
+      audit(tool, `judge-${judged.decision}`, opts.source, { reason: judged.reason, mode: settings.autoApprove });
+      if (mayAutoApprove(settings.autoApprove, opts.source, judged)) {
+        audit(tool, "auto-approved", opts.source, { reason: judged.reason });
+        void autoApprovedNotice?.(`✅ Done without asking: ${description.replace(/\n+/g, " | ").slice(0, 300)}`).catch(() => {});
+        return { behavior: "allow", updatedInput: input };
+      }
+    }
     audit(tool, "ask-sent", opts.source); // logged before the wait, so a stuck approval is visible
-    const d = await approve(describeCall(tool, input), { tool, input }, signal);
+    const d = await approve(description, { tool, input }, signal);
+    if (judged) audit(tool, "judge-vs-owner", opts.source, { judge: judged.decision, ownerApproved: d.approved });
     audit(
       tool,
       d.approved ? (d.updatedInput ? "ask-approved-modified" : "ask-approved") : d.feedback ? "ask-feedback" : "ask-declined",
@@ -293,7 +316,8 @@ const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
 });
 
 // Interactive chat: resumes the persistent conversation, on the warm process when it fits.
-export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>): Promise<AgentReply> {
+export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string): Promise<AgentReply> {
+  chatOwnerMessage = ownerMessage ?? prompt;
   const o = chatOptions(notify);
   const r = chatResume(true);
   const s = spare;

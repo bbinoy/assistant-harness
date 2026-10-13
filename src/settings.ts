@@ -58,6 +58,10 @@ export function loadSettings(env: Env) {
     radarMinutes: num(env, "RADAR_MINUTES", 120, 30, 720),
     maxProactivePerDay: num(env, "MAX_PROACTIVE_PER_DAY", 8, 0, 50),
 
+    // A small model's second opinion on approvals (src/autojudge.ts). shadow: it judges and logs, you
+    // still decide; chat / broad: it may skip the question for calendar events that only touch you.
+    autoApprove: oneOf(env, "AUTO_APPROVE", "shadow", ["off", "shadow", "chat", "broad"] as const),
+
     briefStartHour: num(env, "BRIEF_START_HOUR", 7, 0, 23),
     briefMaxAttempts: num(env, "BRIEF_MAX_ATTEMPTS", 3, 1, 10),
 
