@@ -183,7 +183,7 @@ export const ledger = {
   nudge: () => "[nudge] I changed the calendar, so the radar should look again soon",
 };
 const RADAR_KEYS = /\. keys: (\[.*\])\s*$/s;
-const KEY_TTL_MS = 3 * 24 * 3600_000;
+export const KEY_TTL_MS = 3 * 24 * 3600_000;
 
 export interface LookState {
   wake?: Wake & { at: string }; // the last chosen next look (at: when it was written)

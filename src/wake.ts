@@ -3,11 +3,12 @@ import { inQuietHours } from "./actions.ts";
 import { clockLine } from "./brief.ts";
 import { budgetSpent } from "./budget.ts";
 import { fence } from "./fence.ts";
-import { askGate, logTail, lookDue, lookState, NOTHING, notesChangedAt, recordWake, type Gate, type LookState } from "./gate.ts";
+import { askGate, KEY_TTL_MS, logTail, lookDue, lookState, NOTHING, notesChangedAt, recordWake, type Gate, type LookState } from "./gate.ts";
 import { groupContext, listGroups } from "./groupstore.ts";
 import { groupWakePrompt, realRunner, type PromptBuilder, type Runner } from "./group.ts";
 import { group, owner, type Conversation, type Pipeline } from "./conversation.ts";
-import { ledgerEntries } from "./messages.ts";
+import { ledgerEntries, logSignature } from "./messages.ts";
+import { localDay } from "./pause.ts";
 import { voiceOption } from "./voicereply.ts";
 import { isPaused } from "./pause.ts";
 import type { OwnerProfile } from "./agent.ts";
@@ -113,9 +114,23 @@ export function createWakeups(deps: WakeDeps) {
     return runPreset(conv, briefTask(), st, now).catch((e) => (console.error("wake: brief failed:", (e as Error).message), "brief-failed"));
   }
 
+  // The ledger's reading, remembered while the log file is unchanged (same stat), the day is the same and no radar key
+  // has aged out: an idle tick then costs one stat per conversation, not a read and parse of its whole log.
+  const states = new Map<string, { sig: string; day: string; st: LookState }>();
+  function stateOf(conv: Conversation, now: Date): LookState {
+    const sig = logSignature(conv.logFile);
+    const day = localDay(now);
+    const hit = states.get(conv.key);
+    if (hit && sig && hit.sig === sig && hit.day === day && Object.values(hit.st.radarKeys).every((at) => now.getTime() - at < KEY_TTL_MS)) return hit.st;
+    const st = lookState(ledgerEntries(conv.logFile), now);
+    if (sig) states.set(conv.key, { sig, day, st });
+    else states.delete(conv.key);
+    return st;
+  }
+
   // One conversation, one look. Returns what happened (for the log and tests).
   async function look(conv: Conversation, now: Date): Promise<string> {
-    const st = lookState(ledgerEntries(conv.logFile), now);
+    const st = stateOf(conv, now);
     const owed = await backstop(conv, st, now);
     if (owed) return owed;
     if (!settings.wakeups) return "off";
@@ -150,14 +165,19 @@ export function createWakeups(deps: WakeDeps) {
   }
 
   // Is today's brief still due? (The heartbeat's mail alerts and the radar wait for it.)
-  const briefIsPending = (now = clock()): boolean => settings.scheduler === "gate" && !paused(now) && briefPending(lookState(ledgerEntries(owner().logFile), now), now);
+  const briefIsPending = (now = clock()): boolean => settings.scheduler === "gate" && !paused(now) && briefPending(stateOf(owner(), now), now);
 
   // Every conversation looks on its own: a slow brief or a failing group never delays another conversation.
   const busy = new Set<string>();
   async function tick(now = clock()): Promise<void> {
     if (paused(now) || spent()) return;
     const convs: Conversation[] = [owner()];
-    if (settings.wakeups) for (const id of (deps.groups ?? (() => listGroups().map((g) => g.id)))()) if (await deps.vouch(id).catch(() => false)) convs.push(group(id));
+    if (settings.wakeups) {
+      const ids = (deps.groups ?? (() => listGroups().map((g) => g.id)))();
+      const vouched = await Promise.all(ids.map((id) => deps.vouch(id).catch(() => false))); // in parallel; a lookup is cached for minutes
+      ids.forEach((id, i) => vouched[i] && convs.push(group(id)));
+      for (const key of states.keys()) if (!convs.some((c) => c.key === key)) states.delete(key); // groups that are gone
+    }
     await Promise.all(
       convs.map(async (conv) => {
         if (busy.has(conv.key) || paused(clock()) || spent()) return;

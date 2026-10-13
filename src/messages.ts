@@ -58,7 +58,30 @@ const parse = (line: string): Sent | Summary | undefined => {
 
 const isSummary = (e: Sent | Summary): e is Summary => e.kind === "summary";
 
+// Parsed logs are cached per file, keyed by what stat says (inode, size, mtime): any append, rewrite (compaction
+// writes a new file) or deletion changes the key, so a hit is always what a fresh read would give. Bounded, because
+// every group has a log: only the most recently used few are kept.
+const MAX_CACHED_LOGS = 8;
+const parsed = new Map<string, { sig: string; sent: Sent[]; summary?: Summary }>();
+
+// What changes whenever the file does ("" when there is none). Cheap: one stat.
+export function logSignature(file: string = FILE): string {
+  try {
+    const s = statSync(dataPath(file));
+    return `${s.ino}:${s.size}:${s.mtimeMs}`;
+  } catch {
+    return "";
+  }
+}
+
 function readAll(file: string = FILE): { sent: Sent[]; summary?: Summary } {
+  const sig = logSignature(file);
+  const hit = parsed.get(file);
+  if (hit && sig && hit.sig === sig) {
+    parsed.delete(file); // most recently used last
+    parsed.set(file, hit);
+    return hit;
+  }
   const sent: Sent[] = [];
   let summary: Summary | undefined;
   for (const line of (readText(file) ?? "").split("\n")) {
@@ -66,6 +89,11 @@ function readAll(file: string = FILE): { sent: Sent[]; summary?: Summary } {
     if (!e) continue;
     if (isSummary(e)) summary = e;
     else sent.push(e);
+  }
+  parsed.delete(file);
+  if (sig) {
+    parsed.set(file, { sig, sent, summary });
+    while (parsed.size > MAX_CACHED_LOGS) parsed.delete(parsed.keys().next().value!);
   }
   return { sent, summary };
 }
@@ -84,7 +112,7 @@ export const findMessage = (ts: number, file: string = FILE): Sent | undefined =
 export const messagesSince = (sinceIso?: string, file: string = FILE): Sent[] => readAll(file).sent.filter((m) => !isLedger(m.kind) && (!sinceIso || m.at > sinceIso));
 
 // Every line including the ledger, oldest first: for the gate (gate.ts) alone.
-export const ledgerEntries = (file: string = FILE): Sent[] => readAll(file).sent;
+export const ledgerEntries = (file: string = FILE): readonly Sent[] => readAll(file).sent; // shared with the cache: read-only
 
 const NOTICE_KINDS = new Set<Kind>(["notice", "draft", "brief"]);
 const NOTICE_AGE_MS = 24 * 3600_000;

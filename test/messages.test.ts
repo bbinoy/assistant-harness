@@ -89,3 +89,25 @@ test("reactions: the prompt carries the emoji and the message, fenced, and no in
   assert.match(p, /<reacted_message>/i);
   assert.match(reactionPrompt("👍", undefined), /no longer in your log/);
 });
+
+test("messages: the parsed-log cache follows the file (append, rewrite, delete) and a group log is separate", async () => {
+  const { ledgerEntries, logSignature, messagesSince } = await import("../src/messages.ts");
+  const { writeText } = await import("../src/state.ts");
+  reset();
+  assert.equal(logSignature(), "");
+  assert.deepEqual(ledgerEntries(), []);
+  recordMessage("owner", 1, "first");
+  assert.equal(ledgerEntries().length, 1);
+  assert.equal(ledgerEntries(), ledgerEntries()); // unchanged file: the same parsed result, not a re-read
+  recordMessage("wake", 2, "{}");
+  assert.equal(ledgerEntries().length, 2); // an append is seen at once
+  assert.equal(messagesSince().length, 1); // ledger still excluded from conversation
+  writeText("logs/messages.jsonl", JSON.stringify({ ts: 9, at: "2026-10-01T00:00:00.000Z", kind: "owner", text: "rewritten" }) + "\n");
+  assert.deepEqual(ledgerEntries().map((m) => m.text), ["rewritten"]); // a rewrite (compaction) is seen
+  recordMessage("owner", 3, "other log", new Date(), "logs/group-abc.jsonl");
+  assert.deepEqual(ledgerEntries("logs/group-abc.jsonl").map((m) => m.text), ["other log"]);
+  assert.equal(ledgerEntries().length, 1);
+  reset();
+  assert.deepEqual(ledgerEntries(), []); // deleted
+  rmSync(dataPath("logs/group-abc.jsonl"), { force: true });
+});
