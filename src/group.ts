@@ -93,14 +93,15 @@ export interface GroupMessage {
   quote?: Quote; // it is a reply to an earlier message
   voice?: boolean; // the text is a transcript of a voice message
   picture?: Picture; // a picture it carries (the text is its caption); shown to the model for this turn only, never stored
+  arrivedAt?: number; // when it came in (for the timing line)
   reaction?: { emoji: string; on: string }; // not a message but a reaction to one (on = that message's text)
 }
 
 // Makes the prompt once it is known whether the session resumes: `since` is the newest line it has been shown.
 export type PromptBuilder = (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] };
-export type Runner = (build: PromptBuilder, ctx: { conv: Conversation; now: Date }) => Promise<string>;
+export type Runner = (build: PromptBuilder, ctx: { conv: Conversation; now: Date; firstOutput?: () => void }) => Promise<string>;
 
-export const realRunner: Runner = async (build, { conv, now }) => (await runGroupTurn(conv, styleLines(now), build)).text.trim();
+export const realRunner: Runner = async (build, { conv, now, firstOutput }) => (await runGroupTurn(conv, styleLines(now), build, firstOutput)).text.trim();
 
 
 export interface Brain {
@@ -144,6 +145,8 @@ export function createGroupBrain(brain: Brain) {
         const looked = new Date();
         try {
           const v = await (brain.gate ?? askGate)({ conv, trigger: "message", now, tail: brain.recent(m.groupId), secondsSinceMine: st.lastSpoke ? Math.round((Date.now() - st.lastSpoke) / 1000) : undefined });
+          batch.timing.set("gate", Date.now() - looked.getTime());
+          batch.timing.set("gateDelay", v.delaySeconds * 1000);
           recordWake(pipeline, conv, v.nextCheckMinutes, looked); // the same gate also chose when to look next (wake.ts)
           if (v.reaction && m.author) pipeline.react(conv, v.reaction, { author: m.author, timestamp: m.timestamp }); // quick and cheap: no run
           if (!v.act) return;
@@ -169,7 +172,8 @@ export function createGroupBrain(brain: Brain) {
         };
         // Like a private chat, it may answer with an emoji reaction (on the message it is answering), with or without words.
         const res = await pipeline.runTurn(conv, {
-          run: async () => ({ text: await (brain.run ?? realRunner)(build, { conv, now }) }),
+          run: async (hooks) => ({ text: await (brain.run ?? realRunner)(build, { conv, now, firstOutput: hooks.firstOutput }) }),
+          timing: batch.timing,
           // The reaction and status icons go on the message that addressed us, not on a later one that was answered with it.
           target: asked?.quote.author ? { author: asked.quote.author, timestamp: asked.quote.timestamp } : last.author ? { author: last.author, timestamp: last.timestamp } : undefined,
           threadUnder: asked?.quote,
@@ -179,6 +183,6 @@ export function createGroupBrain(brain: Brain) {
         if (res.noticed) st.addressed = undefined;
         if (res.spoke) st.lastSpoke = Date.now();
       });
-    });
+    }, m.arrivedAt);
   };
 }

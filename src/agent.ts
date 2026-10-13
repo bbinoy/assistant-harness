@@ -100,6 +100,7 @@ export interface RunOptions {
   outputFormat?: Options["outputFormat"]; // constrained JSON output
   // Fires after a tool call succeeds. Used to capture the brief the agent sends.
   onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void;
+  onFirstOutput?: () => void; // the model's first message arrived (timing only)
 }
 
 // Context size of one model call: everything it was sent.
@@ -311,6 +312,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
 // The one we want is the single "result" message that ends the turn.
 async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-sdk").SDKMessage>, opts: RunOptions, previousCost: number): Promise<AgentReply> {
   let lastError: string | undefined;
+  let first = false;
   let lastContext: number | undefined; // the last model call of the main loop shows how big the context is
   for await (const message of stream) {
     if (message.type === "system" && message.subtype === "init" && opts.source !== "group") { // a group run has no connectors: its tool list says nothing about them
@@ -318,6 +320,7 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
       recordConnectors(message.tools, message.mcp_servers);
     }
     if (message.type === "assistant") {
+      if (!first && !message.parent_tool_use_id) (first = true), opts.onFirstOutput?.();
       if (message.error) lastError = message.error;
       if (!message.parent_tool_use_id) lastContext = contextTokens(message.message.usage);
     }
@@ -363,10 +366,10 @@ export const groupRunOptions = (conv: Pick<Conversation, "notesDir" | "sessionFi
   maxBudgetUsd: PROFILES.group.maxBudgetUsd,
 });
 
-export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }): Promise<AgentReply> {
+export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void): Promise<AgentReply> {
   const r = chatResume(true, conv.sessionFile, "group");
   const { prompt, seenAt, pictures } = build(r.resume ? r.seenAt : undefined);
-  const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt };
+  const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
   return consume(query({ prompt: userInput(prompt, pictures), options: buildOptions(async () => ({ approved: false }), o, r.resume) }), o, r.previousCost);
 }
 
@@ -416,9 +419,9 @@ const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
 });
 
 // Interactive chat: resumes the persistent conversation, on the warm process when it fits.
-export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = []): Promise<AgentReply> {
+export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void }): Promise<AgentReply> {
   chatOwnerMessage = ownerMessage ?? prompt;
-  const o = chatOptions(notify);
+  const o = { ...chatOptions(notify), onFirstOutput: hooks?.firstOutput };
   const r = chatResume(true);
   const s = spare;
   spare = undefined; // a warm process serves one query

@@ -11,6 +11,7 @@ import { shouldThread, withQuoteContext } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
+import { startTiming, type Timing } from "./timing.ts";
 import { MAX_SPOKEN_CHARS, type IncomingMessage, type IncomingReaction, type Quote } from "@ted-personal-assistant/signal";
 
 // The one pipeline every conversation goes through: the owner's private chat and each group. What differs
@@ -75,8 +76,13 @@ type Held = IncomingMessage & { picture?: Picture };
 export type Incoming = { type: "message"; m: IncomingMessage } | { type: "reaction"; r: IncomingReaction };
 
 // What one run needs. The caller (the owner's path here, the group brain in group.ts) builds it.
+export interface RunHooks {
+  firstOutput: () => void; // the model produced its first message (timing only)
+}
+
 export interface Turn {
-  run: () => Promise<{ text: string; costUsd?: number }>;
+  run: (hooks: RunHooks) => Promise<{ text: string; costUsd?: number }>;
+  timing?: Timing; // the burst's timing, logged as one line when the turn ends (timing.ts)
   target?: { author: string; timestamp: number }; // the message to react to (and to show status icons on)
   threadUnder?: Quote; // what a threaded answer quotes
   hadQuote?: boolean; // the message was itself a reply: thread the answer
@@ -106,7 +112,7 @@ export interface PipelineDeps {
   };
   record: (groupId: string | undefined, kind: Kind, ts: number, text: string) => void; // into that conversation's log
   account: string; // our own Signal number: the author of messages of ours that a reaction points at
-  runOwner: (prompt: string, ownerMessage: string, pictures?: Picture[]) => Promise<{ text: string; costUsd?: number }>;
+  runOwner: (prompt: string, ownerMessage: string, pictures?: Picture[], hooks?: RunHooks) => Promise<{ text: string; costUsd?: number }>;
   picture: (m: IncomingMessage) => Promise<Picture>; // throws a sentence the sender can be told
   transcript: (m: IncomingMessage) => Promise<string>; // throws a sentence the sender can be told
   speech: { ready: () => boolean; synth: (words: string) => Promise<string> }; // spoken replies: local TTS, a file
@@ -126,6 +132,7 @@ export interface PipelineDeps {
 // message gathered by the time the run starts (oldest first).
 export interface Batch<T> {
   stale: () => boolean;
+  timing: Timing; // this burst's timing; zero is the arrival of its newest message
   run: (job: (items: T[]) => Promise<void>) => Promise<void>;
 }
 
@@ -154,7 +161,9 @@ export function createPipeline(deps: PipelineDeps) {
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   const wait = deps.wait ?? sleep;
   const bursts = new Map<string, { epoch: number; pending: unknown[]; queued: boolean; firstAt?: number }>();
-  async function burst<T>(conv: Conversation, item: T, settled: (b: Batch<T>) => Promise<void>): Promise<void> {
+  // `arrivedAt`: when the message really came in, if earlier than this call (voice transcription, group lookup).
+  async function burst<T>(conv: Conversation, item: T, settled: (b: Batch<T>) => Promise<void>, arrivedAt: number = now()): Promise<void> {
+    const timing = startTiming(conv.kind, now, arrivedAt);
     const st = bursts.get(conv.key) ?? { epoch: 0, pending: [], queued: false };
     bursts.set(conv.key, st);
     if (!st.pending.length) st.firstAt = now();
@@ -164,11 +173,15 @@ export function createPipeline(deps: PipelineDeps) {
     const left = Math.max(0, maxMs - (now() - (st.firstAt ?? now())));
     await wait(Math.min(deps.settleMs ? deps.settleMs() : settings.settleSeconds * 1000, left));
     if (st.epoch !== mine || st.queued || !st.pending.length) return; // a newer message took over, or a queued run will take this one too
+    timing.mark("settle");
     await settled({
       stale: () => st.epoch !== mine,
+      timing,
       run: (job) => {
         st.queued = true;
+        const queuedAt = now();
         return enqueue(conv, async () => {
+          timing.set("queue", now() - queuedAt);
           st.queued = false;
           st.firstAt = undefined;
           const items = st.pending.splice(0) as T[];
@@ -231,16 +244,22 @@ export function createPipeline(deps: PipelineDeps) {
       status(conv, "👀", turn.target); // 👀 working, ✅ answered, ⚠️ failed, each replacing the last
       // In an own-account chat Signal shows "typing…" (not in Note to Self); refreshed until the reply is out.
       void signal.typing(false, conv.groupId);
+      turn.timing?.mark("typing");
     }
     const typing = !background && signal.separateAccount ? setInterval(() => void signal.typing(false, conv.groupId), 8000) : undefined;
     try {
-      const { text, costUsd } = await turn.run();
+      const { text, costUsd } = await turn.run({ firstOutput: () => turn.timing?.mark("first") });
+      turn.timing?.set("run", now() - started);
       console.log(`${conv.kind === "owner" ? "agent" : "group"} replied (${text.length} chars${costUsd === undefined ? "" : `, $${costUsd.toFixed(4)}`})`);
       const sent = await deliver(conv, text, { ...turn, started });
+      turn.timing?.mark("total");
+      turn.timing?.report(); // before compaction: that runs after the reply and is not part of the wait
       if (conv.kind === "group") audit("group_reply", sent.spoke || sent.reacted ? "sent" : "silent", "group");
       if (!turn.reaction) await deps.compact?.(conv);
       return { spoke: sent.spoke };
     } catch (e) {
+      turn.timing?.mark("total");
+      turn.timing?.report();
       console.error(background ? `agent error (${turn.background ? "wake-up" : "reaction"}):` : `${conv.kind === "owner" ? "agent" : "group: run"} failed:`, (e as Error).message); // a reaction needs no apology
       if (conv.kind === "group") audit("group_reply", "failed", "group", { error: (e as Error).message.slice(0, 200) });
       let noticed = false;
@@ -297,6 +316,7 @@ export function createPipeline(deps: PipelineDeps) {
   }
 
   async function ownerMessage(conv: Conversation, original: IncomingMessage): Promise<void> {
+    const arrived = now();
     void signal.markRead(original.timestamp); // the owner sees it was read, as soon as we have it
     let m: Held = original;
     if (m.audio) {
@@ -323,6 +343,7 @@ export function createPipeline(deps: PipelineDeps) {
     }
     await burst(conv, m, (b) =>
       b.run(async (items) => {
+        const timing = b.timing;
         const ms = items.sort((a, c) => a.timestamp - c.timestamp);
         const last = ms[ms.length - 1]!;
         for (const x of ms) {
@@ -331,13 +352,15 @@ export function createPipeline(deps: PipelineDeps) {
         }
         const prompt = ownerPrompt(ms);
         await runTurn(conv, {
-          run: () => deps.runOwner(prompt, ms.map((x) => x.text).join("\n"), ms.flatMap((x) => x.picture ?? []).slice(-MAX_PICTURES)),
+          run: (hooks) => deps.runOwner(prompt, ms.map((x) => x.text).join("\n"), ms.flatMap((x) => x.picture ?? []).slice(-MAX_PICTURES), hooks),
           target: { author: last.from, timestamp: last.timestamp },
           threadUnder: { text: last.text.slice(0, 200), author: last.from, timestamp: last.timestamp },
           hadQuote: ms.some((x) => x.quote),
           announce: true,
+          timing,
         });
       }),
+      arrived,
     );
   }
 
@@ -358,6 +381,7 @@ export function createPipeline(deps: PipelineDeps) {
   // The shared steps for a group message, then the group's own question: should it speak (group.ts).
   async function groupMessage(conv: Conversation, original: IncomingMessage): Promise<void> {
     const groupId = conv.groupId!;
+    const arrivedAt = now();
     if (!(await deps.vouch(groupId))) return; // a group we cannot vouch for gets nothing, not even a transcription
     const author = original.from || original.fromUuid;
     if (original.addressedToMe && author) void signal.markRead(original.timestamp, author); // only those who spoke to us see "seen"
@@ -372,7 +396,7 @@ export function createPipeline(deps: PipelineDeps) {
       const seen = m.addressedToMe || settings.groupParticipation !== "tagged" ? await see(conv, m) : false;
       m = { ...m, image: undefined, picture: seen ? seen.picture : undefined, text: `🖼️ ${m.text || "image"}` };
     }
-    return deps.admitGroup(conv, { groupId, text: m.text, picture: m.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
+    return deps.admitGroup(conv, { groupId, arrivedAt, text: m.text, picture: m.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
   }
 
   async function groupReaction(conv: Conversation, r: IncomingReaction): Promise<void> {
