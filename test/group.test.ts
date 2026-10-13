@@ -458,3 +458,88 @@ test("groups: in tagged-only mode an unaddressed picture is not even opened", as
     (settings as { groupParticipation: string }).groupParticipation = was;
   }
 });
+
+const defer = <T>() => {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+};
+const verdict = (act: boolean, over: object = {}) => ({ act, task: "task" as const, delaySeconds: 0, nextCheckMinutes: 30, ...over });
+const tick = () => new Promise((res) => setTimeout(res, 5));
+
+test("groups: the gate is asked when an untagged message arrives, while the settling pause is still running", async () => {
+  const order: string[] = [];
+  const settle = defer<void>();
+  const r = rig({
+    wait: () => (order.push("settle started"), settle.promise),
+    gate: async () => (order.push("gate asked"), verdict(true)),
+    run: async () => (order.push("run"), "Howdy!"),
+  });
+  const done = r.on(mk({ groupId: gid(), addressedToMe: false }));
+  await tick();
+  assert.ok(order.includes("gate asked") && order.includes("settle started") && !order.includes("run")); // the gate did not wait for the pause to end
+  settle.resolve();
+  await done;
+  assert.deepEqual(order.filter((x) => x !== "settle started"), ["gate asked", "run"]);
+  assert.equal(r.sent.length, 1);
+});
+
+test("groups: a message that arrives while the gate is in flight takes over: the old verdict is discarded, one burst is one turn", async () => {
+  const g = gid();
+  const first = defer<ReturnType<typeof verdict>>();
+  const second = defer<ReturnType<typeof verdict>>();
+  const verdicts = [first, second];
+  let asked = 0;
+  let runs = 0;
+  const r = rig({ wait: async () => {}, gate: () => verdicts[asked++]!.promise, run: async () => (runs++, "one answer") });
+  const a = r.on(mk({ groupId: g, addressedToMe: false, timestamp: 1, text: "one" }));
+  await tick(); // settled, now waiting for its verdict
+  const b = r.on(mk({ groupId: g, addressedToMe: false, timestamp: 2, text: "two" }));
+  await tick();
+  assert.equal(asked, 2); // each untagged message is judged with its own tail
+  first.resolve(verdict(true)); // the old verdict says speak: it must not start a run
+  await tick();
+  assert.equal(runs, 0);
+  second.resolve(verdict(true));
+  await Promise.all([a, b]);
+  assert.equal(runs, 1); // no model run twice
+  assert.deepEqual(r.sent.map((s) => s.text), ["one answer"]);
+  assert.equal(r.ledger.length, 1); // only the verdict that was used chose the next look
+});
+
+test("groups: the old 'yes' is dropped when the newer message's verdict is 'no', and the old 'no' does not silence a newer 'yes'", async () => {
+  for (const [oldAct, newAct, runs] of [[true, false, 0], [false, true, 1]] as const) {
+    const first = defer<ReturnType<typeof verdict>>();
+    const second = defer<ReturnType<typeof verdict>>();
+    const verdicts = [first, second];
+    let asked = 0;
+    let ran = 0;
+    const g = gid();
+    const r = rig({ wait: async () => {}, gate: () => verdicts[asked++]!.promise, run: async () => (ran++, "ok") });
+    const a = r.on(mk({ groupId: g, addressedToMe: false, timestamp: 1 }));
+    await tick();
+    const b = r.on(mk({ groupId: g, addressedToMe: false, timestamp: 2 }));
+    await tick();
+    second.resolve(verdict(newAct));
+    first.resolve(verdict(oldAct));
+    await Promise.all([a, b]);
+    assert.equal(ran, runs, `old ${oldAct}, new ${newAct}`);
+  }
+});
+
+test("groups: a gate slower than the settling pause is waited for; a failing gate stays silent; an addressed message never starts one", async () => {
+  const slow = defer<ReturnType<typeof verdict>>();
+  const r = rig({ gate: () => slow.promise });
+  const done = r.on(mk({ groupId: gid(), addressedToMe: false }));
+  await tick();
+  assert.equal(r.sent.length, 0);
+  slow.resolve(verdict(true));
+  await done;
+  assert.equal(r.sent.length, 1);
+  const broken = rig({ gate: async () => { throw new Error("x"); } });
+  await broken.on(mk({ groupId: gid(), addressedToMe: false }));
+  assert.equal(broken.sent.length, 0);
+  const tagged = rig({ gate: async () => assert.fail("addressed: no gate, not even early") });
+  await tagged.on(mk({ groupId: gid() }));
+  assert.equal(tagged.sent.length, 1);
+});

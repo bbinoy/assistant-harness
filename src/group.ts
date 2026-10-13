@@ -105,7 +105,7 @@ export const realRunner: Runner = async (build, { conv, now, firstOutput }) => (
 
 
 export interface Brain {
-  pipeline: Pick<Pipeline, "enqueue" | "burst" | "wait" | "runTurn" | "record" | "canSpeak" | "react">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
+  pipeline: Pick<Pipeline, "enqueue" | "burst" | "burstQueued" | "wait" | "runTurn" | "record" | "canSpeak" | "react">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
   recent: (groupId: string) => string[]; // the tail of that history (for the gate; gate.ts logTail)
   context?: typeof groupContext; // what the run is shown (default: the group's log)
   run?: Runner;
@@ -135,27 +135,46 @@ export function createGroupBrain(brain: Brain) {
     const st = state.get(m.groupId) ?? {};
     state.set(m.groupId, st);
     if (direct) st.addressed = { line, quote: { text: m.text.slice(0, 200), author: m.author ?? "", timestamp: m.timestamp }, incoming: m.quote, voice: !!m.voice, picture: m.picture, at: now.getTime() }; // sticky until answered, or until it is too old to answer (STICKY_MS)
+    // Still waiting for an answer to a direct address? (It lapses after STICKY_MS: answering hours later would be odd.)
+    const pending = () => {
+      if (st.addressed && now.getTime() - st.addressed.at > STICKY_MS) st.addressed = undefined;
+      return st.addressed;
+    };
+    // The gate is asked the moment an untagged message arrives, in parallel with the settling pause, so the two overlap
+    // instead of adding up. The promise never rejects. Its result is used only if this message still ends the burst; a newer
+    // message is judged again with its own tail and this verdict is dropped.
+    const judge = () => {
+      const looked = new Date();
+      const gate = brain.gate ?? askGate;
+      return (async () => gate({ conv, trigger: "message", now, tail: brain.recent(m.groupId), secondsSinceMine: st.lastSpoke ? Math.round((Date.now() - st.lastSpoke) / 1000) : undefined }))().then(
+        (v) => ({ ok: true as const, v, looked, ms: Date.now() - looked.getTime() }),
+        (e: unknown) => ({ ok: false as const, e }),
+      );
+    };
+    // Nothing to judge when the burst will not be answered anyway (paused, over budget) or a queued run already takes this message in.
+    const early = !pending() && !isPaused(now) && !budgetSpent() && !pipeline.burstQueued(conv) ? judge() : undefined;
     await pipeline.burst(conv, m, async (batch) => {
       if (isPaused(now) || budgetSpent()) return;
-      if (st.addressed && now.getTime() - st.addressed.at > STICKY_MS) st.addressed = undefined; // paused or over budget for a while: answering hours later would be odd
-      const asked = st.addressed;
+      const asked = pending();
       let delay = 0;
       let hint: string | undefined;
       if (!asked) {
-        const looked = new Date();
-        try {
-          const v = await (brain.gate ?? askGate)({ conv, trigger: "message", now, tail: brain.recent(m.groupId), secondsSinceMine: st.lastSpoke ? Math.round((Date.now() - st.lastSpoke) / 1000) : undefined });
-          batch.timing.set("gate", Date.now() - looked.getTime());
-          batch.timing.set("gateDelay", v.delaySeconds * 1000);
-          recordWake(pipeline, conv, v.nextCheckMinutes, looked); // the same gate also chose when to look next (wake.ts)
-          if (v.reaction && m.author) pipeline.react(conv, v.reaction, { author: m.author, timestamp: m.timestamp }); // quick and cheap: no run
-          if (!v.act) return;
-          delay = v.delaySeconds;
-          hint = v.instructions;
-        } catch (e) {
-          console.error("group: gate failed:", (e as Error).message); // not addressed: nobody is waiting for an answer
+        const waitingSince = Date.now();
+        const r = await (early ?? judge()); // judge(): the address lapsed since the message arrived, so there is no early verdict
+        batch.timing.set("gateWait", Date.now() - waitingSince);
+        if (batch.stale()) return; // someone wrote meanwhile: that message is judged on its own
+        if (!r.ok) {
+          console.error("group: gate failed:", (r.e as Error).message); // not addressed: nobody is waiting for an answer
           return;
         }
+        const v = r.v;
+        batch.timing.set("gate", r.ms);
+        batch.timing.set("gateDelay", v.delaySeconds * 1000);
+        recordWake(pipeline, conv, v.nextCheckMinutes, r.looked); // the same gate also chose when to look next (wake.ts)
+        if (v.reaction && m.author) pipeline.react(conv, v.reaction, { author: m.author, timestamp: m.timestamp }); // quick and cheap: no run
+        if (!v.act) return;
+        delay = v.delaySeconds;
+        hint = v.instructions;
         if (delay) {
           await pipeline.wait(delay * 1000);
           if (batch.stale()) return; // someone wrote meanwhile: that message re-evaluates

@@ -191,6 +191,9 @@ export function createPipeline(deps: PipelineDeps) {
     });
   }
 
+  // A run is already queued for the current burst, so a message arriving now joins it (no verdict of its own is needed).
+  const burstQueued = (conv: Conversation): boolean => !!bursts.get(conv.key)?.queued;
+
   const record = (conv: Conversation, kind: Kind, ts: number, text: string) => deps.record(conv.groupId, kind, ts, text);
 
   // Working / done / failed icons on the owner's message. Only in Note to Self, where Signal shows no
@@ -416,7 +419,7 @@ export function createPipeline(deps: PipelineDeps) {
   // A quick reaction of our own, no run needed (the gate chose it).
   const react = (conv: Conversation, emoji: string, target: { author: string; timestamp: number }) => void signal.react(emoji, target, conv.groupId);
 
-  return { handleIncoming, enqueue, burst, wait, runTurn, deliver, record, canSpeak, react };
+  return { handleIncoming, enqueue, burst, burstQueued, wait, runTurn, deliver, record, canSpeak, react };
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>;
