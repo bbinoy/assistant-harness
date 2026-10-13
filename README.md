@@ -107,7 +107,7 @@ The email has the rest, kept to the day ahead:
 > "find a decent cup of tea"
 > 👥 Coach Beard
 >
-> Reply yes, no, or tell me what to change, or react 👍 / 👎 (5 min, then I assume no).
+> Reply yes, no, or tell me what to change, or react 👍 / 👎 (15 min, then I assume no).
 >
 > **You:** yes but make it 16:00
 > **Ted:** Applied your change: startTime → 2026-10-14T16:00:00, endTime → 2026-10-14T17:00:00

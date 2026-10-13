@@ -69,7 +69,7 @@ export function createWakeups(deps: WakeDeps) {
 
   async function act(conv: Conversation, instructions: string, now: Date): Promise<"posted" | "silent" | "failed"> {
     if (conv.kind === "owner") {
-      // The owner's run happens OUTSIDE the chat queue: it may ask for an approval and wait up to five minutes for it, and the
+      // The owner's run happens OUTSIDE the chat queue: it may ask for an approval and wait up to `BACKGROUND_APPROVAL_TIMEOUT_MINUTES` (2 h by default) for it, and the
       // owner's chat must not wait with it. Only the delivery of the answer takes its place in the queue.
       let done: { text: string; costUsd?: number } | undefined;
       let failure: unknown;

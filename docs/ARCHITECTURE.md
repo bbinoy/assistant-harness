@@ -122,7 +122,7 @@ src/outbound.ts      sending, chunking, echo guard
 src/guards.ts        owner allowlist (pure, tested)
 src/agent.ts         Agent SDK runs: chat / brief / handler, permission callback
 src/policy.ts        allow / ask / deny + edit-and-approve rules (pure, tested)
-src/approvals.ts     pending approvals: words, judge, reactions
+src/approvals.ts     open approvals: words, judge, reactions
 src/judge.ts         constrained Haiku judge for free-text approval replies
 src/heartbeat.ts     the tick: check mail, triage, act, hand off
 src/triage.ts        batched classifier + injection isolation
