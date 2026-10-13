@@ -119,25 +119,25 @@ test("web: search is allowed in chat, opening a page asks, and background runs g
   for (const source of ["brief", "handler", "heartbeat"] as const) for (const t of ["WebSearch", "WebFetch"]) assert.equal(classify(t, { url: "https://example.com", query: "x" }, source), "deny", `${t} (${source})`);
 });
 
-test("logs: chat may read them (never write), and links cannot lead out", async () => {
+test("data folders: chat may read them (never write), and links cannot lead out", async () => {
   const { mkdtempSync, writeFileSync, symlinkSync, mkdirSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { isLogPath } = await import("../src/policy.ts");
+  const { isReadableData } = await import("../src/policy.ts");
   const root = mkdtempSync(join(tmpdir(), "logs-"));
   const logs = join(root, "logs");
   mkdirSync(logs);
   writeFileSync(join(logs, "voice.jsonl"), "{}\n");
   writeFileSync(join(root, "secret.txt"), "x");
   symlinkSync(join(root, "secret.txt"), join(logs, "link.txt"));
-  assert.equal(isLogPath(join(logs, "voice.jsonl"), logs), true);
-  assert.equal(isLogPath(join(logs, "..", "secret.txt"), logs), false);
-  assert.equal(isLogPath(join(logs, "link.txt"), logs), false);
-  assert.equal(isLogPath(join(logs, "missing.log"), logs), false);
-  assert.equal(isLogPath(undefined, logs), false);
+  assert.equal(isReadableData(join(logs, "voice.jsonl"), [logs]), true);
+  assert.equal(isReadableData(join(logs, "..", "secret.txt"), [logs]), false);
+  assert.equal(isReadableData(join(logs, "link.txt"), [logs]), false);
+  assert.equal(isReadableData(join(logs, "missing.log"), [logs]), false);
+  assert.equal(isReadableData(undefined, [logs]), false);
 });
 
-test("logs: Read is allowed in chat only, Write and Edit never", () => {
+test("data folders: Read is allowed in chat only, Write and Edit never", () => {
   const log = `${settings.logsDir}/voice.jsonl`;
   mkdirSync(settings.logsDir, { recursive: true });
   writeFileSync(log, "");
@@ -145,4 +145,9 @@ test("logs: Read is allowed in chat only, Write and Edit never", () => {
   assert.equal(classify("Write", { file_path: log }, "chat"), "deny");
   assert.equal(classify("Edit", { file_path: log }, "chat"), "deny");
   for (const source of ["brief", "handler", "radar"] as const) assert.equal(classify("Read", { file_path: log }, source), "deny", source);
+});
+
+test("search_logs: chat only", () => {
+  assert.equal(classify("mcp__memory__search_logs", { query: "x" }, "chat"), "allow");
+  for (const source of ["brief", "handler", "radar", "heartbeat"] as const) assert.equal(classify("mcp__memory__search_logs", { query: "x" }, source), "deny", source);
 });

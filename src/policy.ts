@@ -65,18 +65,22 @@ const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
 // something the agent read is seen at once. Nothing unattended may touch them. Checked before
 // any allow list, so adding them to one can never open them up.
 const NOTE_FILE_TOOLS = new Set(["Read", "Write", "Edit"]);
-// The logs folder may be READ (never written) in chat, so the owner can ask what a voice message
-// said or what happened. Symlinks are resolved first, so a link cannot lead out of the folder.
-export function isLogPath(path: unknown, logsDir: string = settings.logsDir): path is string {
+// The assistant's own data folders may be READ (never written) in chat, so the owner can ask what a
+// voice message said, what happened to a mail, or what the assistant knows: logs/, state/ and
+// memory/ (the notes, the last brief, recent pings). Symlinks are resolved first, so a link cannot
+// lead out of them. The repo, .env and the rest of the disk stay out of reach.
+export function isReadableData(path: unknown, dirs: readonly string[] = [settings.logsDir, settings.stateDir, settings.memoryDir]): path is string {
   if (typeof path !== "string" || path === "") return false;
   try {
-    return realpathSync(resolve(path)).startsWith(realpathSync(logsDir) + sep);
+    const real = realpathSync(resolve(path));
+    return dirs.some((d) => real.startsWith(realpathSync(d) + sep));
   } catch {
     return false; // missing file or folder
   }
 }
 
 const FORGET_NOTE = "mcp__memory__forget_note";
+const SEARCH_LOGS = "mcp__memory__search_logs";
 
 // --- what the model never sees ---
 // Every tool schema the model can see is re-sent on every model call, so hiding tools nobody
@@ -112,8 +116,8 @@ const WEB_FETCH = "WebFetch";
 export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
-  if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && (isNotePath(input.file_path) || (tool === "Read" && isLogPath(input.file_path))) ? "allow" : "deny";
-  if (tool === FORGET_NOTE) return source === "chat" ? "allow" : "deny";
+  if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && (isNotePath(input.file_path) || (tool === "Read" && isReadableData(input.file_path))) ? "allow" : "deny";
+  if (tool === FORGET_NOTE || tool === SEARCH_LOGS) return source === "chat" ? "allow" : "deny";
   if (tool === WEB_SEARCH) return source === "chat" ? "allow" : "deny";
   if (tool === WEB_FETCH) return source === "chat" ? "ask" : "deny";
   if (tool === "Skill" || isReadTool(tool)) return "allow"; // which skills load is limited by the SDK's skills allowlist (agent.ts)
