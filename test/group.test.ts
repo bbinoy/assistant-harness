@@ -425,3 +425,11 @@ test("prompts: Ted is told he can act later and on a schedule, in a private chat
   assert.ok(chatSystem(undefined, new Date(), [], [], []).includes(SELF_TIMED));
   assert.doesNotMatch(groupSystem({}), /cannot do here \([^)]*reminders/);
 });
+
+test("groups: the gate can react right away to a message, with no run and no words", async () => {
+  const r = rig({ gate: async () => ({ act: false, task: "task", reaction: "😂", delaySeconds: 0, nextCheckMinutes: 30 }), run: async () => assert.fail("a quick reaction needs no run") });
+  await r.on(mk({ groupId: gid(), addressedToMe: false, timestamp: 77, text: "I fell off my chair 😅" }));
+  assert.deepEqual(r.reacted, ["😂"]);
+  assert.deepEqual(r.reactTargets.map((t) => t.timestamp), [77]);
+  assert.equal(r.sent.length, 0);
+});

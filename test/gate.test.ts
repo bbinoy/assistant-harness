@@ -292,3 +292,8 @@ test("wake: bad gate output fails closed; a gate that throws or acts without ins
   assert.equal(await t.wakeups.look(t.ownerConv, T0), "no");
   assert.equal(t.c.ownerRuns.length, 0);
 });
+
+test("gate: a quick reaction must be exactly one emoji, otherwise it is dropped", () => {
+  assert.equal(parseGate({ act: false, reaction: " 😂 ", nextCheckMinutes: 30 }).reaction, "😂");
+  for (const bad of ["haha", "😂😂", "", 5, null]) assert.equal(parseGate({ act: false, reaction: bad, nextCheckMinutes: 30 }).reaction, undefined, String(bad));
+});

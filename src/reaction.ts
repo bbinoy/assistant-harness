@@ -8,7 +8,7 @@ import { OWNER } from "./settings.ts";
 
 const MARK = /^\s*\[\[react:\s*([^\]]{1,16}?)\s*\]\]\s*/;
 
-const isOneEmoji = (s: string) => {
+export const isOneEmoji = (s: string) => {
   const parts = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)];
   return parts.length === 1 && /\p{Extended_Pictographic}/u.test(s);
 };

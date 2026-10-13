@@ -101,7 +101,7 @@ export const realRunner: Runner = async (build, { conv, now }) => (await runGrou
 
 
 export interface Brain {
-  pipeline: Pick<Pipeline, "enqueue" | "burst" | "wait" | "runTurn" | "record" | "canSpeak">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
+  pipeline: Pick<Pipeline, "enqueue" | "burst" | "wait" | "runTurn" | "record" | "canSpeak" | "react">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
   recent: (groupId: string) => string[]; // the tail of that history (for the gate; gate.ts logTail)
   context?: typeof groupContext; // what the run is shown (default: the group's log)
   run?: Runner;
@@ -142,6 +142,7 @@ export function createGroupBrain(brain: Brain) {
         try {
           const v = await (brain.gate ?? askGate)({ conv, trigger: "message", now, tail: brain.recent(m.groupId), secondsSinceMine: st.lastSpoke ? Math.round((Date.now() - st.lastSpoke) / 1000) : undefined });
           recordWake(pipeline, conv, v.nextCheckMinutes, looked); // the same gate also chose when to look next (wake.ts)
+          if (v.reaction && m.author) pipeline.react(conv, v.reaction, { author: m.author, timestamp: m.timestamp }); // quick and cheap: no run
           if (!v.act) return;
           delay = v.delaySeconds;
           hint = v.instructions;

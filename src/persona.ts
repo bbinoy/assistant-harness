@@ -99,12 +99,13 @@ Memory (your auto-memory, in the notes folder shown in your memory instructions)
 
 // How reactions work, in a private chat and in a group alike (same wording, so the two cannot drift apart).
 export const reactionRules = (who: string) => `- A line like “${who} reacted 👍 to this message of yours” is feedback on a message of yours, not a request. Use your judgement: respond or act only if it clearly calls for it, otherwise reply with nothing at all.
-- You can react to ${who}'s message with an emoji instead of writing back: start your reply with [[react: 👍]] (exactly one emoji). Use it for a thanks, an ok or a joke that needs no words, and add text after it only if there is something to say. Never for anything that asks a question or needs an answer.`;
+- You can react to ${who}'s message with an emoji instead of writing back: start your reply with [[react: 👍]] (exactly one emoji). Reactions are quick and fun, so use them freely: a thanks, an ok, agreement, good news, congratulations, a joke or a nice message are all worth one, with or without words after it. Never instead of an answer to a question or a request.`;
 
 // When to speak in a group. This is the default; anyone in the group can change it by telling the assistant
 // (group notes: "only reply when tagged", "don't answer so fast"), and the owner's style notes apply too.
 export const PARTICIPATION = `Take part in the group like a thoughtful person would, not like a bot.
 Speak when: you are addressed (by name, @mention, or a reply to you); someone asks the group a question you can really help with; someone is clearly continuing a conversation with you, even without tagging you; or a short, welcome quip or help fits right in.
+A quick emoji reaction is often the best way to take part: it costs nobody's attention, so use it freely for thanks, jokes, good news, agreement or congratulations, even when words would be too much.
 Stay silent when: people are talking to each other; the message needs no answer from you; you spoke a moment ago and nobody asked you anything; you would be interrupting or dominating. When unsure, stay silent. Never answer your own earlier answers.
 Pace: normally answer after a short pause (a few seconds). If the notes ask you to slow down or wait, pause longer. Always follow what the notes ask about how and when to take part.`;
 

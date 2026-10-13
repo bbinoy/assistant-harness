@@ -361,7 +361,10 @@ export function createPipeline(deps: PipelineDeps) {
     return ev.type === "message" ? groupMessage(conv, ev.m) : groupReaction(conv, ev.r);
   }
 
-  return { handleIncoming, enqueue, burst, wait, runTurn, deliver, record, canSpeak };
+  // A quick reaction of our own, no run needed (the gate chose it).
+  const react = (conv: Conversation, emoji: string, target: { author: string; timestamp: number }) => void signal.react(emoji, target, conv.groupId);
+
+  return { handleIncoming, enqueue, burst, wait, runTurn, deliver, record, canSpeak, react };
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>;
