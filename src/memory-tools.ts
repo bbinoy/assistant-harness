@@ -17,7 +17,7 @@ export function createMemoryServer(record: (line: string) => void) {
     tools: [
       tool(
         "forget_note",
-        "Delete one memory note, and its line in MEMORY.md. Only when the OWNER asked you to forget it. The owner is told on their phone automatically; do not repeat that in your reply.",
+        "Delete one memory note, and its line in MEMORY.md. Only when the OWNER asked you to forget it. Say in your reply what you forgot, in a few words.",
         { file: z.string().describe("The note's file name, like style-no-em-dashes.md") },
         async ({ file }) => {
           const r = forgetNote(file);

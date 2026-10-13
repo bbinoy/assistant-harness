@@ -12,3 +12,12 @@ test("reaction: one emoji at the very start is a reaction; the rest is still sai
 test("reaction: anything else is plain text, never a reaction", () => {
   for (const s of ["Sure thing [[react: 👍]]", "[[react: ok]]", "[[react: 👍👍]]", "[[react: ]]", "[[react: 1]]", "react: 👍", "Hello"]) assert.deepEqual(splitReaction(s), { text: s }, s);
 });
+
+test("memory notice: a deterministic notice is only needed when the reply has no words", async () => {
+  const { needsMemoryNotice } = await import("../src/agent.ts");
+  assert.equal(needsMemoryNotice(""), true);
+  assert.equal(needsMemoryNotice("[[react: 👍]]"), true);
+  assert.equal(needsMemoryNotice("  "), true);
+  assert.equal(needsMemoryNotice("Got it, I'll call you Captain from now on."), false);
+  assert.equal(needsMemoryNotice("[[react: 👍]] Saved: no meetings before 10."), false);
+});

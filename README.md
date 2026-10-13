@@ -91,19 +91,19 @@ The email has the rest, kept to the day ahead:
 > **Computer:** Archived. It can't challenge you to a duel now.
 >
 > **You:** remember that messages from Quark are never urgent
-> **Computer:** 🧠 Memory updated (triage-quark-never-urgent.md): Messages from Quark are never urgent.
-> Wrong? Tell me to change or forget it.
->
-> Quark's "urgent!!!" emails will now wait their turn.
+> **Computer:** Saved: Quark's "urgent!!!" emails will now wait their turn.
 
-**11:20.** Anything outward-facing waits for the captain's say-so:
+**11:20.** Plain things on your own calendar just happen, and you are told. Anything that involves other people waits for the captain's say-so:
 
 > **You:** put "holodeck pottery research" in my calendar tomorrow at 15:00
+> **Computer:** ✅ Done without asking: 📅 Create calendar event "holodeck pottery research", Wed 14 Oct, 15:00-16:00
+>
+> **You:** and invite Dr. Crusher to it
 >
 > **Computer:** Approve?
-> 📅 Create calendar event
+> 📅 Change calendar event
 > "holodeck pottery research"
-> 🕒 Wed 14 Oct, 15:00-16:00
+> 👥 Dr. Crusher
 >
 > Reply yes, no, or tell me what to change, or react 👍 / 👎 (5 min, then I assume no).
 >
@@ -116,7 +116,7 @@ You can answer that question with `yes`, `sure, go ahead`, an edit like the one 
 
 - **It only obeys you.** Just your own "Note to Self" thread, from your own number. Anything else is ignored.
 - **It cannot delete or send on its own.** Mail is only archived, and archiving is reversible. Sending, forwarding and calendar changes ask first. Some actions (deleting, trading, attaching your local files) are simply blocked.
-- **Memory cannot grant power.** What you ask it to remember shapes tone, priorities and sorting, never permissions. Every change to memory is announced on your phone with the exact text, so a mistake is one message from undone. Only a chat you started can change it (not an email, not the background jobs), and the assistant is told never to save something because an email said so.
+- **Memory cannot grant power.** What you ask it to remember shapes tone, priorities and sorting, never permissions. Every change to memory is mentioned in the assistant's reply, so a mistake is one message from undone. Only a chat you started can change it (not an email, not the background jobs), and the assistant is told never to save something because an email said so.
 - **Background work gets the least power.** The part that handles mail while you are not looking may only leave reply drafts; anything more, it has to ask.
 - **Archiving is judged by intent and reviewed by you.** The classifier archives only what leaves nothing to do (receipts, status notices, newsletters), keeps anything with an open question, a payment or a person waiting, and every archived mail is listed with the reason in the morning brief, one command from being restored.
 - **Mail is treated as hostile input.** A classifier with no tools reads it, suspicious text is handled in isolation, and a spend limit stops runaway costs.

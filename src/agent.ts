@@ -12,6 +12,7 @@ import { createMemoryServer } from "./memory-tools.ts";
 import { briefSystem, chatSystem, handlerSystem, radarSystem } from "./persona.ts";
 import { classify, hiddenTools, isReadTool } from "./policy.ts";
 import { recentPings } from "./pings.ts";
+import { splitReaction } from "./reaction.ts";
 import { OWNER, settings } from "./settings.ts";
 import { planSession, type ChatSession } from "./session.ts";
 import { readJson, readText, writeJson } from "./state.ts";
@@ -52,6 +53,9 @@ const SESSION_FILE = "state/session.json";
 // message when the turn ends (consume), not one per tool call. Chat is serial, so a
 // module-level list is safe.
 const memoryChanges: string[] = [];
+
+// Pure: true when the reply has no words of its own, so a memory change would otherwise go unmentioned.
+export const needsMemoryNotice = (reply: string) => splitReaction(reply).text.trim() === "";
 
 // Tool names runs have seen, so policy.hiddenTools() can hide the unused ones by name.
 // Seeded with Notion's and Mailbird's current tools, so even the very first run is trimmed.
@@ -249,7 +253,12 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
     if (message.type !== "result") continue;
     if (opts.memoryNotify && memoryChanges.length) {
       const lines = memoryChanges.splice(0);
-      void opts.memoryNotify(`🧠 Memory\n${lines.join("\n")}\nWrong? Tell me to undo it.`).catch(() => {});
+      // The assistant's own reply says what it saved or forgot, and that is the one message. Only if
+      // it answered with no words (a bare reaction, or nothing) is a short notice sent instead, so a
+      // change never goes unmentioned.
+      if (needsMemoryNotice(message.subtype === "success" ? message.result : "")) {
+        void opts.memoryNotify(`🧠 Memory\n${lines.join("\n")}\nWrong? Tell me to undo it.`).catch(() => {});
+      }
     }
     if (opts.resumeChatSession) {
       const next: ChatSession = { sessionId: message.session_id, costUsd: message.total_cost_usd, lastTurnAt: new Date().toISOString(), lastContextTokens: lastContext };
