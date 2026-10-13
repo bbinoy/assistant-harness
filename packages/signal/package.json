@@ -56,6 +56,8 @@
   "files": [
     "dist",
     "scripts",
+    "docs",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],

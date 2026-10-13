@@ -7,7 +7,7 @@ import { toolEnv } from "./internal/exec.ts";
 
 // Shared parts of the optional remote speech providers (tts-elevenlabs.ts, tts-http.ts): a bounded HTTPS
 // request, a check that what came back is audio, and the same ffmpeg step to AAC as the local voice.
-// The text sent is only the words Ted would speak; keys and tokens come from settings and are never logged.
+// The text sent is only the words to be spoken; keys and tokens come from the caller's config and are never logged.
 
 const run = promisify(execFile);
 const MAX_REMOTE_AUDIO_BYTES = 25 * 1024 * 1024;
@@ -15,7 +15,7 @@ const MAX_REMOTE_AUDIO_BYTES = 25 * 1024 * 1024;
 export type Fetch = typeof fetch;
 export type AudioKind = "wav" | "mp3" | "ogg";
 
-// A remote endpoint is plain HTTPS, except on this machine, where http is fine for testing. Pure.
+/** Pure: whether a remote speech endpoint is acceptable: https, or http on this machine (for testing). */
 export const isSafeUrl = (s: string): boolean => {
   try {
     const u = new URL(s);

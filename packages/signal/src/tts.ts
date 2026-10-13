@@ -9,16 +9,20 @@ import { onPath, toolEnv } from "./internal/exec.ts";
 
 // Text to speech, on this machine: Kokoro (an open-source neural voice model, run through onnx in its
 // own Python environment) makes the audio, ffmpeg turns it into an AAC file, which Signal shows as a
-// voice message. No network, no API key. `scripts/setup-tts.sh` in the app installs everything.
+// voice message. No network, no API key. `scripts/setup-tts.sh` in this package installs everything.
+// English only: voices starting with "b" speak en-gb, all others en-us (scripts/kokoro-say.py).
 
 const run = promisify(execFile);
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "../scripts/kokoro-say.py");
 const TIMEOUT_MS = 240_000; // synthesis runs at roughly 10 to 20 times real time; this is generous even for MAX_SPOKEN_CHARS
 
-// Measured: about 1,250 characters are one minute of speech (2,145 characters came out as 102 seconds, made in 26 s),
-// so this is roughly three minutes. Longer than that is not a voice message, it is a lecture.
+/**
+ * The longest text worth speaking. Measured: about 1,250 characters are one minute of speech (2,145 characters came
+ * out as 102 seconds, made in 26 s), so this is roughly three minutes. Longer than that is not a voice message.
+ */
 export const MAX_SPOKEN_CHARS = 3500;
 
+/** Settings of the local Kokoro voice. */
 export interface TtsConfig {
   dir: string; // holds venv/, kokoro-v1.0.onnx and voices-v1.0.bin
   voice: string; // a Kokoro voice, like am_onyx
@@ -27,7 +31,7 @@ export interface TtsConfig {
 
 const files = (dir: string) => ({ python: join(dir, "venv/bin/python"), model: join(dir, "kokoro-v1.0.onnx"), voices: join(dir, "voices-v1.0.bin") });
 
-// What is missing for speech: the Python environment, the model files, ffmpeg.
+/** What is missing for local speech: the Python environment, the model files, ffmpeg. */
 export function ttsReady(dir: string): { ok: boolean; missing: string[] } {
   const f = files(dir);
   const missing = Object.entries({ "Python environment": f.python, "Kokoro model": f.model, "Kokoro voices": f.voices }).filter(([, p]) => !existsSync(p)).map(([n]) => n);
@@ -45,8 +49,11 @@ async function step<T>(name: string, p: Promise<T>): Promise<T> {
   }
 }
 
-// Speaks `text` and returns the path of an .m4a voice message in a fresh temp folder; the caller
-// sends it and then deletes that folder (dirname of the path).
+/**
+ * Speaks `text` locally and returns the path of an .m4a voice message in a fresh temp folder (mode 0700). The caller
+ * sends it and then deletes that folder (`dirname` of the path).
+ * @throws if the Python environment, the model or ffmpeg is missing or fails, or after 240 s
+ */
 export async function synthesize(text: string, cfg: TtsConfig): Promise<string> {
   const f = files(cfg.dir);
   const dir = await mkdtemp(join(tmpdir(), "speech-"));

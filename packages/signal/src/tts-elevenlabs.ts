@@ -1,10 +1,11 @@
 import { synthesizeRemote, type Fetch } from "./tts-remote.ts";
 
-// Optional hosted speech: ElevenLabs. The text Ted speaks goes to elevenlabs.io; the voice (a stock voice, or a
+// Optional hosted speech: ElevenLabs. The text to speak goes to elevenlabs.io; the voice (a stock voice, or a
 // clone you made there with a voice you have the rights to) is chosen by its id; no recording is kept here.
 
+/** Settings of the ElevenLabs engine. */
 export interface ElevenLabsConfig {
-  apiKey: string; // from .env only
+  apiKey: string; // keep it out of source control; it is sent only as a request header and blanked from errors
   voiceId: string;
   modelId: string;
   timeoutMs: number;

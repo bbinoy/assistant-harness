@@ -7,13 +7,12 @@ import { promisify } from "node:util";
 import { onPath, toolEnv } from "./internal/exec.ts";
 
 // Voice messages are transcribed on this machine: ffmpeg turns the recording into 16 kHz mono audio,
-// whisper.cpp (the open-source port of OpenAI's Whisper) turns that into text. No network, no
-// API key, no model call.
+// whisper.cpp (the open-source port of OpenAI's Whisper) turns that into text. No network, no API key.
 
 const run = promisify(execFile);
 const TIMEOUT_MS = 120_000;
 
-// Whisper marks silence and noise in brackets or parentheses; keep only the words.
+/** Whisper marks silence and noise in brackets or parentheses; keeps only the words. */
 export function cleanTranscript(raw: string): string {
   return raw
     .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
@@ -21,16 +20,21 @@ export function cleanTranscript(raw: string): string {
     .trim();
 }
 
-// What is missing for transcription: ffmpeg, whisper-cli, or the model file.
+/** What is missing for transcription: ffmpeg, whisper-cli, or the model file. */
 export function voiceReady(model: string): { ok: boolean; missing: string[] } {
   const missing: string[] = [];
   if (!onPath("ffmpeg")) missing.push("ffmpeg");
-  if (!onPath("whisper-cli")) missing.push("whisper-cli (brew install whisper-cpp)");
+  if (!onPath("whisper-cli")) missing.push("whisper-cli (whisper.cpp; on macOS: brew install whisper-cpp)");
   if (!existsSync(model)) missing.push(`model ${model}`);
   return { ok: missing.length === 0, missing };
 }
 
-// `file`: any audio file ffmpeg can read. `model`: a whisper.cpp ggml model file.
+/**
+ * Transcribes a recording locally (language detected automatically; no limit on concurrent calls).
+ * @param file any audio file ffmpeg can read
+ * @param model path of a whisper.cpp ggml model file
+ * @throws if ffmpeg or whisper-cli is missing or fails, or after 120 s
+ */
 export async function transcribe(file: string, model: string): Promise<string> {
   if (!existsSync(file)) throw new Error("the recording is not on disk");
   const dir = await mkdtemp(join(tmpdir(), "voice-"));

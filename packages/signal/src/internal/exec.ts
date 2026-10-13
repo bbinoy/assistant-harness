@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-// Where the helper programs (ffmpeg, whisper-cli) are looked for besides PATH: a launchd service has a thin PATH
-// that lacks Homebrew.
+// Where the helper programs (ffmpeg, whisper-cli) are looked for besides PATH: a service started by a supervisor
+// often has a thin PATH that lacks Homebrew. (macOS/Linux; Windows is untested.)
 export const EXTRA_BIN_DIRS = ["/opt/homebrew/bin", "/usr/local/bin"];
 
 // The environment for a child process, with the extra directories appended to PATH.

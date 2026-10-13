@@ -112,11 +112,17 @@ Every model call re-sends the whole context, and most of it is fixed: the tool d
 
 What is left is model time: a tool question is two or three model calls of 2 to 3 seconds each, one of them loading the skill.
 
+## The Signal package and the app
+
+`packages/signal` is a library: it never exits the process, installs no signal handlers and prints nothing unless given a logger. The policy lives in `src/main.ts`: if the Signal socket (`signal.onClose`) or the daemon it started (`daemon.exited`) dies, the app exits and launchd restarts it; SIGTERM/SIGINT stop the daemon and exit. The app imports only the package's entry points (`@ted-personal-assistant/signal`, `/tts`, `/voice`).
+
+The package publishes compiled `dist/`, but the app runs straight from TypeScript with no build step: its `exports` carry a `workspace-source` condition that points at `src/`, and every app command (`run.sh`, the `npm run` scripts, `npm test`, `tsconfig.json` `customConditions`) enables it with `--conditions=workspace-source`. A new `node` entry point that imports the package needs that flag, or it resolves to `dist/` and fails when that has not been built.
+
 ## Project layout
 
 ```
 src/main.ts          wiring: Signal in (to the conversation pipeline), heartbeat, brief, approvals
-packages/signal/     @ted-personal-assistant/signal: signal-cli JSON-RPC client, daemon supervision, local voice transcription (a workspace package, usable on its own)
+packages/signal/     @ted-personal-assistant/signal: signal-cli JSON-RPC client, daemon start, and optional local speech in and out (entry points /voice and /tts); a workspace package, usable on its own, with its own README and tests
 src/markdown.ts      Markdown → Signal text styles (UTF-16 offsets)
 src/outbound.ts      sending, chunking, echo guard
 src/guards.ts        owner allowlist (pure, tested)

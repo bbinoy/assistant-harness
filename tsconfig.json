@@ -21,6 +21,7 @@
     "test",
     "examples",
     "packages/*/src",
+    "packages/*/examples",
     "packages/*/test"
   ]
 }

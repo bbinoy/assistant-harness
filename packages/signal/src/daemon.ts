@@ -11,6 +11,7 @@ function portOpen(host: string, port: number): Promise<boolean> {
   });
 }
 
+/** Options of {@link ensureSignalDaemon}. */
 export interface DaemonOptions {
   account: string; // the signal-cli account to run as
   host: string; // where it listens; must be this machine unless allowNonLoopback is set
@@ -22,16 +23,23 @@ export interface DaemonOptions {
 
 const LOOPBACK = ["127.0.0.1", "::1", "[::1]", "localhost"];
 
-// A running daemon, as ensureSignalDaemon reports it.
+/** A running daemon, as {@link ensureSignalDaemon} reports it. */
 export interface SignalDaemon {
-  started: boolean; // false: one was already listening and we reuse it (we do not own it, stop() does nothing)
-  stop(): void; // asks the daemon we started to quit (SIGTERM); does nothing for a reused one
-  exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>; // settles when the daemon we started exits; never settles for a reused one
+  /** False: one was already listening and we reuse it (we do not own it, so `stop()` does nothing). */
+  started: boolean;
+  /** Asks the daemon we started to quit (SIGTERM). Does nothing for a reused one. */
+  stop(): void;
+  /** Settles when the daemon we started exits. Never settles for a reused one. */
+  exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
 }
 
-// Makes sure a signal-cli daemon is listening, starting it if needed. Installs no process handlers and never exits
-// the process: what to do when the daemon dies (restart, exit, ...) and when to stop it is the caller's decision.
-// Refuses a host that is not this machine: signal-cli's socket has no authentication, so anyone who can reach it can send as the account.
+/**
+ * Makes sure a signal-cli daemon is listening on `host:port`, starting `signal-cli` (which must be installed and
+ * registered for `account`) if needed. Installs no process handlers and never exits the process: what to do when the
+ * daemon dies, and when to stop it, is the caller's decision.
+ * @throws if `host` is not this machine (signal-cli's socket has no authentication, so anyone who can reach it can
+ *   send as the account) unless `allowNonLoopback` is set; if signal-cli exits at once or opens no port within 30 s
+ */
 export async function ensureSignalDaemon(opts: DaemonOptions): Promise<SignalDaemon> {
   const { account, host, port, logFd } = opts;
   const log = opts.logger ?? silentLogger;
