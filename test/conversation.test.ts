@@ -160,12 +160,12 @@ test("private chat: voice falls back to text when speech is off, too long, or fa
   const long = rig({ ready: true, run: async () => `[[voice]] ${"word ".repeat(MAX_SPOKEN_CHARS / 5 + 10)}` });
   await long.pipeline.handleIncoming(owner(), msg());
   assert.equal(long.r.spoken.length, 0);
-  assert.equal(long.r.sent.length, 1);
+  assert.ok(long.r.sent.length >= 1); // sent as text instead (a long text goes out in several messages)
   const broken = rig({ ready: true, synth: async () => { throw new Error("no tts"); }, run: async () => "[[voice]] Hello there" });
   await broken.pipeline.handleIncoming(owner(), msg());
   assert.deepEqual(broken.r.sent.map((s) => s.text), ["Hello there\n\n(voice didn't work this time, sending text)"]); // a failed speech says so: the model may have announced a voice message
   assert.deepEqual(off.r.sent.map((s) => s.text), ["Hello there"]); // no speech set up: no such note
-  assert.deepEqual(long.r.sent.map((s) => s.text.includes("voice didn't work")), [false]);
+  assert.ok(long.r.sent.every((s) => !s.text.includes("voice didn't work")));
 });
 
 test("private chat: a voice message that cannot be understood is explained, and a spoken yes is never an approval", async () => {
