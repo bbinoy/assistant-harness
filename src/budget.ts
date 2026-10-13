@@ -40,3 +40,7 @@ export function overBudget(): { over: boolean; firstTime: boolean; usd: number }
   if (firstTime) writeJson(FILE, { ...c, notifiedDay: c.day });
   return { over, firstTime, usd: c.usd };
 }
+
+// Just the question, without the once-a-day "tell the owner" side effect of overBudget (only the code that
+// can tell the owner should use that one, or a group message could use up the notice).
+export const budgetSpent = (): boolean => today().usd >= settings.dailyBudgetUsd;

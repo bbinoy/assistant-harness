@@ -2,7 +2,7 @@ import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod";
 import { audit } from "./audit.ts";
 import { clockLine } from "./brief.ts";
-import { overBudget, recordCost } from "./budget.ts";
+import { budgetSpent, recordCost } from "./budget.ts";
 import { fence } from "./fence.ts";
 import { forgetGroupNote, groupNotes, groupNotesBlock, saveGroupNote, searchGroupHistory } from "./groupstore.ts";
 import { readNotes } from "./notes.ts";
@@ -243,7 +243,7 @@ export function createGroupBrain(brain: Brain) {
     if (direct) st.addressed = { line, quote: { text: m.text.slice(0, 200), author: m.author ?? "", timestamp: m.timestamp } }; // sticky until answered
     await wait(settings.groupDebounceSeconds * 1000);
     if (st.epoch !== mine) return; // a newer message took over
-    if (isPaused(now) || overBudget().over) return;
+    if (isPaused(now) || budgetSpent()) return;
 
     const recent = brain.recent(m.groupId);
     const asked = st.addressed;

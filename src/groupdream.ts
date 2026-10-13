@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { audit } from "./audit.ts";
-import { overBudget } from "./budget.ts";
+import { budgetSpent } from "./budget.ts";
 import { dreamOver, describePlan, groupConversation, groupDreamPrompt, readNoteFiles, realRunner as dreamRunner, type Runner as DreamRunner } from "./dream.ts";
 import { groupHistorySince, groupScope, listGroups } from "./groupstore.ts";
 import { dreamSystem } from "./persona.ts";
@@ -24,7 +24,7 @@ export function createGroupDreamer(deps: { run?: DreamRunner } = {}) {
   let inFlight: Promise<void> | undefined;
 
   async function once(now: Date): Promise<void> {
-    if (!settings.dream || isPaused(now) || overBudget().over) return;
+    if (!settings.dream || isPaused(now) || budgetSpent()) return;
     const today = localDay(now);
     let dreamt = 0;
     for (const g of listGroups()) {

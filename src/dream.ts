@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, write
 import { join } from "node:path";
 import { audit } from "./audit.ts";
 import { clockLine } from "./brief.ts";
-import { overBudget, recordCost } from "./budget.ts";
+import { budgetSpent, recordCost } from "./budget.ts";
 import { fence } from "./fence.ts";
 import { messagesSince, type Sent } from "./messages.ts";
 import { forgetNote, NOTES_DIR, MAX_NOTE_CHARS, parseNote, type Category } from "./notes.ts";
@@ -345,7 +345,7 @@ export function createDreamer(deps: { run?: Runner } = {}) {
     const today = localDay(now);
     const state = readJson<DreamState>(STATE, {});
     if (state.day === today) return;
-    if (!settings.dream || isPaused(now) || overBudget().over) return;
+    if (!settings.dream || isPaused(now) || budgetSpent()) return;
     writeJson(STATE, { ...state, day: today }); // before the run: a crash must not mean a retry on every tick
     const messages = messagesSince(state.lastRunAt);
     const { ownerText } = conversationLines(messages);
