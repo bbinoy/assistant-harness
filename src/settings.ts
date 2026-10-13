@@ -93,6 +93,12 @@ export function loadSettings(env: Env) {
     messageLogMb: num(env, "MESSAGE_LOG_MB", 1, 0.01, 100),
     summaryWords: num(env, "SUMMARY_WORDS", 60, 10, 400),
 
+    // What background runs may read of the owner's notes (chat reads them as files, on demand), and the
+    // nightly "dream" that keeps them up to date (dream.ts).
+    memoryMaxNotes: num(env, "MEMORY_MAX_NOTES", 120, 10, 1000),
+    memoryRunChars: num(env, "MEMORY_RUN_CHARS", 24_000, 2000, 200_000),
+    dream: oneOf(env, "DREAM", "on", ["on", "off"] as const) === "on",
+
     dailyBudgetUsd: num(env, "DAILY_BUDGET_USD", 20, 0, 10_000),
 
     signalHost: "127.0.0.1", // never anything else: signal-cli's socket is unauthenticated

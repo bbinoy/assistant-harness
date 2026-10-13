@@ -50,7 +50,7 @@ test("notes: a run sees only its categories, fenced as data, with caps", () => {
   const big = Array.from({ length: 50 }, (_, i) => ({ file: `style-${i}.md`, category: "style" as const, text: "x".repeat(900) }));
   const block = notesBlock(big, ["style"]);
   assert.ok(block.length < MAX_TOTAL_CHARS + 600, `block is ${block.length}`);
-  assert.equal(block.match(/\[style\]/g)!.length <= 10, true);
+  assert.ok(block.match(/\[style\]/g)!.length <= Math.ceil(MAX_TOTAL_CHARS / 900) + 1, "capped by size");
 });
 
 test("notes: a closing tag in any case cannot escape the fence", () => {

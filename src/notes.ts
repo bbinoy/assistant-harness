@@ -21,9 +21,9 @@ export const LAST_BRIEF = "memory/last-brief.md"; // summary memory: the latest 
 export const CATEGORIES = ["triage", "people", "scheduling", "context", "brief", "style", "setup", "voice"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
-export const MAX_NOTES_SHOWN = 40;
 export const MAX_NOTE_CHARS = 1200;
-export const MAX_TOTAL_CHARS = 8000;
+export const MAX_TOTAL_CHARS = settings.memoryRunChars; // what ONE background run reads of all notes together
+export const MAX_NOTES_SHOWN = settings.memoryMaxNotes;
 
 export function ensureNotesDir(): void {
   mkdirSync(NOTES_DIR, { recursive: true, mode: 0o700 });

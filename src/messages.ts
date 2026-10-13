@@ -9,13 +9,15 @@ import { settings } from "./settings.ts";
 // The file is bounded by SIZE, not age. Past MESSAGE_LOG_MB the oldest messages are folded into
 // ONE short summary line at the top ("20 more messages about ..."), written by a small model; the
 // summary itself is rewritten each time, so the file never grows past the limit. The owner's own
-// messages are not logged: the chat session already holds them.
+
 
 const FILE = "logs/messages.jsonl";
 const MAX_TEXT = 4000;
 const KEEP_AFTER_COMPACTION = 0.7; // compact down to this share of the limit, so it does not run on every message
 
-export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other";
+// What was said: the assistant's own messages (chat, notice, approval, draft, brief, other), the OWNER's messages
+// (owner, including voice transcripts) and the owner's reactions (reaction: "👎 on: <the message>").
+export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction";
 
 export interface Sent {
   ts: number; // Signal timestamp of the message
@@ -66,7 +68,10 @@ export function recordMessage(kind: Kind, ts: number, text: string, now = new Da
 }
 
 // The message a reaction was on, if it is still in the log.
-export const findMessage = (ts: number): Sent | undefined => readAll().sent.find((m) => m.ts === ts);
+export const findMessage = (ts: number): Sent | undefined => readAll().sent.find((m) => m.ts === ts && m.kind !== "reaction");
+
+// Everything logged after `sinceIso` (all of it when undefined), oldest first.
+export const messagesSince = (sinceIso?: string): Sent[] => readAll().sent.filter((m) => !sinceIso || m.at > sinceIso);
 
 const NOTICE_KINDS = new Set<Kind>(["notice", "draft", "brief"]);
 const NOTICE_AGE_MS = 24 * 3600_000;

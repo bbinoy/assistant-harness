@@ -7,6 +7,7 @@ import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
+import { createDreamer } from "./dream.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
@@ -17,7 +18,7 @@ import { createProposer } from "./propose.ts";
 import { createRadar } from "./radar.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
-import { appendLine, openLog } from "./state.ts";
+import { openLog } from "./state.ts";
 import { ensureSignalDaemon, SignalClient, transcribe, voiceReady, type IncomingMessage, type IncomingReaction } from "@ted-personal-assistant/signal";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
@@ -70,7 +71,6 @@ async function hear(m: IncomingMessage) {
     status("🤷", target);
     return void (await out.replyPlain("I couldn't hear any words in that voice message."));
   }
-  appendLine("logs/voice.jsonl", JSON.stringify({ at: new Date().toISOString(), messageTimestamp: m.timestamp, text: heard })); // for inspection; the chat can read it
   await route({ ...m, text: heard, audio: undefined, voice: true });
 }
 
@@ -100,6 +100,7 @@ function status(emoji: string, target: { author: string; timestamp: number }) {
 let queue: Promise<void> = Promise.resolve();
 
 async function route(m: IncomingMessage) {
+  recordMessage("owner", m.timestamp, m.voice ? `🎙️ ${m.text}` : m.text); // what the owner said: searchable, and what the dream learns from
   // While an approval is pending, a message may be its answer. That must skip the queue:
   // the queue is blocked on the very turn that is waiting for it.
   const target = { author: m.from, timestamp: m.timestamp };
@@ -121,7 +122,9 @@ async function route(m: IncomingMessage) {
 async function reacted(r: IncomingReaction) {
   console.log(`owner reacted ${r.emoji}`);
   try {
-    const prompt = reactionPrompt(r.emoji, findMessage(r.targetTimestamp));
+    const target = findMessage(r.targetTimestamp);
+    recordMessage("reaction", Date.now(), `${r.emoji} on: ${(target?.text ?? "an older message").slice(0, 200)}`);
+    const prompt = reactionPrompt(r.emoji, target);
     const { text } = await ask(prompt, approve, say, prompt);
     const { reaction, text: words } = splitReaction(text);
     if (reaction) void signal.react(reaction, { author: r.targetAuthor ?? config.signalAccount, timestamp: r.targetTimestamp });
@@ -181,6 +184,7 @@ setInterval(() => prepareChat(approve, say), 25 * 60_000).unref();
 const handler = createHandler({ approve, notify, propose: proposer.show });
 handler.resume();
 
+const dreamer = createDreamer({ notify });
 const radar = createRadar({ approve, notify: say, briefDue: isBriefDue });
 
 startHeartbeat({
@@ -188,7 +192,10 @@ startHeartbeat({
   handle: handler.enqueue,
   briefDue: isBriefDue,
   onTick: () => {
-    void maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify });
+    // The dream first (it tidies the notes the brief then reads), but never in the brief's way:
+    // it runs at most once a day, only when you said something new, and a failure just moves on.
+    const dreaming = isBriefDue() ? dreamer.run().catch(() => {}) : Promise.resolve();
+    void dreaming.then(() => maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify }));
     void radar();
   },
 });

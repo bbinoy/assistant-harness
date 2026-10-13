@@ -169,6 +169,9 @@ async function doctor() {
   const voice = voiceReady(settings.whisperModel);
   line(voice.ok ? true : "warn", "voice messages", voice.ok ? "transcribed locally with whisper.cpp" : `not available, missing: ${voice.missing.join("; ")}`);
 
+  const dream = readJson<{ lastRunAt?: string }>("state/dream.json", {});
+  line(true, "nightly dream", settings.dream ? `once a day before the brief; last run ${dream.lastRunAt ? local(dream.lastRunAt) : "not yet"}` : "off (DREAM=off)");
+
   const radar = readJson<{ lastRunAt?: string; nextRunAt?: string; sent?: number }>("state/radar.json", {});
   line(true, "proactive radar", settings.proactive ? `adaptive, at most every ${settings.radarMinutes} min; last run ${radar.lastRunAt ? local(radar.lastRunAt) : "not yet"}${radar.nextRunAt ? `, next ${local(radar.nextRunAt)}` : ""}; ${radar.sent ?? 0} message(s) today` : "off (PROACTIVE=off)");
 

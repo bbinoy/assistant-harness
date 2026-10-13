@@ -48,6 +48,12 @@ Agent memory is usually described in layers. Here is where each one lives:
 
 **What stays out of memory:** safety rules (policy, suspicious-text isolation) and operational settings (quiet hours, intervals, the spend limit, model, names). Memory is written through a model, so it must never control those.
 
+## The dream
+
+Once a day, on the first heartbeat tick that finds the daily brief due, **before** the brief, `src/dream.ts` runs a model with **no tools**. It is shown the current notes and what you said and did since the last dream (from `logs/messages.jsonl`: your messages, voice transcripts and reactions; the assistant's chat replies only as context), and it answers with JSON: notes to write or delete. It is skipped on days you said nothing, costs a few cents (Sonnet, one call), and a failure never delays the brief.
+
+Code, not the model, decides what happens (`planOps`, pure and tested): a new or changed note needs `evidence`, a verbatim quote of *your own* words from that conversation (never a reaction's target or an assistant message, which can quote mail); a merge (`consolidates`) may only be shorter than the notes it replaces; a delete needs an expired date (verified) or your own words; `setup-` and `voice-` notes and anything outside the categories triage, people, scheduling, context, brief and style are refused; at most 8 writes and 12 deletes per run; the number of notes is capped (`MEMORY_MAX_NOTES`). Before anything is written the notes are copied to `state/notes-backup/` (7 snapshots kept); the changes are announced in one Signal message, and "undo the dream" (the chat's `undo_dream` tool) restores the snapshot. `DREAM=off` disables it.
+
 ## The approval judge
 
 Some approvals are redundant: you tell the assistant "put pottery in my calendar tomorrow at 15:00" and it then asks you to approve exactly that. `src/autojudge.ts` is a small Haiku second opinion for such cases. Code decides what may even be judged (`isJudgeable`): a calendar event with no attendees. A new event may come from any source; changing an existing event only in chat, because the existing event may have guests who would be emailed. Nothing that sends, forwards, shares or involves other people is ever judged. The model only answers `auto` or `ask` as constrained JSON, and anything else is `ask`; in chat it also sees your own message and says `ask` when the call differs from what you asked. Modes (`AUTO_APPROVE`): `off`; `shadow` (it judges and logs while you still decide; `npm run report` compares its verdicts with your answers); `chat` (may skip the question in chat); `broad` (the default: also for new events from background runs). Every auto-approval is announced on your phone and logged.
@@ -120,6 +126,7 @@ src/radar.ts         the proactive radar: periodic calendar and mail look-around
 src/radar-rules.ts   when the radar is due, which of its messages may be sent (pure, tested)
 src/messages.ts      the log of every message the assistant sent (with Signal timestamps): reaction lookup, "what I told you" context, size-bounded with a model-written summary of the oldest
 src/summarize.ts     the small model that writes that summary
+src/dream.ts         the nightly dream: proposals as JSON, what code applies, snapshots and undo (pure core, tested)
 src/connectors.ts    which connectors (Notion, Calendar, mail) the last run could see
 src/notes.ts         the owner's notes: how background runs read them, path guard, forget (pure core, tested)
 src/memory-tools.ts  the chat-only `forget_note` tool (in-process MCP server)
