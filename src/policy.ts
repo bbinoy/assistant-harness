@@ -1,4 +1,6 @@
 import type { Source } from "./audit.ts";
+import { realpathSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import { isNotePath } from "./notes.ts";
 import { settings } from "./settings.ts";
 
@@ -63,6 +65,17 @@ const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
 // something the agent read is seen at once. Nothing unattended may touch them. Checked before
 // any allow list, so adding them to one can never open them up.
 const NOTE_FILE_TOOLS = new Set(["Read", "Write", "Edit"]);
+// The logs folder may be READ (never written) in chat, so the owner can ask what a voice message
+// said or what happened. Symlinks are resolved first, so a link cannot lead out of the folder.
+export function isLogPath(path: unknown, logsDir: string = settings.logsDir): path is string {
+  if (typeof path !== "string" || path === "") return false;
+  try {
+    return realpathSync(resolve(path)).startsWith(realpathSync(logsDir) + sep);
+  } catch {
+    return false; // missing file or folder
+  }
+}
+
 const FORGET_NOTE = "mcp__memory__forget_note";
 
 // --- what the model never sees ---
@@ -99,7 +112,7 @@ const WEB_FETCH = "WebFetch";
 export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
-  if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && isNotePath(input.file_path) ? "allow" : "deny";
+  if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && (isNotePath(input.file_path) || (tool === "Read" && isLogPath(input.file_path))) ? "allow" : "deny";
   if (tool === FORGET_NOTE) return source === "chat" ? "allow" : "deny";
   if (tool === WEB_SEARCH) return source === "chat" ? "allow" : "deny";
   if (tool === WEB_FETCH) return source === "chat" ? "ask" : "deny";

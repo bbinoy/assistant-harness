@@ -14,96 +14,96 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
   - 📆 **Organises your calendar.** Creates calendar entries from emails and meetings, keeps an eye on conflicts and helps you to resolve them, and makes sure meetings are prepared.
   - 📰 **Summarises your newsletters into a short news digest**: Actually interested in the newsletters you subscribed to but started ignoring them after a while? Number One gives you the top 3 nuggets based on your preferences, and archives the newsletters for you.
 - 🤝 **Is helpful**
-  - 💬 **Listens to your messages on Signal.** Message yourself on Signal and talk to your mail, calendar and tasks in plain language. It has a personality (sassy by default, change it to taste).
+  - 💬 **Listens to your messages on Signal.** Message yourself on Signal and talk to your mail, calendar and tasks in plain language. It has a personality (warm, folksy and relentlessly optimistic, in the style of Ted Lasso, by default; change it to taste).
   - ✋ **Is proactive.** Reaches out to you on Signal if something needs your attention: urgent mail right away, and every couple of hours a look at your calendar for meetings about to start (with their prep) and clashes.
   - 🧠 **Remembers your instructions.** "Anything from the kids' school is urgent." "Dr. Weber is a client, write to him formally." "No meetings before 10." "Never use em dashes." Say it once in chat and it shapes how mail is sorted, how drafts read and when meetings are proposed. 
   - 🙋 **Asks for your approval.** Sending, scheduling and sharing always wait for your OK, by reply, by a natural sentence, or by tapping 👍 on the question.
 
-## A day in the life: Hitchhiker's edition
+## A day in the life: AFC Richmond edition
 
-*(Characters borrowed with love from Douglas Adams. The Vogons have not been consulted, and would hate it.)*
+*(Characters borrowed with love from Ted Lasso. Nobody at Richmond has been consulted, though Roy would say it's "bloody fine, I suppose.")*
 
 **Tuesday, 07:00.** Your Mac wakes and the heartbeat resumes after its night off. It finds 21 messages that arrived while you slept, archives the 19 that are clearly noise, and runs the daily brief. The full brief lands in your inbox. On Signal you get the short version, with the pep talk first:
 
 > **💪 Pep talk**
-> Arthur, DON'T PANIC. The big friendly letters on the cover are doing most of the work today, and what is left is three things. Answer the Vogons before 11:00 and the rest is easy. You have survived the destruction of the Earth, so a Tuesday is within your range.
+> Mornin', Coach! Now, I know the inbox looks like a pile of angry geese, but today is really just three things, and you've handled worse before your first biscuit. Be a goldfish about the rest. Answer the Board before 11:00 and everything else is a nice, easy warm-up.
 >
 > **🎯 Focus**
-> **Answer the Vogon Planning Department about your house before 11:00.** They have asked twice, and the second message just says "Resistance is useless."
-> - Magrathean tourism pitch at 14:00, prep page is ready.
-> - Ring the plumber. Again. He is mostly harmless but never calls back.
+> **Answer Rebecca about the stadium budget before 11:00.** She's asked twice, and the second message just says "Ted. Budget."
+> - Press conference prep at 14:00, the prep page is ready.
+> - Ring the boiler repairman. Again. That man is harder to reach than a Roy Kent smile.
 >
 > 📧 The full brief is in your email. Say "brief" and I'll send it here.
 
 The email has the rest, kept to the day ahead:
 
 > **📥 Needs you**
-> - Zaphod Beeblebrox: wants a yes or no on "the Infinite Improbability pivot" (draft ready)
-> - Slartibartfast: the fjord award submission "has opinions" about the new colour palette, reply owed for 3 days (draft ready)
-> - Vogon Planning Department: form 7B-stroke-6 (demolition objection), due Friday (task added)
+> - Rebecca Welton: wants a yes or no on "the sponsorship pivot" (draft ready)
+> - Coach Beard: the new training schedule "has opinions" about Thursday, reply owed for 3 days (draft ready)
+> - Premier League Compliance: form 7B-stroke-6, due Friday (task added)
 >
 > **📅 Today**
-> - 09:30 Heart of Gold crew stand-up (no prep needed)
-> - 14:00 Magrathean Tourism Board, "Is 42 enough?" (prep -> link)
-> - 17:30 Towel-folding workshop overlaps the Q3 Synergy Brunch with the Vogons. Suggest moving the brunch to 11:00 (not changed)
-> - Tomorrow: 08:30 Infinite Improbability Drive maintenance
+> - 09:30 Diamond Dogs stand-up (no prep needed)
+> - 14:00 Press conference, "Is belief enough?" (prep -> link)
+> - 17:30 Dani's kickball clinic overlaps the Q3 Sponsors' Brunch. Suggest moving the brunch to 11:00 (not changed)
+> - Tomorrow: 08:30 Locker room team talk
 >
 > **✅ Tasks**
-> - ⚠️ overdue: renew your towel (4 days)
-> - due today: invoice the Sirius Cybernetics Corporation (Complaints Division, now a very large building)
+> - ⚠️ overdue: renew your coaching licence (4 days)
+> - due today: invoice the Dubai Air sponsorship (they're very nice about it, which is worrying)
 > - 6 more this week, 8 later
 >
 > **⏳ Waiting on**
-> - The plumber: no reply in 6 days, 3rd follow-up. Want a nudge draft?
+> - The boiler repairman: no reply in 6 days, 3rd follow-up. Want a nudge draft?
 >
 > **📡 Radar**
-> - Brockian Ultra-Cricket Summit, 21 Oct 18:00, register by 18 Oct (Pan Galactic Weekly)
-> - Milliways, the Restaurant at the End of the Universe, closes a 2M seed round (Restaurant Ventures Weekly)
-> - AI: a new model can now say "it depends" in 14 languages, Vogon included. Deep Thought's lawyers are nervous (The Gradient Descent Gazette)
+> - Lisbon: Football Analytics Summit, 21 Oct 18:00, register by 18 Oct (The Tactics Weekly)
+> - London: a biscuit-delivery startup closes a 2M seed round (Snack Ventures Weekly)
+> - AI: a new model can now say "it depends" in 14 languages, Welsh included. Your lawyers are nervous (The Gradient Descent Gazette)
 >
 > **🧹 Housekeeping**
-> I archived 19 overnight: 13 newsletters and cold outreach (one very persistent Sirius Cybernetics sales rep with a Genuine People Personality), plus Eddie the shipboard computer's weekly digest, a Babel fish delivery notice, the shuttle ticket receipt, Trillian's accepted calendar invite, and four more cheerful status pings from Eddie. +2 tasks, 1 prep page, 1 conflict flagged, nothing deleted by me.
+> I archived 19 overnight: 13 newsletters and cold outreach (one very persistent salesman who wanted to sell AFC Richmond a "synergy-based pitch"), plus the stadium app's weekly digest, a kit-delivery notice, the team bus receipt, Keeley's accepted calendar invite, and four more cheerful pings from the laundry system. +2 tasks, 1 prep page, 1 conflict flagged, nothing deleted by me.
 
 **10:42.** A new message arrives while you are in a meeting. It is urgent, so you get exactly one alert:
 
 > 📥 1 email needs you:
-> - Trillian: Need your decision on the proposal by noon (the Heart of Gold is waiting on a yes or no)
+> - Keeley Jones: Need your decision on the PR plan by noon (the whole campaign is waiting on a yes or no)
 
 **11:15.** A scheduling request arrives. It is routine, so the assistant checks your calendar and leaves a draft in the thread. It never sends:
 
 > 🤝 Handled 1:
-> Ford Prefect: drafted a reply offering Tue 15:00 or Wed 10:30, both free (he wants a pint before the world ends, again)
+> Roy Kent: drafted a reply offering Tue 15:00 or Wed 10:30, both free (he'd like it "quick and without any bloody small talk")
 
-**Any time.** Just talk to Number One, in text or in a voice note (transcribed on your Mac, and shown back to you so mishearings get caught). Small icons on your message show what it is doing: 👀 working on it, ✅ done, ⚠️ something broke.
+**Any time.** Just talk to Number One, in text or in a voice note (transcribed on your Mac, nothing leaves it). Small icons on your message show what it is doing: 👀 working on it, ✅ done, ⚠️ something broke.
 
 > **You:** what's on my plate today?
-> **Number One:** Three things, one of them is a bulldozer.
-> - **The Vogons** want an answer about your house by 11:00. Their second message is just "Resistance is useless."
-> - Towel-folding at 17:30 collides with the Q3 Synergy Brunch. I'd move the brunch. No one has ever been saved by a brunch.
-> - Your towel renewal is 4 days overdue. A hitchhiker should always know where their towel is. I am not judging. I am just saying.
+> **Number One:** Three things, and not one of them is a lion! 🦁
+> - **Rebecca** wants an answer on the budget by 11:00. Her second message is just "Ted. Budget."
+> - Kickball clinic at 17:30 collides with the Sponsors' Brunch. I'd move the brunch. Nobody ever won a championship over a quiche.
+> - Your coaching licence is 4 days overdue. No judgment here, buddy. Just a gentle nudge, like a friendly goat.
 >
-> **You:** draft a reply to Zaphod: yes to the pivot, not the logo
-> **Number One:** Draft is waiting in the thread. Yes to the Improbability pivot, a polite no to the logo (the second head disagreed too), zero exclamation marks. Not sent, obviously. Even a President of the Galaxy gets proofread.
+> **You:** draft a reply to Rebecca: yes to the pivot, not the logo
+> **Number One:** Draft's waiting in the thread. Yes to the sponsorship pivot, a kind no to the logo (it looked a little like a sad pie), zero exclamation marks. Not sent, of course. Even the boss gets a proofread.
 >
-> **You:** delete the angry email from the Vogon Poetry Appreciation Society
-> **Number One:** That one is on my never-delete list. I can archive it, so it sits out of sight but safe. Want that?
+> **You:** delete the angry email from the Tottenham fan club
+> **Number One:** That one's on my never-delete list. I can archive it though, so it's out of sight but safe, like a shy turtle. Want that?
 > **You:** ok
-> **Number One:** Archived. It can't read you any more poetry now.
+> **Number One:** Archived. It can't yell at you now.
 >
-> **You:** remember that messages from Zaphod are never urgent
-> **Number One:** Saved: Zaphod's "URGENT!!!" emails will now wait their turn. Statistically, that turn is never.
+> **You:** remember that messages from Jamie are never urgent
+> **Number One:** Saved: Jamie's "URGENT!!!" emails will now wait their turn. Which, between you and me, is a long line.
 
 **11:20.** Plain things on your own calendar just happen, and you are told. Anything that involves other people waits for your say-so:
 
 > **You:** put "find a decent cup of tea" in my calendar tomorrow at 15:00
 > **Number One:** ✅ Done without asking: 📅 Create calendar event "find a decent cup of tea", Wed 14 Oct, 15:00-16:00
 >
-> **You:** and invite Ford to it
+> **You:** and invite Coach Beard to it
 >
 > **Number One:** Approve?
 > 📅 Change calendar event
 > "find a decent cup of tea"
-> 👥 Ford Prefect
+> 👥 Coach Beard
 >
 > Reply yes, no, or tell me what to change, or react 👍 / 👎 (5 min, then I assume no).
 >

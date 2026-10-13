@@ -15,6 +15,7 @@ import { createProposer } from "./propose.ts";
 import { createRadar } from "./radar.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
+import { appendLine } from "./state.ts";
 import { ensureSignalDaemon } from "./signal-daemon.ts";
 import { SignalClient, type IncomingMessage } from "./signal.ts";
 import { transcribe, voiceReady } from "./transcribe.ts";
@@ -42,8 +43,8 @@ signal.onMessage((m) => {
   (m.audio ? hear(m) : route(m)).catch((e) => console.error("route error:", e.message));
 });
 
-// A voice message: transcribe it here, show what was heard (so a mishearing is caught), then handle
-// it as chat. A spoken "yes" is never an approval (route skips the approval check for it).
+// A voice message: transcribe it here, log the transcript (logs/voice.jsonl, to inspect a mishearing), then
+// handle it as chat. A spoken "yes" is never an approval (route skips the approval check for it).
 async function hear(m: IncomingMessage) {
   const target = { author: m.from, timestamp: m.timestamp };
   void signal.react("👂", target);
@@ -61,7 +62,7 @@ async function hear(m: IncomingMessage) {
     void signal.react("🤷", target);
     return void (await out.replyPlain("I couldn't hear any words in that voice message."));
   }
-  await out.replyPlain(`🎙️ I heard: “${heard}”`);
+  appendLine("logs/voice.jsonl", JSON.stringify({ at: new Date().toISOString(), messageTimestamp: m.timestamp, text: heard })); // for inspection; the chat can read it
   await route({ ...m, text: heard, audio: undefined, voice: true });
 }
 

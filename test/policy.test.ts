@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { settings } from "../src/settings.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { idsOf } from "../src/agent.ts";
@@ -115,4 +117,32 @@ test("web: search is allowed in chat, opening a page asks, and background runs g
   assert.equal(classify("WebFetch", { url: "https://example.com/x", prompt: "hours" }, "chat"), "ask");
   assert.equal(classify("WebFetch", { url: "file:///etc/passwd", prompt: "x" }, "chat"), "deny"); // the file:// rule still wins
   for (const source of ["brief", "handler", "heartbeat"] as const) for (const t of ["WebSearch", "WebFetch"]) assert.equal(classify(t, { url: "https://example.com", query: "x" }, source), "deny", `${t} (${source})`);
+});
+
+test("logs: chat may read them (never write), and links cannot lead out", async () => {
+  const { mkdtempSync, writeFileSync, symlinkSync, mkdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { isLogPath } = await import("../src/policy.ts");
+  const root = mkdtempSync(join(tmpdir(), "logs-"));
+  const logs = join(root, "logs");
+  mkdirSync(logs);
+  writeFileSync(join(logs, "voice.jsonl"), "{}\n");
+  writeFileSync(join(root, "secret.txt"), "x");
+  symlinkSync(join(root, "secret.txt"), join(logs, "link.txt"));
+  assert.equal(isLogPath(join(logs, "voice.jsonl"), logs), true);
+  assert.equal(isLogPath(join(logs, "..", "secret.txt"), logs), false);
+  assert.equal(isLogPath(join(logs, "link.txt"), logs), false);
+  assert.equal(isLogPath(join(logs, "missing.log"), logs), false);
+  assert.equal(isLogPath(undefined, logs), false);
+});
+
+test("logs: Read is allowed in chat only, Write and Edit never", () => {
+  const log = `${settings.logsDir}/voice.jsonl`;
+  mkdirSync(settings.logsDir, { recursive: true });
+  writeFileSync(log, "");
+  assert.equal(classify("Read", { file_path: log }, "chat"), "allow");
+  assert.equal(classify("Write", { file_path: log }, "chat"), "deny");
+  assert.equal(classify("Edit", { file_path: log }, "chat"), "deny");
+  for (const source of ["brief", "handler", "radar"] as const) assert.equal(classify("Read", { file_path: log }, source), "deny", source);
 });
