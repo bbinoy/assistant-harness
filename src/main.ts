@@ -33,6 +33,7 @@ const signal = new SignalClient(
   settings.signalPort,
   config.signalAccount,
   config.signalAccount !== config.ownerNumber ? { number: config.ownerNumber, aci: config.ownerAci } : undefined,
+  console, // the app's console is the timestamped, redacting one from log.ts
 );
 // What was said goes into that conversation's own log: the owner's chat, or the group's (made on first use).
 function record(groupId: string | undefined, kind: Kind, ts: number, text: string) {
@@ -88,7 +89,7 @@ const pipeline: Pipeline = createPipeline({
   transcript,
   speech: {
     ready: () => settings.voiceReplies && signal.separateAccount && providerReady(settings.tts).ok,
-    synth: (words) => synthesizeWith(words, settings.tts),
+    synth: (words) => synthesizeWith(words, settings.tts, console),
   },
   approvals,
   vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
@@ -124,7 +125,7 @@ signal.onReaction((r) => {
   pipeline.handleIncoming(owner(), { type: "reaction", r }).catch((e) => console.error("reaction error:", e.message));
 });
 
-await ensureSignalDaemon(config.signalAccount, settings.signalHost, settings.signalPort, openLog("logs/signal-daemon.log"));
+await ensureSignalDaemon(config.signalAccount, settings.signalHost, settings.signalPort, openLog("logs/signal-daemon.log"), console);
 await signal.connect();
 console.log(`connected to signal-cli (${signal.separateAccount ? "own account" : "Note to Self"}); accepting only ${mask(config.ownerNumber)}; auth: ${config.credential}`);
 

@@ -1,4 +1,5 @@
 import net from "node:net";
+import { silentLogger, type Logger } from "./logger.ts";
 
 // The Signal client: a JSON-RPC 2.0 connection to a running `signal-cli daemon` (one JSON object per line over
 // TCP), plus the pure functions that turn what signal-cli reports into our own small types.
@@ -188,11 +189,13 @@ export class SignalClient {
   private account: string;
   private peer: string | undefined;
   private peerAci: string | undefined;
+  private log: Logger;
 
   // `account`: who signal-cli runs as. Without `peer`, that is the owner's own account (we are a
   // linked device and talk in Note to Self). With `peer`, it is the assistant's own account and
   // `peer` is the person it talks to.
-  constructor(host: string, port: number, account: string, peer?: { number: string; aci?: string }) {
+  constructor(host: string, port: number, account: string, peer?: { number: string; aci?: string }, logger: Logger = silentLogger) {
+    this.log = logger;
     this.host = host;
     this.port = port;
     this.account = account;
@@ -230,7 +233,7 @@ export class SignalClient {
     try {
       await this.call("sendReceipt", { recipient: from || this.peer, targetTimestamp: [timestamp], type: "read" });
     } catch (e) {
-      console.error("read receipt failed:", (e as Error).message);
+      this.log.warn("read receipt failed:", (e as Error).message);
     }
   }
 
@@ -270,7 +273,7 @@ export class SignalClient {
       socket.on("close", () => {
         for (const p of this.pending.values()) p.reject(new Error("socket closed"));
         this.pending.clear();
-        console.error("signal socket closed");
+        this.log.error("signal socket closed");
         process.exit(1); // launchd (later) restarts us; fail loudly for now
       });
     });
@@ -291,7 +294,7 @@ export class SignalClient {
     try {
       msg = JSON.parse(line);
     } catch {
-      console.error("unparseable line from signal-cli");
+      this.log.warn("unparseable line from signal-cli");
       return;
     }
     // A response to one of our requests.
@@ -341,7 +344,7 @@ export class SignalClient {
         targetTimestamp: target.timestamp,
       });
     } catch (e) {
-      console.error(`reaction ${emoji} failed:`, (e as Error).message);
+      this.log.warn(`reaction ${emoji} failed:`, (e as Error).message);
     }
   }
 

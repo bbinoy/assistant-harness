@@ -7,7 +7,6 @@ import { FakeSignalDaemon, FakeRpcError, type FakeRequest } from "../src/testing
 // take the test runner down with them.
 const realExit = process.exit;
 process.exit = ((code?: number) => (code === 1 ? undefined : realExit(code))) as typeof process.exit; // only the client's exit(1)
-console.error = () => {};
 
 type Req = FakeRequest;
 const RpcError = FakeRpcError;
@@ -172,4 +171,20 @@ test("client: a read receipt names a single recipient string (peer, peer by acco
   assert.deepEqual(d.requests.map((r) => r.params.targetTimestamp), [[10], [11], [12]]);
   assert.equal(d.requests[0]!.params.type, "read");
   await done();
+});
+
+test("client: warnings go to the injected logger (and nowhere by default)", async () => {
+  const d = await FakeSignalDaemon.start(() => new RpcError("nope"));
+  open.push(d);
+  const lines: string[] = [];
+  const c = new SignalClient("127.0.0.1", d.port, ME, PEER, { info: () => {}, error: () => {}, warn: (...a) => void lines.push(a.join(" ")) });
+  await c.connect();
+  await until(() => d.connections > 0);
+  await c.markRead(1);
+  d.raw("garbage\n");
+  await c.react("x", { author: PEER.number, timestamp: 1 });
+  await until(() => lines.length === 3);
+  assert.match(lines.join("|"), /read receipt failed: nope/);
+  assert.match(lines.join("|"), /unparseable line/);
+  assert.match(lines.join("|"), /reaction x failed: nope/);
 });

@@ -1,6 +1,7 @@
 // Starts and supervises `signal-cli daemon` on localhost, so the client has something to connect to.
 import { spawn } from "node:child_process";
 import net from "node:net";
+import { silentLogger, type Logger } from "./logger.ts";
 
 function portOpen(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -14,18 +15,18 @@ function portOpen(host: string, port: number): Promise<boolean> {
 // If the child ever dies we exit too, so launchd restarts the whole agent cleanly
 // instead of leaving a harness with no Signal connection.
 // `logFd`: where the daemon's output goes (a file descriptor opened for appending); default: discarded.
-export async function ensureSignalDaemon(account: string, host: string, port: number, logFd?: number): Promise<void> {
+export async function ensureSignalDaemon(account: string, host: string, port: number, logFd?: number, log: Logger = silentLogger): Promise<void> {
   if (await portOpen(host, port)) {
-    console.log("signal-cli daemon already running, reusing it");
+    log.info("signal-cli daemon already running, reusing it");
     return;
   }
-  const log = logFd ?? "ignore";
+  const out = logFd ?? "ignore";
   // 127.0.0.1 only: the socket is unauthenticated, anything that can reach it can send as you.
   const child = spawn("signal-cli", ["-a", account, "daemon", "--tcp", `${host}:${port}`, "--no-receive-stdout"], {
-    stdio: ["ignore", log, log],
+    stdio: ["ignore", out, out],
   });
   child.once("exit", (code, sig) => {
-    console.error(`signal-cli exited (code=${code} signal=${sig}); exiting so launchd restarts us`);
+    log.error(`signal-cli exited (code=${code} signal=${sig}); exiting so launchd restarts us`);
     process.exit(1);
   });
   const stop = () => child.kill("SIGTERM");
@@ -34,7 +35,7 @@ export async function ensureSignalDaemon(account: string, host: string, port: nu
 
   for (let i = 0; i < 60; i++) {
     if (await portOpen(host, port)) {
-      console.log("signal-cli daemon started");
+      log.info("signal-cli daemon started");
       return;
     }
     await new Promise((r) => setTimeout(r, 500));
