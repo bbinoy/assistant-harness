@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs><clipPath id="c"><circle cx="256" cy="256" r="256"/></clipPath></defs>
+  <g>
+    <rect width="512" height="512" fill="#1f4e9c"/>
+    <circle cx="256" cy="520" r="230" fill="#14336b"/>
+    <!-- shoulders / jacket -->
+    <path d="M70 512 Q90 380 256 365 Q422 380 442 512 Z" fill="#14336b"/>
+    <path d="M256 365 L226 512 L286 512 Z" fill="#f2f2f2"/>
+    <!-- neck -->
+    <rect x="224" y="320" width="64" height="60" rx="20" fill="#e8b48c"/>
+    <!-- face -->
+    <ellipse cx="256" cy="245" rx="92" ry="105" fill="#f0c19b"/>
+    <!-- ears -->
+    <ellipse cx="164" cy="250" rx="16" ry="26" fill="#e8b48c"/>
+    <ellipse cx="348" cy="250" rx="16" ry="26" fill="#e8b48c"/>
+    <!-- cap -->
+    <path d="M160 195 Q160 110 256 108 Q352 110 352 195 Q256 170 160 195 Z" fill="#f5c518"/>
+    <path d="M150 198 Q256 172 362 198 Q372 214 346 214 Q256 192 166 214 Q140 214 150 198 Z" fill="#d9a900"/>
+    <circle cx="256" cy="112" r="9" fill="#d9a900"/>
+    <!-- eyebrows -->
+    <path d="M200 228 Q222 214 244 228" stroke="#6b4423" stroke-width="9" fill="none" stroke-linecap="round"/>
+    <path d="M268 228 Q290 214 312 228" stroke="#6b4423" stroke-width="9" fill="none" stroke-linecap="round"/>
+    <!-- eyes -->
+    <circle cx="222" cy="252" r="9" fill="#2b2118"/>
+    <circle cx="290" cy="252" r="9" fill="#2b2118"/>
+    <circle cx="225" cy="249" r="3" fill="#fff"/>
+    <circle cx="293" cy="249" r="3" fill="#fff"/>
+    <!-- nose -->
+    <path d="M256 258 Q246 290 262 292" stroke="#d99a72" stroke-width="7" fill="none" stroke-linecap="round"/>
+    <!-- moustache -->
+    <path d="M178 305 Q215 272 256 292 Q297 272 334 305 Q300 322 256 306 Q212 322 178 305 Z" fill="#6b4423"/>
+    <!-- smile -->
+    <path d="M214 322 Q256 362 298 322" stroke="#b5483a" stroke-width="8" fill="none" stroke-linecap="round"/>
+    <!-- BELIEVE sign -->
+    <g transform="rotate(-6 256 440)">
+      <rect x="116" y="410" width="280" height="64" rx="8" fill="#f5c518" stroke="#1b1b1b" stroke-width="5"/>
+      <text x="256" y="455" font-family="Helvetica, Arial, sans-serif" font-weight="800" font-size="40" text-anchor="middle" fill="#1b1b1b" letter-spacing="3">BELIEVE</text>
+    </g>
+  </g>
+</svg>

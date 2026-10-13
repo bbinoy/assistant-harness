@@ -28,11 +28,11 @@ The recovery key is the 64-character key under Signal's Settings → Backups, an
 ## 2. Give it a name (and optionally a username)
 
 ```bash
-signal-cli -a ACCOUNT updateProfile --given-name "Ted" --avatar ~/Pictures/ted.png   # run it BEFORE step 3: once the assistant is running, signal-cli holds the account and a second command would hang
+signal-cli -a ACCOUNT updateProfile --given-name "Ted" --avatar assets/ted.png   # run it BEFORE step 3: once the assistant is running, signal-cli holds the account and a second command would hang
 signal-cli -a ACCOUNT updateAccount -u tedassistant      # optional: you can then find it by username
 ```
 
-`ACCOUNT` is the number from A, or the account key from B.
+`ACCOUNT` is the number from A, or the account key from B. `assets/ted.png` is a sample avatar (original artwork, free to use); any square picture works.
 
 ## 3. Switch the assistant over
 
