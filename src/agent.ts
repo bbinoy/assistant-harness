@@ -13,7 +13,7 @@ import { isIndex, isNotePath, LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, pa
 import { createMemoryServer } from "./memory-tools.ts";
 import { briefSystem, chatSystem, handlerSystem, radarSystem } from "./persona.ts";
 import { classify, hiddenTools, isReadTool } from "./policy.ts";
-import { recentPings } from "./pings.ts";
+import { recentNotices } from "./messages.ts";
 import { splitReaction } from "./reaction.ts";
 import { OWNER, settings } from "./settings.ts";
 import { planSession, type ChatSession } from "./session.ts";
@@ -336,7 +336,7 @@ export function prepareChat(approve: Approve, notify: (text: string) => Promise<
 
 const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
   source: "chat",
-  systemPrompt: chatSystem(readText(LAST_BRIEF), new Date(), missingSetup(readNotes(), down()), down(), recentPings()),
+  systemPrompt: chatSystem(readText(LAST_BRIEF), new Date(), missingSetup(readNotes(), down()), down(), recentNotices()),
   resumeChatSession: true,
   memoryNotify: notify,
   maxTurns: 40,

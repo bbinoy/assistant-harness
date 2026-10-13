@@ -41,15 +41,6 @@ test("radar: a new day resets the counter, old keys expire", () => {
   assert.equal(rollover({ day: "2026-10-12", sent: 5, keys: {} }, "2026-10-12", NOW).sent, 5);
 });
 
-test("pings: only the last day, oldest first, one line each", async () => {
-  const { pingLines } = await import("../src/pings.ts");
-  const now = new Date("2026-10-12T12:00:00");
-  const lines = pingLines([{ at: "2026-10-10T12:00:00", text: "too old" }, { at: "2026-10-12T09:30:00", text: "first\nsecond line" }, { at: "2026-10-12T11:00:00", text: "later" }], now);
-  assert.equal(lines.length, 2);
-  assert.match(lines[0]!, /^\[09:30\] first \/ second line$/);
-  assert.match(lines[1]!, /^\[11:00\] later$/);
-});
-
 test("radar: the next run is set shortly before the next meeting, within bounds", async () => {
   const { scheduleNext, nudge, isDue } = await import("../src/radar-rules.ts");
   const now = new Date("2026-10-13T10:00:00Z");

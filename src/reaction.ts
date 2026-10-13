@@ -1,3 +1,6 @@
+import { fence } from "./fence.ts";
+import { OWNER } from "./settings.ts";
+
 // The model may answer with an emoji reaction on the owner's message instead of (or before) a text,
 // for acknowledgements that need no words: thanks, ok, a joke that landed. It writes
 // "[[react: 👍]]" at the very start of its reply. Pure and strict: exactly one emoji, only at the
@@ -15,4 +18,14 @@ export function splitReaction(reply: string): { reaction?: string; text: string 
   const m = MARK.exec(reply);
   if (!m || !isOneEmoji(m[1]!)) return { text: reply };
   return { reaction: m[1]!, text: reply.slice(m[0].length).trim() };
+}
+
+// The prompt for a reaction the owner put on a message: what they reacted with, and the message
+// (from the message log; it is fenced because it may quote mail). It carries no instruction on
+// what to do: the model judges, and the owner's notes can tune it.
+export function reactionPrompt(emoji: string, msg?: { at: string; kind: string; text: string }): string {
+  const about = msg
+    ? `to this message of yours (${msg.kind}, sent ${msg.at.slice(0, 16).replace("T", " ")} UTC):\n${fence("reacted_message", msg.text)}`
+    : "to a message that is no longer in your log (or to one of their own).";
+  return `${OWNER} reacted ${emoji} ${about}`;
 }

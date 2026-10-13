@@ -6,7 +6,7 @@ import { overBudget } from "./budget.ts";
 import { buildDigest, readTriageSince } from "./digest.ts";
 import { fence } from "./fence.ts";
 import { isPaused, localDay } from "./pause.ts";
-import { recentPings, recordPing } from "./pings.ts";
+import { recentNotices } from "./messages.ts";
 import { acceptMessages, emptyState, isDue, nudge, rollover, scheduleNext, WINDOW_MINUTES, type RadarState } from "./radar-rules.ts";
 import { settings } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";
@@ -75,7 +75,7 @@ export function createRadar(deps: { approve: Approve; notify: (text: string) => 
       const windowMinutes = WINDOW_MINUTES;
       const started = Date.now();
       const { structured, costUsd } = await runRadarTurn(
-        radarPrompt(now, since, windowMinutes, buildDigest(readTriageSince(since), since), recentPings(now), Object.keys(state.keys)),
+        radarPrompt(now, since, windowMinutes, buildDigest(readTriageSince(since), since), recentNotices(now), Object.keys(state.keys)),
         deps.approve,
         SCHEMA,
       );
@@ -86,7 +86,6 @@ export function createRadar(deps: { approve: Approve; notify: (text: string) => 
       const keys = { ...state.keys };
       for (const m of messages) {
         try {
-          recordPing(m.text, now);
           await deps.notify(m.text);
           keys[m.key] = Date.now();
           sent++;

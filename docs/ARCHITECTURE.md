@@ -94,7 +94,7 @@ What is left is model time: a tool question is two or three model calls of 2 to 
 
 ```
 src/main.ts          wiring: Signal in, chat turns, heartbeat, brief, approvals
-src/signal*.ts       signal-cli JSON-RPC client and daemon supervision
+packages/signal/     @number-one/signal: signal-cli JSON-RPC client, daemon supervision, local voice transcription (a workspace package, usable on its own)
 src/markdown.ts      Markdown → Signal text styles (UTF-16 offsets)
 src/outbound.ts      sending, chunking, echo guard
 src/guards.ts        owner allowlist (pure, tested)
@@ -118,7 +118,8 @@ src/propose.ts       shows the handler's reply drafts on Signal and reads a draf
 src/proposals.ts     the draft rules: id from the tool result, Signal text and send-approval text from the draft as Mailbird holds it (pure, tested)
 src/radar.ts         the proactive radar: periodic calendar and mail look-around, sends only what matters
 src/radar-rules.ts   when the radar is due, which of its messages may be sent (pure, tested)
-src/pings.ts         what the assistant sent on its own, for chat context and de-duplication
+src/messages.ts      the log of every message the assistant sent (with Signal timestamps): reaction lookup, "what I told you" context, size-bounded with a model-written summary of the oldest
+src/summarize.ts     the small model that writes that summary
 src/connectors.ts    which connectors (Notion, Calendar, mail) the last run could see
 src/notes.ts         the owner's notes: how background runs read them, path guard, forget (pure core, tested)
 src/memory-tools.ts  the chat-only `forget_note` tool (in-process MCP server)

@@ -1,6 +1,7 @@
+import { join } from "node:path";
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { withQuoteContext, shouldThread } from "./quote.ts";
-import { splitReaction } from "./reaction.ts";
+import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { ask, setDraftReader, AuthError, RateLimitError, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
@@ -9,28 +10,29 @@ import { acceptOwner } from "./guards.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
-import { recordPing } from "./pings.ts";
+import { compactIfNeeded, findMessage, recordMessage } from "./messages.ts";
+import { summarizeWithHaiku } from "./summarize.ts";
 import { Mailbird } from "./mailbird.ts";
 import { createProposer } from "./propose.ts";
 import { createRadar } from "./radar.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
-import { appendLine } from "./state.ts";
-import { ensureSignalDaemon } from "./signal-daemon.ts";
-import { SignalClient, type IncomingMessage } from "./signal.ts";
-import { transcribe, voiceReady } from "./transcribe.ts";
+import { appendLine, openLog } from "./state.ts";
+import { ensureSignalDaemon, SignalClient, transcribe, voiceReady, type IncomingMessage, type IncomingReaction } from "@number-one/signal";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 
 const signal = new SignalClient(settings.signalHost, settings.signalPort, config.ownerNumber);
-const out = createOutbound(signal);
-const approve: Approve = (description, call, abort) => approvals.request(out.replyPlain, description, call, abort);
+const out = createOutbound(signal, (kind, ts, text) => {
+  recordMessage(kind, ts, text);
+  void compactIfNeeded(summarizeWithHaiku).catch((e) => console.error("messages: compaction failed:", e.message));
+});
+const approve: Approve = (description, call, abort) => approvals.request((t) => out.replyPlain(t, "approval"), description, call, abort);
 // `say` is a plain message to the owner. `notify` is what the assistant sends on its own (mail
 // alerts, handled mail, setup problems) and is also remembered, so the chat knows what a reply
-// like "yes, do that" refers to (pings.ts). Memory announcements and chat answers use `say`.
-const say = async (text: string) => void (await out.replyPlain(text));
+// like "yes, do that" refers to (messages.ts). Memory announcements and chat answers use `say`.
+const say = async (text: string) => void (await out.replyPlain(text, "notice"));
 const notify = async (text: string) => {
-  recordPing(text);
   await say(text);
   prepareChat(approve, say); // the chat prompt carries recent pings, so the warm process is stale now
 };
@@ -50,9 +52,9 @@ async function hear(m: IncomingMessage) {
   void signal.react("👂", target);
   let heard = "";
   try {
-    heard = await transcribe(m.audio!);
+    heard = await transcribe(join(settings.signalAttachmentsDir, m.audio!.id), settings.whisperModel);
   } catch (e) {
-    const gaps = voiceReady();
+    const gaps = voiceReady(settings.whisperModel);
     console.error("voice: transcription failed:", (e as Error).message);
     void signal.react("⚠️", target);
     return void (await out.replyPlain(gaps.ok ? "I couldn't make out that voice message. Try again or type it." : `I can't transcribe voice messages yet: missing ${gaps.missing.join(", ")}.`));
@@ -69,14 +71,16 @@ async function hear(m: IncomingMessage) {
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal
 // (propose.ts), and the approval of any send shows the draft read back from here (agent.ts).
 setAutoApprovedNotice(say);
-const proposer = createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t) });
+const proposer = createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t, "draft") });
 setDraftReader(proposer.read);
 
 // A 👍 / 👎 on the pending "Approve?" message answers it.
 signal.onReaction((r) => {
   if (!acceptOwner(r, config.ownerNumber) || r.isRemove) return;
+  if (signal.isOwnReaction(r)) return; // our own status icons come back as reactions
   const outcome = approvals.answerReaction(r.emoji, r.targetTimestamp);
-  if (outcome !== "ignored") console.log(`approval ${outcome} (by reaction)`);
+  if (outcome !== "ignored") return void console.log(`approval ${outcome} (by reaction)`);
+  queue = queue.then(() => reacted(r)).catch((e) => console.error("reaction error:", e.message));
 });
 
 // Chat turns run one at a time, in order: two at once would share one session.
@@ -99,6 +103,23 @@ async function route(m: IncomingMessage) {
   queue = queue.then(() => chat(m)).catch((e) => console.error("queue error:", e.message));
 }
 
+// Any other reaction is feedback on a message. The chat agent is told which message it was on
+// (looked up by timestamp in the message log) and decides what, if anything, it means.
+async function reacted(r: IncomingReaction) {
+  console.log(`owner reacted ${r.emoji}`);
+  try {
+    const prompt = reactionPrompt(r.emoji, findMessage(r.targetTimestamp));
+    const { text } = await ask(prompt, approve, say, prompt);
+    const { reaction, text: words } = splitReaction(text);
+    if (reaction) void signal.react(reaction, { author: r.from, timestamp: r.targetTimestamp });
+    if (words) await out.reply(words, { kind: "chat" });
+  } catch (e) {
+    console.error("agent error (reaction):", (e as Error).message); // a reaction needs no apology
+  } finally {
+    prepareChat(approve, say);
+  }
+}
+
 async function chat(m: IncomingMessage) {
   console.log(`owner message (${m.text.length} chars)`);
   const target = { author: m.from, timestamp: m.timestamp };
@@ -111,7 +132,7 @@ async function chat(m: IncomingMessage) {
     console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
     // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
     const { reaction, text: words } = splitReaction(text);
-    if (words) await out.reply(words, { quote: shouldThread(!!m.quote, Date.now() - started) ? { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp } : undefined });
+    if (words) await out.reply(words, { kind: "chat", quote: shouldThread(!!m.quote, Date.now() - started) ? { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp } : undefined });
     void signal.react(reaction ?? "✅", target);
     await compactChatIfNeeded(); // after the reply is out; the next message waits for it
   } catch (e) {
@@ -129,7 +150,7 @@ async function chat(m: IncomingMessage) {
   }
 }
 
-await ensureSignalDaemon(config.ownerNumber, settings.signalHost, settings.signalPort);
+await ensureSignalDaemon(config.ownerNumber, settings.signalHost, settings.signalPort, openLog("logs/signal-daemon.log"));
 await signal.connect();
 console.log(`connected to signal-cli; accepting only ${mask(config.ownerNumber)}; auth: ${config.credential}`);
 
@@ -141,7 +162,7 @@ setInterval(() => prepareChat(approve, say), 25 * 60_000).unref();
 const handler = createHandler({ approve, notify, propose: proposer.show });
 handler.resume();
 
-const radar = createRadar({ approve, notify: say, briefDue: isBriefDue }); // records its own pings
+const radar = createRadar({ approve, notify: say, briefDue: isBriefDue });
 
 startHeartbeat({
   alert: notify,

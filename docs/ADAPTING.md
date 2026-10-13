@@ -80,7 +80,7 @@ Signal via `signal-cli`, linked as a **secondary device**, reading the owner's *
 
 ### What each piece must provide
 
-`src/signal.ts` is the contract. Replace it with a class offering:
+`packages/signal` (`SignalClient`) is the contract. Replace it with a class offering:
 
 ```ts
 interface Messenger {
@@ -96,8 +96,8 @@ Then adjust:
 
 | File | Change |
 |---|---|
-| `src/signal.ts` | the client above. `timestamp` is just a message id: Telegram `message_id`, Slack `ts`. |
-| `src/signal-daemon.ts` | delete if the messenger needs no local daemon. |
+| `packages/signal/src/client.ts` | the client above. `timestamp` is just a message id: Telegram `message_id`, Slack `ts`. |
+| `packages/signal/src/daemon.ts` | delete if the messenger needs no local daemon. |
 | `src/markdown.ts` | emit the target's markup instead of Signal style ranges (Telegram MarkdownV2/HTML entities, Slack mrkdwn, WhatsApp `*bold*`). `splitSections` and the section-per-message brief delivery carry over unchanged. |
 | `src/outbound.ts` | keep or drop the echo guard, as above. Chunk size (`CHUNK_LIMIT`) should respect the platform's message limit. |
 | `src/guards.ts` | allowlist by your platform's user/chat id. Keep it pure and keep the tests. |

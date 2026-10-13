@@ -67,6 +67,10 @@ export class SignalClient {
   private handler: ((m: IncomingMessage) => void) | undefined;
   private reactionHandler: ((r: IncomingReaction) => void) | undefined;
 
+  // Reactions WE sent come back as incoming reactions (in Note to Self they look exactly like the
+  // owner's own). Remembered for a few minutes so isOwnReaction can tell them apart.
+  private ownReactions = new Map<string, number>();
+
   private host: string;
   private port: number;
   private account: string;
@@ -79,6 +83,13 @@ export class SignalClient {
 
   onMessage(handler: (m: IncomingMessage) => void) {
     this.handler = handler;
+  }
+
+  isOwnReaction(r: { emoji: string; targetTimestamp: number }): boolean {
+    const key = `${r.targetTimestamp}:${r.emoji}`;
+    const expires = this.ownReactions.get(key) ?? 0;
+    for (const [k, e] of this.ownReactions) if (e < Date.now()) this.ownReactions.delete(k);
+    return expires > Date.now();
   }
 
   onReaction(handler: (r: IncomingReaction) => void) {
@@ -181,6 +192,7 @@ export class SignalClient {
   // message replaces the previous one, so this doubles as a status indicator.
   // Best-effort: a failed reaction is logged, never thrown.
   async react(emoji: string, target: { author: string; timestamp: number }): Promise<void> {
+    this.ownReactions.set(`${target.timestamp}:${emoji}`, Date.now() + 5 * 60_000);
     try {
       await this.call("sendReaction", {
         noteToSelf: true,

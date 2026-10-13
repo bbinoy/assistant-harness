@@ -89,6 +89,10 @@ export function loadSettings(env: Env) {
     ),
     notionTools: list(env, "NOTION_TOOLS", ["notion-search", "notion-fetch", "notion-create-pages", "notion-update-page"], /^notion-[\w-]+$/, "a Notion tool name like notion-fetch"),
 
+    // The log of messages the assistant sent (messages.ts) is bounded by size; older messages become one summary.
+    messageLogMb: num(env, "MESSAGE_LOG_MB", 1, 0.01, 100),
+    summaryWords: num(env, "SUMMARY_WORDS", 60, 10, 400),
+
     dailyBudgetUsd: num(env, "DAILY_BUDGET_USD", 20, 0, 10_000),
 
     signalHost: "127.0.0.1", // never anything else: signal-cli's socket is unauthenticated

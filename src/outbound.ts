@@ -1,5 +1,6 @@
+import type { Kind as MessageKind } from "./messages.ts";
 import { renderMarkdown, signalSummary, splitSections, toSignalStyles } from "./markdown.ts";
-import type { Quote, SignalClient } from "./signal.ts";
+import type { Quote, SignalClient } from "@number-one/signal";
 
 const CHUNK_LIMIT = 1800; // keep each Signal message comfortably short
 const ECHO_WINDOW_MS = 5 * 60_000;
@@ -19,7 +20,8 @@ export function chunk(text: string, limit = CHUNK_LIMIT): string[] {
   return out;
 }
 
-export function createOutbound(signal: SignalClient) {
+// `record` is told about every message sent (kind, Signal timestamp, text): the message log.
+export function createOutbound(signal: SignalClient, record?: (kind: MessageKind, ts: number, text: string) => void) {
   // Everything we send to Note to Self comes back to us as an incoming message, and must not
   // be answered. Each message is registered BEFORE sending, by text (the echo can arrive
   // before the send returns its timestamp), then by timestamp. Entries expire after a while.
@@ -40,7 +42,7 @@ export function createOutbound(signal: SignalClient) {
   // that embeds untrusted text (approval prompts and alerts quote email content).
   // Returns the timestamp of the last message sent (what a reaction would target).
   // `quote` threads the reply under a message of the owner's (first chunk only).
-  async function reply(text: string, opts: { plain?: boolean; quote?: Quote } = {}): Promise<number> {
+  async function reply(text: string, opts: { plain?: boolean; quote?: Quote; kind?: MessageKind } = {}): Promise<number> {
     let last = 0;
     let quote = opts.quote;
     for (const part of chunk(text)) {
@@ -49,22 +51,23 @@ export function createOutbound(signal: SignalClient) {
       last = await signal.sendNoteToSelf(r.text, toSignalStyles(r.styles), quote);
       quote = undefined;
       remember(`t:${last}`);
+      record?.(opts.kind ?? "other", last, r.text);
     }
     return last;
   }
 
-  const replyPlain = (text: string) => reply(text, { plain: true });
+  const replyPlain = (text: string, kind?: MessageKind) => reply(text, { plain: true, kind });
 
   // The whole brief, one message per section (not used for the daily brief any more: Signal gets
   // the short summary above, the full text goes out by email).
   // The brief itself goes out by email. Signal gets the short version (pep talk, focus, a pointer).
   async function sendBriefSummary(markdown: string) {
-    await reply(signalSummary(markdown));
+    await reply(signalSummary(markdown), { kind: "brief" });
   }
 
   async function sendBrief(markdown: string) {
     for (const section of splitSections(markdown, CHUNK_LIMIT)) {
-      await reply(section);
+      await reply(section, { kind: "brief" });
       await new Promise((r) => setTimeout(r, 400)); // keep delivery order stable
     }
   }

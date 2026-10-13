@@ -1,4 +1,4 @@
-import { voiceReady } from "./transcribe.ts";
+import { voiceReady } from "@number-one/signal";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -165,7 +165,7 @@ async function doctor() {
   }
   line(true, "memory/notes/", `${readNotes().length} active note(s)`); // the count only, never the notes
 
-  const voice = voiceReady();
+  const voice = voiceReady(settings.whisperModel);
   line(voice.ok ? true : "warn", "voice messages", voice.ok ? "transcribed locally with whisper.cpp" : `not available, missing: ${voice.missing.join("; ")}`);
 
   const radar = readJson<{ lastRunAt?: string; nextRunAt?: string; sent?: number }>("state/radar.json", {});
