@@ -54,19 +54,19 @@ signal.onMessage((m) => {
 // handle it as chat. A spoken "yes" is never an approval (route skips the approval check for it).
 async function hear(m: IncomingMessage) {
   const target = { author: m.from, timestamp: m.timestamp };
-  void signal.react("👂", target);
+  status("👂", target);
   let heard = "";
   try {
     heard = await transcribe(join(settings.signalAttachmentsDir, m.audio!.id), settings.whisperModel);
   } catch (e) {
     const gaps = voiceReady(settings.whisperModel);
     console.error("voice: transcription failed:", (e as Error).message);
-    void signal.react("⚠️", target);
+    status("⚠️", target);
     return void (await out.replyPlain(gaps.ok ? "I couldn't make out that voice message. Try again or type it." : `I can't transcribe voice messages yet: missing ${gaps.missing.join(", ")}.`));
   }
   console.log(`voice: transcribed (${heard.length} chars)`);
   if (!heard) {
-    void signal.react("🤷", target);
+    status("🤷", target);
     return void (await out.replyPlain("I couldn't hear any words in that voice message."));
   }
   appendLine("logs/voice.jsonl", JSON.stringify({ at: new Date().toISOString(), messageTimestamp: m.timestamp, text: heard })); // for inspection; the chat can read it
@@ -88,6 +88,13 @@ signal.onReaction((r) => {
   queue = queue.then(() => reacted(r)).catch((e) => console.error("reaction error:", e.message));
 });
 
+// Working / done / failed icons on the owner's message. Only in Note to Self, where Signal shows no
+// "typing…"; in the assistant's own chat the typing indicator says it, and only the model's own
+// reactions (and error replies) remain.
+function status(emoji: string, target: { author: string; timestamp: number }) {
+  if (!signal.separateAccount) void signal.react(emoji, target);
+}
+
 // Chat turns run one at a time, in order: two at once would share one session.
 let queue: Promise<void> = Promise.resolve();
 
@@ -95,7 +102,7 @@ async function route(m: IncomingMessage) {
   // While an approval is pending, a message may be its answer. That must skip the queue:
   // the queue is blocked on the very turn that is waiting for it.
   const target = { author: m.from, timestamp: m.timestamp };
-  const { outcome, changes } = m.voice ? { outcome: "none" as const, changes: undefined } : await approvals.answer(m.text, () => void signal.react("⏳", target));
+  const { outcome, changes } = m.voice ? { outcome: "none" as const, changes: undefined } : await approvals.answer(m.text, () => status("⏳", target));
   if (outcome !== "none") {
     console.log(`approval ${outcome}${changes ? ` (${changes.map((c) => c.field).join(", ")})` : ""}`);
     void signal.react({ approved: "👍", modified: "👍", declined: "👎", feedback: "💬" }[outcome], target);
@@ -129,7 +136,7 @@ async function chat(m: IncomingMessage) {
   console.log(`owner message (${m.text.length} chars)`);
   const target = { author: m.from, timestamp: m.timestamp };
   // Status on the owner's message, each replacing the last: 👀 working, ✅ answered, ⚠️ failed.
-  void signal.react("👀", target);
+  status("👀", target);
   // In the assistant's own chat Signal shows "typing…" (not in Note to Self); refreshed until the reply is out.
   void signal.typing();
   const typing = signal.separateAccount ? setInterval(() => void signal.typing(), 8000) : undefined;
@@ -141,11 +148,12 @@ async function chat(m: IncomingMessage) {
     // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
     const { reaction, text: words } = splitReaction(text);
     if (words) await out.reply(words, { kind: "chat", quote: shouldThread(!!m.quote, Date.now() - started) ? { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp } : undefined });
-    void signal.react(reaction ?? "✅", target);
+    if (reaction) void signal.react(reaction, target); // the model's own choice, in either mode
+    else status("✅", target);
     await compactChatIfNeeded(); // after the reply is out; the next message waits for it
   } catch (e) {
     console.error("agent error:", (e as Error).message);
-    void signal.react("⚠️", target);
+    status("⚠️", target);
     await out.reply(
       e instanceof AuthError
         ? "My login expired. On the Mac, run `claude auth login`, then message me again."
