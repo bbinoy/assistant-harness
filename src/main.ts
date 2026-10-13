@@ -85,7 +85,7 @@ const pipeline: Pipeline = createPipeline({
   out,
   record,
   account: config.signalAccount,
-  runOwner: (prompt, ownerMessage, pictures) => ask(prompt, approve, say, ownerMessage, pictures),
+  runOwner: (prompt, ownerMessage, pictures, hooks) => ask(prompt, approve, say, ownerMessage, pictures, hooks),
   picture: (m) => preparePicture(attachmentPath(m.image!, settings.signalAttachmentsDir)), // a plain file name inside signal-cli's folder
   transcript,
   speech: {

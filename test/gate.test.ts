@@ -4,12 +4,12 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { group, owner, type Conversation } from "../src/conversation.ts";
-import { clampCheck, gatePrompt, gateSystem, logTail, lookDue, lookState, parseGate, tailLine, wakeText } from "../src/gate.ts";
+import { clampCheck, GATE_SCHEMA, gatePrompt, gateSystem, logTail, lookDue, lookState, parseGate, tailLine, wakeText } from "../src/gate.ts";
 import { compactIfNeeded, findMessage, messagesSince, noticeLines, recordMessage, type Kind, type Sent } from "../src/messages.ts";
 import { groupConversation } from "../src/dream.ts";
 import { groupContext, groupLogFile } from "../src/groupstore.ts";
 import { classify } from "../src/policy.ts";
-import { settings } from "../src/settings.ts";
+import { loadSettings, settings } from "../src/settings.ts";
 import { dataPath } from "../src/state.ts";
 import { createWakeups } from "../src/wake.ts";
 
@@ -19,8 +19,32 @@ const T0 = new Date(2026, 9, 14, 9, 0, 0); // a Wednesday, 09:00 local
 
 // ---- the gate's answer ----
 
+test("gate: the delay is capped by the setting in code, and the prompt says typing is already showing", () => {
+  assert.equal(parseGate({ act: true, delaySeconds: 60 }, 4).delaySeconds, 4);
+  assert.equal(parseGate({ act: true, delaySeconds: 3 }, 4).delaySeconds, 3);
+  assert.equal(parseGate({ act: true, delaySeconds: 3 }, 0).delaySeconds, 0); // GATE_MAX_DELAY_SECONDS=0: never wait
+  assert.equal(parseGate({ act: true, delaySeconds: "soon" }, 4).delaySeconds, 0);
+  assert.equal((GATE_SCHEMA.schema.properties.delaySeconds as { maximum: number }).maximum, settings.gateMaxDelaySeconds);
+  const sys = gateSystem({ kind: "group" }, "message", "");
+  assert.match(sys, /typing indicator is already showing/);
+  assert.match(sys, new RegExp(`never more than ${settings.gateMaxDelaySeconds}`));
+  assert.doesNotMatch(sys, /0 to 120/);
+  const long = Array.from({ length: 60 }, (_, i) => `line ${i}`);
+  const p = gatePrompt({ trigger: "message", now: T0, tail: long }, "");
+  assert.match(p, /line 59/);
+  assert.doesNotMatch(p, /line 39\b/); // a message look reads the latest exchange only
+  assert.match(gatePrompt({ trigger: "clock", now: T0, tail: long }, ""), /line 0\b/); // the clock look keeps the whole tail
+});
+
+test("settings: GATE_MAX_DELAY_SECONDS defaults to 4 and is validated", () => {
+  assert.equal(loadSettings({}).gateMaxDelaySeconds, 4);
+  assert.equal(loadSettings({ GATE_MAX_DELAY_SECONDS: "0" }).gateMaxDelaySeconds, 0);
+  assert.throws(() => loadSettings({ GATE_MAX_DELAY_SECONDS: "-1" }), /GATE_MAX_DELAY_SECONDS/);
+  assert.throws(() => loadSettings({ GATE_MAX_DELAY_SECONDS: "slow" }), /GATE_MAX_DELAY_SECONDS/);
+});
+
 test("gate: whatever the model returns, only a literal true acts, and the next look is clamped to 15..60", () => {
-  assert.deepEqual(parseGate({ act: true, instructions: "  Post   a fun fact ", delaySeconds: 7.4, nextCheckMinutes: 20 }), { act: true, task: "task", instructions: "Post a fun fact", delaySeconds: 7, nextCheckMinutes: 20 });
+  assert.deepEqual(parseGate({ act: true, instructions: "  Post   a fun fact ", delaySeconds: 2.4, nextCheckMinutes: 20 }), { act: true, task: "task", instructions: "Post a fun fact", delaySeconds: 2, nextCheckMinutes: 20 });
   for (const bad of [undefined, null, "yes", 7, [], {}, { act: "true" }, { act: 1 }, { act: "yes", instructions: "x" }]) assert.equal(parseGate(bad).act, false, JSON.stringify(bad));
   assert.deepEqual(parseGate({ act: true, delaySeconds: -5, nextCheckMinutes: 5 }), { act: true, task: "task", delaySeconds: 0, nextCheckMinutes: 15 });
   assert.equal(parseGate({ act: true, delaySeconds: 9999, nextCheckMinutes: 600 }).nextCheckMinutes, 60);
