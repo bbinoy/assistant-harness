@@ -26,6 +26,7 @@ export interface IncomingMessage {
   quote?: Quote; // set when the message is a reply to an earlier one
   audio?: AudioRef; // a voice message (no text); main.ts transcribes it
   voice?: boolean; // the text is a transcript of a voice message
+  image?: ImageRef; // a picture (the text is its caption, possibly empty); main.ts prepares it
 }
 
 // A voice note or audio file signal-cli has downloaded: its id names the file in its attachments folder.
@@ -35,6 +36,28 @@ export interface AudioRef {
 }
 
 export const MAX_AUDIO_BYTES = 25_000_000;
+
+// A picture signal-cli has downloaded, named like an audio file.
+export interface ImageRef {
+  id: string;
+  size: number;
+}
+
+export const MAX_IMAGE_BYTES = 20_000_000;
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"];
+
+// Pure: the first usable picture of a message, with the same rules as parseAudio. Videos and other files are skipped;
+// whether the bytes really are a picture is checked when they are read (src/image.ts).
+export function parseImage(attachments: unknown): ImageRef | undefined {
+  if (!Array.isArray(attachments)) return undefined;
+  for (const a of attachments) {
+    const id = typeof a?.id === "string" ? a.id : "";
+    const size = Number(a?.size ?? 0);
+    if (!IMAGE_TYPES.includes(String(a?.contentType ?? "").toLowerCase()) || !/^[\w.-]{1,100}$/.test(id) || id.startsWith(".")) continue;
+    if (size > 0 && size <= MAX_IMAGE_BYTES) return { id, size };
+  }
+  return undefined;
+}
 
 // Pure: the first usable audio attachment of a message. The id becomes a file name, so only plain
 // names pass (no path separators), and huge files are refused.
@@ -128,7 +151,8 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
     };
   }
   const audio = parseAudio(body.attachments);
-  if (!body.message && !audio) return {};
+  const image = parseImage(body.attachments);
+  if (!body.message && !audio && !image) return {};
   const quote = parseQuote(body.quote);
   const mentioned = (Array.isArray(body.mentions) ? body.mentions : []).some((m: any) => m?.uuid === ch.account || m?.number === ch.account);
   return {
@@ -139,6 +163,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
       direct,
       quote,
       audio,
+      ...(image ? { image } : {}),
       ...(group ? { group, addressedToMe: mentioned || quote?.author === ch.account, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}),
     },
   };

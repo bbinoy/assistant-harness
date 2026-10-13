@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { interpretEnvelope } from "../src/client.ts";
+import { interpretEnvelope, parseImage } from "../src/client.ts";
 
 const ME = "+10000000000"; // the owner
 const BOT = "+10000000001"; // the assistant's own account
@@ -80,3 +80,24 @@ test("groups: a group message is never direct; it says whether it is addressed t
   assert.equal(withMentions("a ￼ b", [{ start: 2, name: "Ted" }]), "a @Ted b");
 });
 
+
+test("images: JPEG, PNG, WebP, GIF and HEIC are accepted; videos, other files, odd names and huge files are not", () => {
+  assert.deepEqual(parseImage([{ contentType: "image/jpeg", id: "abc-DEF_1.jpg", size: 400000 }]), { id: "abc-DEF_1.jpg", size: 400000 });
+  for (const t of ["image/png", "image/webp", "image/gif", "image/heic", "image/heif"]) assert.ok(parseImage([{ contentType: t, id: "x", size: 5 }]));
+  assert.equal(parseImage([{ contentType: "video/mp4", id: "v", size: 5 }]), undefined);
+  assert.equal(parseImage([{ contentType: "application/pdf", id: "d", size: 5 }]), undefined);
+  assert.equal(parseImage([{ contentType: "image/svg+xml", id: "s", size: 5 }]), undefined);
+  assert.equal(parseImage([{ contentType: "image/jpeg", id: "../../.ssh/id_rsa", size: 5 }]), undefined);
+  assert.equal(parseImage([{ contentType: "image/jpeg", id: ".hidden", size: 5 }]), undefined);
+  assert.equal(parseImage([{ contentType: "image/jpeg", id: "big", size: 99_000_000 }]), undefined);
+  assert.equal(parseImage(undefined), undefined);
+});
+
+test("images: a picture with or without a caption is a message, in a private chat and in a group", () => {
+  const att = [{ contentType: "image/jpeg", id: "p1.jpg", size: 1000 }];
+  const direct = interpretEnvelope({ sourceNumber: ME, timestamp: 7, dataMessage: { timestamp: 7, attachments: att } }, peer).message;
+  assert.deepEqual([direct?.text, direct?.image, direct?.direct], ["", { id: "p1.jpg", size: 1000 }, true]);
+  const grp = interpretEnvelope({ sourceNumber: "+15555550105", timestamp: 8, dataMessage: { timestamp: 8, message: "look", attachments: att, groupInfo: { groupId: "g1" } } }, peer).message;
+  assert.deepEqual([grp?.text, grp?.image?.id, grp?.group?.id], ["look", "p1.jpg", "g1"]);
+  assert.equal(interpretEnvelope({ sourceNumber: ME, timestamp: 9, dataMessage: { timestamp: 9, attachments: [{ contentType: "video/mp4", id: "v", size: 5 }] } }, peer).message, undefined);
+});

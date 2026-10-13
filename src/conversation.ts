@@ -6,6 +6,7 @@ import { GROUPS_DIR, groupKey, groupLogFile, groupNotesDir } from "./groupstore.
 import type { GroupMessage } from "./group.ts";
 import { FILE as OWNER_LOG, findMessage, type Kind } from "./messages.ts";
 import { NOTES_DIR } from "./notes.ts";
+import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
@@ -68,6 +69,9 @@ export const group = (groupId: string): Conversation =>
     notice: groupErrorNotice, // nobody there should be sent to a terminal
   });
 
+// A message with its picture, once prepared (the bytes are held for this turn only; src/image.ts).
+type Held = IncomingMessage & { picture?: Picture };
+
 export type Incoming = { type: "message"; m: IncomingMessage } | { type: "reaction"; r: IncomingReaction };
 
 // What one run needs. The caller (the owner's path here, the group brain in group.ts) builds it.
@@ -102,7 +106,8 @@ export interface PipelineDeps {
   };
   record: (groupId: string | undefined, kind: Kind, ts: number, text: string) => void; // into that conversation's log
   account: string; // our own Signal number: the author of messages of ours that a reaction points at
-  runOwner: (prompt: string, ownerMessage: string) => Promise<{ text: string; costUsd?: number }>;
+  runOwner: (prompt: string, ownerMessage: string, pictures?: Picture[]) => Promise<{ text: string; costUsd?: number }>;
+  picture: (m: IncomingMessage) => Promise<Picture>; // throws a sentence the sender can be told
   transcript: (m: IncomingMessage) => Promise<string>; // throws a sentence the sender can be told
   speech: { ready: () => boolean; synth: (words: string) => Promise<string> }; // spoken replies: local TTS, a file
   approvals: { answer: (text: string, working: () => void, quote?: { timestamp: number }) => Promise<{ outcome: "none" | "approved" | "modified" | "declined" | "feedback"; changes?: { field: string; value: unknown }[] }>; answerReaction: (emoji: string, ts: number) => string };
@@ -254,8 +259,8 @@ export function createPipeline(deps: PipelineDeps) {
   }
 
   // The owner's messages of one burst, as the model sees them: oldest first, each with its own quote and voice marks.
-  function ownerPrompt(ms: readonly IncomingMessage[]): string {
-    const one = (m: IncomingMessage) => withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.text, m.quote);
+  function ownerPrompt(ms: readonly Held[]): string {
+    const one = (m: Held) => withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.picture ? `${PICTURE_NOTE} ${m.text}`.trim() : m.text, m.quote);
     const text = ms.length === 1 ? one(ms[0]!) : `${ms.length} messages arrived one after another, oldest first. Answer them together, as one reply:\n\n${ms.map(one).join("\n\n")}`;
     return canSpeak() ? `${text}\n\n${voiceOption(true)}` : text;
   }
@@ -278,19 +283,37 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
+  // A picture -> the message with it attached, or false when it could not be opened (the sender was told, if they should be).
+  // The same step for every conversation; the bytes go to the model for this turn and nowhere else.
+  async function see(conv: Conversation, m: IncomingMessage): Promise<Held | false> {
+    console.log(`🖼️ image${m.text ? ` (caption ${m.text.length} chars)` : ""}`);
+    try {
+      return { ...m, image: undefined, picture: await deps.picture(m) };
+    } catch (e) {
+      if (conv.kind === "owner") await out.replyPlain((e as Error).message);
+      else if (m.addressedToMe) await out.reply((e as Error).message, { kind: "chat", groupId: conv.groupId });
+      return false;
+    }
+  }
+
   async function ownerMessage(conv: Conversation, original: IncomingMessage): Promise<void> {
     void signal.markRead(original.timestamp); // the owner sees it was read, as soon as we have it
-    let m = original;
+    let m: Held = original;
     if (m.audio) {
       const heard = await hear(conv, m);
       if (!heard) return;
       m = heard;
     }
-    record(conv, "owner", m.timestamp, m.voice ? `🎙️ ${m.text}` : m.text); // what the owner said: searchable, and what the dream learns from
+    if (m.image) {
+      const seen = await see(conv, m);
+      if (!seen) return;
+      m = seen;
+    }
+    record(conv, "owner", m.timestamp, m.voice ? `🎙️ ${m.text}` : m.picture ? `🖼️ ${m.text || "image"}` : m.text); // what the owner said: searchable, and what the dream learns from (never the picture itself)
     // While an approval is pending, a message may be its answer. That must skip the queue.
-    // A spoken "yes" is never an approval.
+    // A spoken "yes" is never an approval, nor is a caption.
     const target = { author: m.from, timestamp: m.timestamp };
-    const { outcome, changes } = m.voice ? { outcome: "none" as const, changes: undefined } : await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote);
+    const { outcome, changes } = m.voice || m.picture ? { outcome: "none" as const, changes: undefined } : await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote);
     if (outcome !== "none") {
       console.log(`approval ${outcome}${changes ? ` (${changes.map((c) => c.field).join(", ")})` : ""}`);
       void signal.react({ approved: "👍", modified: "👍", declined: "👎", feedback: "💬" }[outcome], target, conv.groupId);
@@ -308,7 +331,7 @@ export function createPipeline(deps: PipelineDeps) {
         }
         const prompt = ownerPrompt(ms);
         await runTurn(conv, {
-          run: () => deps.runOwner(prompt, ms.map((x) => x.text).join("\n")),
+          run: () => deps.runOwner(prompt, ms.map((x) => x.text).join("\n"), ms.flatMap((x) => x.picture ?? []).slice(-MAX_PICTURES)),
           target: { author: last.from, timestamp: last.timestamp },
           threadUnder: { text: last.text.slice(0, 200), author: last.from, timestamp: last.timestamp },
           hadQuote: ms.some((x) => x.quote),
@@ -338,13 +361,18 @@ export function createPipeline(deps: PipelineDeps) {
     if (!(await deps.vouch(groupId))) return; // a group we cannot vouch for gets nothing, not even a transcription
     const author = original.from || original.fromUuid;
     if (original.addressedToMe && author) void signal.markRead(original.timestamp, author); // only those who spoke to us see "seen"
-    let m = original;
+    let m: Held = original;
     if (m.audio) {
       const heard = await hear(conv, m);
       if (!heard) return;
       m = { ...heard, text: `🎙️ ${heard.text}` };
     }
-    return deps.admitGroup(conv, { groupId, text: m.text, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
+    if (m.image) {
+      // Looked at only when it will be used: in "tagged" mode a picture nobody addressed to us is just a line in the history.
+      const seen = m.addressedToMe || settings.groupParticipation !== "tagged" ? await see(conv, m) : false;
+      m = { ...m, image: undefined, picture: seen ? seen.picture : undefined, text: `🖼️ ${m.text || "image"}` };
+    }
+    return deps.admitGroup(conv, { groupId, text: m.text, picture: m.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
   }
 
   async function groupReaction(conv: Conversation, r: IncomingReaction): Promise<void> {

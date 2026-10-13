@@ -6,6 +6,7 @@ import { basename } from "node:path";
 import { isJudgeable, judgeAction, mayAutoApprove, type Verdict } from "./autojudge.ts";
 import { readFileSync } from "node:fs";
 import type { Conversation } from "./conversation.ts";
+import { userInput, type Picture } from "./image.ts";
 import { query, startup, type CanUseTool, type HookCallbackMatcher, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { Decision } from "./approvals.ts";
 import { audit, type Source } from "./audit.ts";
@@ -362,11 +363,11 @@ export const groupRunOptions = (conv: Pick<Conversation, "notesDir" | "sessionFi
   maxBudgetUsd: PROFILES.group.maxBudgetUsd,
 });
 
-export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: string, build: (since?: string) => { prompt: string; seenAt?: string }): Promise<AgentReply> {
+export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }): Promise<AgentReply> {
   const r = chatResume(true, conv.sessionFile, "group");
-  const { prompt, seenAt } = build(r.resume ? r.seenAt : undefined);
+  const { prompt, seenAt, pictures } = build(r.resume ? r.seenAt : undefined);
   const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt };
-  return consume(query({ prompt, options: buildOptions(async () => ({ approved: false }), o, r.resume) }), o, r.previousCost);
+  return consume(query({ prompt: userInput(prompt, pictures), options: buildOptions(async () => ({ approved: false }), o, r.resume) }), o, r.previousCost);
 }
 
 // --- a warm process for the next chat message ---
@@ -415,7 +416,7 @@ const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
 });
 
 // Interactive chat: resumes the persistent conversation, on the warm process when it fits.
-export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string): Promise<AgentReply> {
+export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = []): Promise<AgentReply> {
   chatOwnerMessage = ownerMessage ?? prompt;
   const o = chatOptions(notify);
   const r = chatResume(true);
@@ -425,11 +426,11 @@ export async function ask(prompt: string, approve: Approve, notify: (text: strin
     // Fall back only if the warm process never came up. Once the turn has started, an error
     // is the turn's error: running it again could repeat what it already did.
     const warm = await s.warm.catch((e: Error) => console.error("chat: warm process unavailable, starting normally:", e.message));
-    if (warm) return consume(warm.query(prompt), o, r.previousCost);
+    if (warm) return consume(warm.query(userInput(prompt, pictures)), o, r.previousCost);
   } else {
     s?.warm.then((w) => w.close()).catch(() => {});
   }
-  return consume(query({ prompt, options: buildOptions(approve, o, r.resume) }), o, r.previousCost);
+  return consume(query({ prompt: userInput(prompt, pictures), options: buildOptions(approve, o, r.resume) }), o, r.previousCost);
 }
 
 // The owner profiles, as before (the legacy scheduler and the gate's presets both go through runProfile).

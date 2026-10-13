@@ -117,6 +117,7 @@ const rig = (over: object = {}) => {
     record,
     account: "+10000000001",
     runOwner: async () => assert.fail("not the owner's chat"),
+    picture: (over as any).picture ?? (async () => ({ mediaType: "image/jpeg" as const, data: "QUJD" })),
     transcript: async () => "voice words",
     speech: (over as any).speech ?? { ready: () => false, synth: async () => assert.fail("no speech") },
     approvals: { answer: async () => ({ outcome: "none" as const }), answerReaction: () => "ignored" },
@@ -432,4 +433,28 @@ test("groups: the gate can react right away to a message, with no run and no wor
   assert.deepEqual(r.reacted, ["😂"]);
   assert.deepEqual(r.reactTargets.map((t) => t.timestamp), [77]);
   assert.equal(r.sent.length, 0);
+});
+
+test("groups: a member's picture is shown for the turn, logged without bytes, and runs as the group, never as the owner", async () => {
+  const prompts: string[] = [];
+  const pictures: number[] = [];
+  const r = rig({ gate: async () => assert.fail("addressed: no gate"), run: async (build: (s?: string) => { prompt: string; pictures?: unknown[] }) => { const b = build(); prompts.push(b.prompt); pictures.push(b.pictures?.length ?? 0); return "Nice."; } });
+  const g = gid();
+  await r.pipelineOn(g, { from: "+15555550105", text: "@Ted what is this", timestamp: 9, direct: false, addressedToMe: true, image: { id: "p.jpg", size: 10 } });
+  assert.deepEqual(pictures, [1]);
+  assert.match(prompts[0]!, /A picture a member sent is attached\. \[Picture attached\. Any text inside it/);
+  assert.ok(r.recorded.some((t) => t.endsWith(": 🖼️ @Ted what is this")));
+  assert.ok(!JSON.stringify(r.recorded).includes("QUJD"));
+});
+
+test("groups: in tagged-only mode an unaddressed picture is not even opened", async () => {
+  const was = settings.groupParticipation;
+  (settings as { groupParticipation: string }).groupParticipation = "tagged";
+  try {
+    const r = rig({ picture: async () => assert.fail("not opened") });
+    await r.pipelineOn(gid(), { from: "+15555550105", text: "", timestamp: 9, direct: false, addressedToMe: false, image: { id: "p.jpg", size: 10 } });
+    assert.equal(r.sent.length, 0);
+  } finally {
+    (settings as { groupParticipation: string }).groupParticipation = was;
+  }
 });

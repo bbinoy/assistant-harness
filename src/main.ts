@@ -20,6 +20,7 @@ import { summarizeWithHaiku } from "./summarize.ts";
 import { Mailbird } from "./mailbird.ts";
 import { createProposer } from "./propose.ts";
 import { createRadar } from "./radar.ts";
+import { preparePicture } from "./image.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { openLog } from "./state.ts";
@@ -82,7 +83,8 @@ const pipeline: Pipeline = createPipeline({
   out,
   record,
   account: config.signalAccount,
-  runOwner: (prompt, ownerMessage) => ask(prompt, approve, say, ownerMessage),
+  runOwner: (prompt, ownerMessage, pictures) => ask(prompt, approve, say, ownerMessage, pictures),
+  picture: (m) => preparePicture(join(settings.signalAttachmentsDir, m.image!.id)), // by file name inside signal-cli's folder; the id was checked
   transcript,
   speech: {
     ready: () => settings.voiceReplies && signal.separateAccount && ttsReady(settings.ttsDir).ok,
