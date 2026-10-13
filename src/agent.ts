@@ -138,7 +138,7 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
     // mode it only logs; the owner is asked either way.
     const description = describeCall(tool, input);
     let judged: Verdict | undefined;
-    if (settings.autoApprove !== "off" && isJudgeable(tool, input)) {
+    if (settings.autoApprove !== "off" && isJudgeable(tool, input, opts.source)) {
       judged = await judgeAction({ source: opts.source, description, ownerMessage: opts.source === "chat" ? chatOwnerMessage : undefined });
       audit(tool, `judge-${judged.decision}`, opts.source, { reason: judged.reason, mode: settings.autoApprove });
       if (mayAutoApprove(settings.autoApprove, opts.source, judged)) {

@@ -6,7 +6,10 @@ const CAL = "mcp__claude_ai_Google_Calendar__";
 
 test("judge floor: only calendar events for the owner alone are ever up for judgement", () => {
   assert.equal(isJudgeable(`${CAL}create_event`, { summary: "Pottery", startTime: "2026-10-14T16:00:00" }), true);
-  assert.equal(isJudgeable(`${CAL}update_event`, { eventId: "x", attendees: [] }), true);
+  assert.equal(isJudgeable(`${CAL}update_event`, { eventId: "x", attendees: [] }, "chat"), true);
+  // changing an existing event may email its guests: only ever judged in chat, where the owner asked
+  for (const s of ["handler", "radar", "brief"] as const) assert.equal(isJudgeable(`${CAL}update_event`, { eventId: "x" }, s), false, `update from ${s}`);
+  for (const s of ["chat", "handler", "radar", "brief"] as const) assert.equal(isJudgeable(`${CAL}create_event`, { summary: "Ticket" }, s), true, `create from ${s}`);
   assert.equal(isJudgeable(`${CAL}create_event`, { summary: "Coffee", attendees: [{ email: "a@example.com" }] }), false);
   assert.equal(isJudgeable(`${CAL}create_event`, { guests: ["a@example.com"] }), false);
   for (const t of ["mcp__mailbird__send_message_now", "mcp__mailbird__forward_conversation", "mcp__claude_ai_Google_Drive__share_file", `${CAL}respond_to_event`, `${CAL}delete_event`, "WebFetch"]) assert.equal(isJudgeable(t, {}), false, t);
