@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { interpretEnvelope, parseImage } from "../src/client.ts";
+import { interpretEnvelope, parseImage } from "../src/envelope.ts";
 
 const ME = "+10000000000"; // the owner
 const BOT = "+10000000001"; // the assistant's own account
@@ -56,7 +56,7 @@ test("an attachment-only voice message is a message with audio and no text", () 
 const BOTACCT = "00000000-0000-4000-8000-000000000001";
 const GID = "Zm9vYmFyZm9vYmFyZm9vYmFy";
 const peerCh = { account: BOTACCT, peer: ME };
-import { withMentions } from "../src/client.ts";
+import { withMentions } from "../src/envelope.ts";
 
 test("groups: a group message is never direct; it says whether it is addressed to the assistant", () => {
   const plain = { sourceNumber: "+15555550105", sourceUuid: "u-1", sourceName: "Eve", timestamp: 1, dataMessage: { message: "hello all", timestamp: 1, groupInfo: { groupId: GID } } };

@@ -111,7 +111,7 @@ Signal is a trademark of its owners; this is an unofficial integration.
 
 ## Files
 
-`src/client.ts` the client and `interpretEnvelope` · `src/daemon.ts` daemon start · `src/transcribe.ts` speech to text · `src/tts.ts` + `scripts/kokoro-say.py` local text to speech · `src/tts-provider.ts` (`synthesizeWith`) picks Kokoro or the optional remote `tts-elevenlabs.ts` / `tts-http.ts` · `src/testing.ts` the fake daemon · `test/` run with `npm test` in this folder · `npm run build` compiles to `dist/`.
+`src/client.ts` the client · `src/envelope.ts` `interpretEnvelope` and the other pure parsing · `src/daemon.ts` daemon start · `src/transcribe.ts` speech to text · `src/tts.ts` + `scripts/kokoro-say.py` local text to speech · `src/tts-provider.ts` (`synthesizeWith`) picks Kokoro or the optional remote `tts-elevenlabs.ts` / `tts-http.ts` · `src/testing.ts` the fake daemon · `test/` run with `npm test` in this folder · `npm run build` compiles to `dist/`.
 
 ## Changes and contributing
 

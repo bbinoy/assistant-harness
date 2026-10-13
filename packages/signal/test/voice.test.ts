@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseAudio } from "../src/client.ts";
+import { parseAudio } from "../src/envelope.ts";
 import { cleanTranscript } from "../src/transcribe.ts";
 
 test("voice: only a plain, reasonably sized audio attachment is accepted", () => {
