@@ -11,7 +11,8 @@ import { shouldThread, withQuoteContext } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
-import { MAX_SPOKEN_CHARS, type IncomingMessage, type IncomingReaction, type Quote } from "@ted-personal-assistant/signal";
+import type { IncomingMessage, IncomingReaction, Quote } from "@ted-personal-assistant/signal";
+import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal/tts";
 
 // The one pipeline every conversation goes through: the owner's private chat and each group. What differs
 // between them is DATA on a Conversation, and a Conversation is made only by owner() and group(id), so trust

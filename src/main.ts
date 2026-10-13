@@ -23,7 +23,9 @@ import { preparePicture } from "./image.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { openLog } from "./state.ts";
-import { attachmentPath, ensureSignalDaemon, SignalClient, providerReady, synthesizeWith, transcribe, voiceReady, type IncomingMessage } from "@ted-personal-assistant/signal";
+import { attachmentPath, ensureSignalDaemon, SignalClient, type IncomingMessage } from "@ted-personal-assistant/signal";
+import { providerReady, synthesizeWith } from "@ted-personal-assistant/signal/tts";
+import { transcribe, voiceReady } from "@ted-personal-assistant/signal/voice";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 

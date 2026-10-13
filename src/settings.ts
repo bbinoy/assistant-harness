@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isSafeUrl, type TtsProviderConfig } from "@ted-personal-assistant/signal";
+import { isSafeUrl, type TtsProviderConfig } from "@ted-personal-assistant/signal/tts";
 
 // Every tunable in one place, read from the environment (see .env.example) and validated
 // when the agent starts. A typo fails loudly instead of silently becoming NaN: an interval

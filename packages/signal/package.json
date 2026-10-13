@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./voice": "./src/voice.ts",
+    "./tts": "./src/speech.ts",
     "./testing": "./src/testing.ts"
   },
   "license": "MIT",

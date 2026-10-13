@@ -46,9 +46,9 @@ await signal.connect();
 
 **Groups** (own-account mode): a group message has `group: { id }` and `direct: false`. `addressedToMe` is true when it @mentions the bot or replies to one of its messages, so a bot can stay silent otherwise. The package never decides who may talk to the bot: check `from`/`fromUuid` and the group's members yourself.
 
-**Voice**
-- In: `parseAudio` accepts only a plain audio attachment id (no paths) under 25 MB; `transcribe(file, whisperModelPath)` turns it into text locally with ffmpeg and [whisper.cpp](https://github.com/ggerganov/whisper.cpp); `voiceReady(model)` says what is missing.
-- Out: `synthesize(text, { dir, voice, speed })` makes an AAC voice message locally with [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) (its Python environment and model live in `dir`; the app's `scripts/setup-tts.sh` installs them); `ttsReady(dir)` says what is missing. Send the file with `send("", { attachments: [file] })`.
+**Voice** (optional entry points, separate from the core: `@ted-personal-assistant/signal/voice` and `/tts`)
+- In (`/voice`): `parseAudio` (core) accepts only a plain audio attachment id (no paths) under 25 MB; `transcribe(file, whisperModelPath)` turns it into text locally with ffmpeg and [whisper.cpp](https://github.com/ggerganov/whisper.cpp); `voiceReady(model)` says what is missing.
+- Out (`/tts`): `synthesize(text, { dir, voice, speed })` makes an AAC voice message locally with [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) (its Python environment and model live in `dir`; the app's `scripts/setup-tts.sh` installs them); `ttsReady(dir)` says what is missing. Send the file with `send("", { attachments: [file] })`.
 
 **Also exported:** `interpretEnvelope(envelope, { account, peer?, peerAci? })` (the pure function behind the receiving side; start here to understand or test it), `withMentions`, `parseQuote`, `ensureSignalDaemon({ account, host, port, logFd?, logger?, allowNonLoopback? })` returns `{ started, stop(), exited }` and installs no process handlers (localhost only unless `allowNonLoopback`: signal-cli's socket is unauthenticated).
 

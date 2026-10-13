@@ -9,7 +9,7 @@ import { AuthError, RateLimitError } from "../src/errors.ts";
 import { SLOW_REPLY_MS } from "../src/quote.ts";
 import type { Picture } from "../src/image.ts";
 import type { IncomingMessage, IncomingReaction } from "@ted-personal-assistant/signal";
-import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal";
+import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal/tts";
 
 // The shared conversation pipeline against a fake Signal client. The first block pins the owner's private chat
 // exactly as it behaved when it lived in main.ts; the second shows groups get the same machinery.
