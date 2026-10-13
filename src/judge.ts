@@ -21,6 +21,8 @@ const OPTIONS: Options = {
   systemPrompt: SYSTEM,
   tools: [],
   settingSources: [],
+  strictMcpConfig: true, // no connectors: see triage.ts; they cost ~133k tokens per call
+  mcpServers: {},
   maxTurns: 3, // structured output can take a retry turn
   maxBudgetUsd: 0.05,
   // Constrained output: the model cannot ramble its way into an approval.

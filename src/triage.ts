@@ -39,6 +39,11 @@ const OPTIONS: Options = {
   model: "haiku",
   tools: [],
   settingSources: [],
+  // `tools: []` does NOT stop MCP servers from loading: the owner's claude.ai connectors (109 tools,
+  // ~133k tokens) came along into every classification, costing $0.16 per cold call instead of
+  // $0.0002. Strict MCP mode with no servers keeps the context at a few hundred tokens.
+  strictMcpConfig: true,
+  mcpServers: {},
   maxTurns: 3,
   maxBudgetUsd: 0.25, // a ceiling, not a target; the real cost is logged per batch
   outputFormat: {
