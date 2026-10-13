@@ -19,6 +19,9 @@ import { readJson, readText, writeJson } from "./state.ts";
 // instead of showing a generic failure.
 export class AuthError extends Error {}
 
+// Thrown when the plan's usage limit is hit, so the owner is told that instead of "something broke".
+export class RateLimitError extends Error {}
+
 // Pulls id-like fields (id, conversationId, messageId...) out of tool input for the audit log.
 export function idsOf(input: Record<string, unknown>): Record<string, unknown> | undefined {
   const ids = Object.fromEntries(
@@ -234,6 +237,7 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
       return { text: message.result, costUsd: message.total_cost_usd - previousCost, structured: message.structured_output };
     }
     if (lastError === "authentication_failed") throw new AuthError("authentication_failed");
+    if (lastError === "rate_limit") throw new RateLimitError("rate_limit");
     throw new Error(`agent turn ended with ${message.subtype}${lastError ? ` (${lastError})` : ""}`);
   }
   throw new Error("agent stream ended without a result");

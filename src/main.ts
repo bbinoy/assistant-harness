@@ -1,7 +1,7 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { withQuoteContext, shouldThread } from "./quote.ts";
 import { splitReaction } from "./reaction.ts";
-import { ask, AuthError, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
+import { ask, AuthError, RateLimitError, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
@@ -94,7 +94,9 @@ async function chat(m: IncomingMessage) {
     await out.reply(
       e instanceof AuthError
         ? "My login expired. On the Mac, run `claude auth login`, then message me again."
-        : "Something broke on my end. Check the logs, I'm not telling you what it was.",
+        : e instanceof RateLimitError
+          ? "I've hit my usage limit for now, so I can't think until it resets. Mail triage keeps running. Try me again a bit later."
+          : "Something broke on my end. Check the logs, I'm not telling you what it was.",
     );
   } finally {
     prepareChat(approve, say); // warm up the process for the next message
