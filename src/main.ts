@@ -59,24 +59,32 @@ signal.onMessage((m) => {
   (m.audio ? hear(m) : route(m)).catch((e) => console.error("route error:", e.message));
 });
 
-// A voice message: transcribe it here, log the transcript (logs/voice.jsonl, to inspect a mishearing), then
-// handle it as chat. A spoken "yes" is never an approval (route skips the approval check for it).
-async function hear(m: IncomingMessage) {
-  const target = { author: m.from, timestamp: m.timestamp };
-  status("👂", target);
+// A voice message's words, from the local speech model; the transcript is logged (logs/voice.jsonl) to inspect a
+// mishearing. Throws a sentence the user can be told if it cannot be made out.
+async function transcript(m: IncomingMessage): Promise<string> {
   let heard = "";
   try {
     heard = await transcribe(join(settings.signalAttachmentsDir, m.audio!.id), settings.whisperModel);
   } catch (e) {
     const gaps = voiceReady(settings.whisperModel);
     console.error("voice: transcription failed:", (e as Error).message);
-    status("⚠️", target);
-    return void (await out.replyPlain(gaps.ok ? "I couldn't make out that voice message. Try again or type it." : `I can't transcribe voice messages yet: missing ${gaps.missing.join(", ")}.`));
+    throw new Error(gaps.ok ? "I couldn't make out that voice message. Try again or type it." : `I can't transcribe voice messages yet: missing ${gaps.missing.join(", ")}.`);
   }
   console.log(`voice: transcribed (${heard.length} chars)`);
-  if (!heard) {
-    status("🤷", target);
-    return void (await out.replyPlain("I couldn't hear any words in that voice message."));
+  if (!heard) throw new Error("I couldn't hear any words in that voice message.");
+  return heard;
+}
+
+// In the private chat: transcribe, then handle it as chat. A spoken "yes" is never an approval (route skips the approval check for it).
+async function hear(m: IncomingMessage) {
+  const target = { author: m.from, timestamp: m.timestamp };
+  status("👂", target);
+  let heard: string;
+  try {
+    heard = await transcript(m);
+  } catch (e) {
+    status("⚠️", target);
+    return void (await out.replyPlain((e as Error).message));
   }
   await route({ ...m, text: heard, audio: undefined, voice: true });
 }
@@ -93,8 +101,19 @@ const groupBrain = createGroupBrain({
   typing: (groupId, on) => void signal.typing(!on, groupId),
 });
 const fromOwner = (w: { from: string; fromUuid?: string }) => w.from === config.ownerNumber || (!!config.ownerAci && w.fromUuid === config.ownerAci);
-const inGroup = (m: IncomingMessage) =>
-  groupBrain({ groupId: m.group!.id, text: m.text, timestamp: m.timestamp, isOwner: fromOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author: m.from || m.fromUuid });
+async function inGroup(m: IncomingMessage) {
+  const groupId = m.group!.id;
+  if (m.audio) {
+    // Voice messages are understood in groups too. Someone who spoke to it and cannot be understood is told; otherwise it just moves on.
+    try {
+      m = { ...m, text: `🎙️ ${await transcript(m)}` };
+    } catch (e) {
+      if (m.addressedToMe) await out.replyGroup(groupId, (e as Error).message);
+      return;
+    }
+  }
+  return groupBrain({ groupId, text: m.text, timestamp: m.timestamp, isOwner: fromOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author: m.from || m.fromUuid });
+}
 const reactedInGroup = (r: IncomingReaction) => {
   const groupId = r.group!.id;
   const on = findMessage(r.targetTimestamp, groupLogFile(groupId))?.text ?? "an older message";
