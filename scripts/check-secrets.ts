@@ -2,12 +2,21 @@
 // that must never be published: credentials, phone numbers, personal paths and emails, and the
 // ACTUAL values from your local .env and Mailbird config. Prints file:line and the rule that
 // matched, never the matched text. Run it before every commit: npm run check:secrets
+// `--dir <folder>` scans every file under that folder instead (CI uses it on the unpacked npm tarball).
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
-const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { encoding: "utf8" })
-  .split("\n")
-  .filter((f) => f && existsSync(f));
+function filesUnder(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesUnder(join(dir, e.name)) : [join(dir, e.name)]));
+}
+const dirArg = process.argv[2] === "--dir" ? process.argv[3] : undefined;
+if (process.argv[2] === "--dir" && !dirArg) throw new Error("--dir needs a folder");
+const files = dirArg
+  ? filesUnder(dirArg)
+  : execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { encoding: "utf8" })
+      .split("\n")
+      .filter((f) => f && existsSync(f));
 
 const rules: { name: string; re: RegExp; skipFiles?: RegExp; allow?: RegExp }[] = [
   { name: "Anthropic key", re: /sk-ant-[A-Za-z0-9_-]{10,}/, allow: /abcdefghijklmnop/ }, // the redaction test uses an obviously fake key

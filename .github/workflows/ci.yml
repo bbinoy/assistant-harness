@@ -13,3 +13,24 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm audit --audit-level=high
+  # The signal package on its own: nothing of the app is installed or run. Proves it compiles, tests and packs
+  # by itself, and that the tarball that would be published installs and contains no secrets.
+  signal-package:
+    runs-on: ubuntu-latest # no ffmpeg on purpose: the encoding tests skip themselves
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci -w packages/signal
+      - run: npm run typecheck -w packages/signal
+      - run: npm test -w packages/signal
+      - run: npm run build -w packages/signal
+      - run: npm run verify-pack -w packages/signal
+      - name: Scan the tarball contents for secrets
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack"
+          npm pack -w packages/signal --pack-destination "$RUNNER_TEMP/pack" > /dev/null
+          mkdir "$RUNNER_TEMP/unpacked" && tar -xzf "$RUNNER_TEMP"/pack/*.tgz -C "$RUNNER_TEMP/unpacked"
+          node scripts/check-secrets.ts --dir "$RUNNER_TEMP/unpacked"
