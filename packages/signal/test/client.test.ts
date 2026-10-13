@@ -1,0 +1,194 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import net from "node:net";
+import { SignalClient } from "../src/client.ts";
+
+// Until the client stops exiting the process when its socket closes, the tests that end by closing the fake must not
+// take the test runner down with them.
+const realExit = process.exit;
+process.exit = ((code?: number) => (code === 1 ? undefined : realExit(code))) as typeof process.exit; // only the client's exit(1)
+console.error = () => {};
+
+// A throw-away signal-cli: a TCP server on a free port that speaks line-delimited JSON-RPC.
+type Req = { id: number; method: string; params: any };
+class RpcError {
+  message: string;
+  constructor(message: string) {
+    this.message = message;
+  }
+}
+async function fake(answer: (r: Req) => unknown = () => ({})) {
+  const requests: Req[] = [];
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer((s) => {
+    sockets.add(s);
+    s.setEncoding("utf8");
+    let buf = "";
+    s.on("data", (c: string) => {
+      buf += c;
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const r = JSON.parse(buf.slice(0, nl)) as Req;
+        buf = buf.slice(nl + 1);
+        requests.push(r);
+        const result = answer(r);
+        if (result instanceof RpcError) s.write(JSON.stringify({ jsonrpc: "2.0", id: r.id, error: { code: -1, message: result.message } }) + "\n");
+        else if (result !== undefined) s.write(JSON.stringify({ jsonrpc: "2.0", id: r.id, result }) + "\n");
+      }
+    });
+    s.on("close", () => sockets.delete(s));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as net.AddressInfo).port;
+  return {
+    port,
+    requests,
+    connections: () => sockets.size,
+    push: (o: object) => sockets.forEach((s) => s.write(JSON.stringify(o) + "\n")),
+    raw: (t: string) => sockets.forEach((s) => s.write(t)),
+    close: () => new Promise<void>((r) => (sockets.forEach((s) => s.destroy()), server.close(() => r()))),
+  };
+}
+
+const ME = "+10000000000";
+const PEER = { number: "+10000000001", aci: "11111111-2222-3333-4444-555555555555" };
+const receive = (envelope: object) => ({ jsonrpc: "2.0", method: "receive", params: { envelope } });
+const until = async (f: () => boolean) => {
+  for (let i = 0; i < 400 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(f(), "timed out waiting");
+};
+
+async function connected(peer?: typeof PEER, answer?: (r: Req) => unknown) {
+  const d = await fake(answer ?? ((r) => (r.method === "send" ? { timestamp: 1234 } : {})));
+  const c = new SignalClient("127.0.0.1", d.port, ME, peer);
+  await c.connect();
+  await until(() => d.connections() > 0); // the server sees the connection a moment after the client does
+  return { d, c, done: () => d.close() };
+}
+
+test("client: framing handles several lines in one chunk and one line split over chunks", async () => {
+  const { d, c, done } = await connected();
+  const got: string[] = [];
+  c.onMessage((m) => got.push(m.text));
+  const env = (t: string) => JSON.stringify(receive({ sourceNumber: ME, syncMessage: { sentMessage: { destinationNumber: ME, message: t, timestamp: 1 } } }));
+  d.raw(env("one") + "\n" + env("two") + "\n");
+  const third = env("three") + "\n";
+  d.raw(third.slice(0, 20));
+  await new Promise((r) => setTimeout(r, 20));
+  d.raw(third.slice(20));
+  await until(() => got.length === 3);
+  assert.deepEqual(got, ["one", "two", "three"]);
+  await done();
+});
+
+test("client: an unparseable line is skipped and later lines still work", async () => {
+  const { d, c, done } = await connected();
+  const got: string[] = [];
+  c.onMessage((m) => got.push(m.text));
+  d.raw("{not json\n");
+  d.push(receive({ sourceNumber: ME, syncMessage: { sentMessage: { destinationNumber: ME, message: "ok", timestamp: 2 } } }));
+  await until(() => got.length === 1);
+  await done();
+});
+
+test("client: responses are matched to requests by id, even out of order", async () => {
+  const held: Req[] = [];
+  const { d, c, done } = await connected(undefined, (r) => (held.push(r), undefined));
+  const a = c.send("a");
+  const b = c.send("b");
+  await until(() => held.length === 2);
+  d.push({ jsonrpc: "2.0", id: held[1]!.id, result: { timestamp: 22 } });
+  d.push({ jsonrpc: "2.0", id: held[0]!.id, result: { timestamp: 11 } });
+  assert.deepEqual(await Promise.all([a, b]), [11, 22]);
+  await done();
+});
+
+test("client: an rpc error rejects that request with signal-cli's message", async () => {
+  const { c, done } = await connected(undefined, () => new RpcError("Invalid number"));
+  await assert.rejects(c.send("x"), /Invalid number/);
+  await done();
+});
+
+test("client: send in Note to Self mode", async () => {
+  const { d, c, done } = await connected();
+  assert.equal(await c.send("hi"), 1234);
+  assert.deepEqual(d.requests[0]!.params, { noteToSelf: true, message: "hi" });
+  await done();
+});
+
+test("client: send in peer mode, with style, quote and attachments", async () => {
+  const { d, c, done } = await connected(PEER);
+  await c.send("hi", ["0:2:BOLD"], { text: "earlier", author: PEER.number, timestamp: 99 }, { attachments: ["/tmp/a.m4a"] });
+  assert.deepEqual(d.requests[0]!.params, {
+    recipient: [PEER.number],
+    message: "hi",
+    attachments: ["/tmp/a.m4a"],
+    textStyle: ["0:2:BOLD"],
+    quoteTimestamp: 99,
+    quoteAuthor: PEER.number,
+    quoteMessage: "earlier",
+  });
+  await done();
+});
+
+test("client: send to a group, attachment only", async () => {
+  const { d, c, done } = await connected(PEER);
+  await c.send("", [], undefined, { groupId: "grp==", attachments: ["/tmp/a.png"] });
+  assert.deepEqual(d.requests[0]!.params, { groupId: "grp==", attachments: ["/tmp/a.png"] });
+  await done();
+});
+
+test("client: react sends the target and is remembered as our own", async () => {
+  const { d, c, done } = await connected(PEER);
+  await c.react("👍", { author: PEER.number, timestamp: 5 });
+  assert.deepEqual(d.requests[0]!.params, { recipient: [PEER.number], emoji: "👍", targetAuthor: PEER.number, targetTimestamp: 5 });
+  assert.equal(c.isOwnReaction({ emoji: "👍", targetTimestamp: 5 }), true);
+  assert.equal(c.isOwnReaction({ emoji: "👎", targetTimestamp: 5 }), false);
+  await c.react("🔥", { author: PEER.number, timestamp: 6 }, "grp==");
+  assert.equal(d.requests[1]!.params.groupId, "grp==");
+  assert.equal(d.requests[1]!.params.recipient, undefined);
+  await done();
+});
+
+test("client: a failed reaction is swallowed (best effort)", async () => {
+  const { c, done } = await connected(PEER, () => new RpcError("nope"));
+  await c.react("👍", { author: PEER.number, timestamp: 5 });
+  await done();
+});
+
+test("client: typing and read receipts do nothing in Note to Self mode", async () => {
+  const { d, c, done } = await connected();
+  await c.typing();
+  await c.markRead(1);
+  assert.equal(d.requests.length, 0);
+  await done();
+});
+
+test("client: typing in peer mode, direct and in a group", async () => {
+  const { d, c, done } = await connected(PEER);
+  await c.typing();
+  await c.typing(true, "grp==");
+  assert.deepEqual(d.requests[0]!.params, { recipient: [PEER.number] });
+  assert.deepEqual(d.requests[1]!.params, { groupId: "grp==", stop: true });
+  await done();
+});
+
+test("client: groups() maps members and drops groups we left", async () => {
+  const { c, done } = await connected(PEER, () => [
+    { id: "g1", name: "Team", members: [{ number: "+10000000002", uuid: "u2" }, "+10000000003", { uuid: "u4" }] },
+    { id: "g2", name: "Old", isMember: false, members: [] },
+  ]);
+  assert.deepEqual(await c.groups(), [
+    { id: "g1", name: "Team", members: [{ number: "+10000000002", uuid: "u2" }, { number: "+10000000003", uuid: "+10000000003" }, { number: undefined, uuid: "u4" }] },
+  ]);
+  await done();
+});
+
+test("client: an incoming reaction reaches the reaction handler", async () => {
+  const { d, c, done } = await connected(PEER);
+  const got: string[] = [];
+  c.onReaction((r) => got.push(r.emoji));
+  d.push(receive({ sourceNumber: PEER.number, dataMessage: { timestamp: 7, reaction: { emoji: "👍", targetSentTimestamp: 5, targetAuthorNumber: ME } } }));
+  await until(() => got.length === 1);
+  await done();
+});
