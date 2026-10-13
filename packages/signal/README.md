@@ -43,6 +43,7 @@ await signal.connect();
   - `separateAccount`: which mode you are in.
 - **`interpretEnvelope(envelope, { account, peer?, peerAci? })`**: the pure function behind the above, exported for tests. In Note to Self mode the person's messages arrive as something they sent from another device; in own-account mode they are ordinary incoming messages, matched to the person by number, or by account id (`peerAci`) when Signal hides their number.
 - **Voice notes**: attachments are parsed safely (`parseAudio`: plain file ids only, no paths, capped at 25 MB). `transcribe(file, modelPath)` turns audio into text locally with ffmpeg and whisper.cpp, nothing leaves the machine; `voiceReady(modelPath)` says what is missing.
+- **Speaking**: `synthesize(text, { dir, voice, speed })` makes a voice message (AAC) locally with [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) in its own Python environment (installed by the app's `scripts/setup-tts.sh`); `send("", [], undefined, { attachments: [file] })` sends it, and Signal shows it as a voice message. `ttsReady(dir)` says what is missing.
 - **`parseQuote`**, **`ensureSignalDaemon(account, host, port, logFd?)`**: the daemon listens on 127.0.0.1 only (its socket is unauthenticated); if it dies, the process exits so a supervisor can restart everything.
 
 ## Safety
