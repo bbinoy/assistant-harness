@@ -418,3 +418,10 @@ test("group dream: nightly, only groups with enough new talk, silently", async (
   await dreamer.run(new Date());
   assert.equal(calls, 1); // once a day
 });
+
+import { chatSystem, groupSystem, SELF_TIMED } from "../src/persona.ts";
+test("prompts: Ted is told he can act later and on a schedule, in a private chat and in a group alike", () => {
+  assert.ok(groupSystem({}).includes(SELF_TIMED));
+  assert.ok(chatSystem(undefined, new Date(), [], [], []).includes(SELF_TIMED));
+  assert.doesNotMatch(groupSystem({}), /cannot do here \([^)]*reminders/);
+});
