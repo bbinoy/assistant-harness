@@ -66,7 +66,7 @@ export function presetRefusal(task: Task, st: LookState, now: Date): string | un
     if (!settings.proactive) return "radar-off";
     if (briefPending(st, now)) return "brief-first";
     if (st.lastRadarAt && now.getTime() - Date.parse(st.lastRadarAt) < MIN_GAP_MINUTES * 60_000) return "too-soon";
-    if (st.postsToday >= settings.maxProactivePerDay) return "post-cap";
+    if (st.radarPostsToday >= settings.maxProactivePerDay) return "post-cap";
   }
   return undefined;
 }
@@ -108,8 +108,8 @@ export async function runRadarTask(io: PresetIO, task: Task, st: LookState, now:
     const { structured, costUsd } = await io.runProfile("radar", radarPrompt(now, since, WINDOW_MINUTES, buildDigest(readTriageSince(since), since), recentNotices(now), Object.keys(st.radarKeys), task.instructions));
     const seen = Number((structured as { eventsSeen?: unknown } | undefined)?.eventsSeen ?? 0);
     if (!(seen > 0)) console.error("radar: the run reports it read no calendar events (calendar empty, or it did not look)");
-    // Message-rate rules: the generic cap on posts per day (posts so far today count), 3 per run, no repeated key (the ledger).
-    const messages = acceptMessages(structured, { sent: st.postsToday, keys: st.radarKeys }, settings.maxProactivePerDay);
+    // Message-rate rules: the cap on the radar's OWN messages per day (mail alerts do not count; read from its ledger lines), 3 per run, no repeated key (the ledger).
+    const messages = acceptMessages(structured, { sent: st.radarPostsToday, keys: st.radarKeys }, settings.maxProactivePerDay);
     const sentKeys: string[] = [];
     for (const m of messages) {
       try {

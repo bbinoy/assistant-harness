@@ -98,27 +98,24 @@ export type Runner = (build: PromptBuilder, ctx: { conv: Conversation; now: Date
 
 export const realRunner: Runner = async (build, { conv, now }) => (await runGroupTurn(conv, styleLines(now), build)).text.trim();
 
+
 export interface Brain {
-  pipeline: Pick<Pipeline, "enqueue" | "runTurn" | "record" | "canSpeak">; // the shared conversation code (conversation.ts): record, run, reply, notice
+  pipeline: Pick<Pipeline, "enqueue" | "burst" | "wait" | "runTurn" | "record" | "canSpeak">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
   recent: (groupId: string) => string[]; // the tail of that history (for the gate; gate.ts logTail)
   context?: typeof groupContext; // what the run is shown (default: the group's log)
   run?: Runner;
   gate?: Gate;
-  wait?: (ms: number) => Promise<void>;
 }
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // The group brain: feed it every message (conversation.ts has checked the group, sent the read receipt and
 // transcribed voice messages). It records what a member wrote, then decides (code or the gate) whether and
-// when to speak. Each message supersedes the evaluation of the ones before it (an "epoch"), so a burst of
-// messages gets one answer, not several. Deciding waits happen outside the group's queue, so a burst does not
-// pile up behind them; the run itself goes through the queue, one turn at a time.
+// when to speak. The settling pause and folding a burst into one turn are the pipeline's (conversation.ts burst), the same
+// as in the private chat; what stays here is the group's own question once the burst has settled: was the assistant
+// addressed (sticky until answered), or does the gate say it should speak.
 export function createGroupBrain(brain: Brain) {
-  const wait = brain.wait ?? sleep;
   const { pipeline } = brain;
   type Asked = { line: string; quote: Quote; incoming?: Quote; voice: boolean };
-  const state = new Map<string, { epoch: number; addressed?: Asked; lastSpoke?: number}>();
+  const state = new Map<string, { addressed?: Asked; lastSpoke?: number }>();
 
   return async function onMessage(m: GroupMessage, now = new Date()): Promise<void> {
     const conv = group(m.groupId);
@@ -127,51 +124,49 @@ export function createGroupBrain(brain: Brain) {
     pipeline.record(conv, "member", m.timestamp, line);
     const direct = m.addressedToMe;
     if (!direct && settings.groupParticipation === "tagged") return;
-    const st = state.get(m.groupId) ?? { epoch: 0 };
+    const st = state.get(m.groupId) ?? {};
     state.set(m.groupId, st);
-    const mine = ++st.epoch;
     if (direct) st.addressed = { line, quote: { text: m.text.slice(0, 200), author: m.author ?? "", timestamp: m.timestamp }, incoming: m.quote, voice: !!m.voice }; // sticky until answered
-    await wait(settings.groupDebounceSeconds * 1000);
-    if (st.epoch !== mine) return; // a newer message took over
-    if (isPaused(now) || budgetSpent()) return;
-
-    const asked = st.addressed;
-    let delay = 0;
-    let hint: string | undefined;
-    if (!asked) {
-      const looked = new Date();
-      try {
-        const v = await (brain.gate ?? askGate)({ conv, trigger: "message", now, tail: brain.recent(m.groupId), secondsSinceMine: st.lastSpoke ? Math.round((Date.now() - st.lastSpoke) / 1000) : undefined });
-        recordWake(pipeline, conv, v.nextCheckMinutes, looked); // the same gate also chose when to look next (wake.ts)
-        if (!v.act) return;
-        delay = v.delaySeconds;
-        hint = v.instructions;
-      } catch (e) {
-        console.error("group: gate failed:", (e as Error).message); // not addressed: nobody is waiting for an answer
-        return;
+    await pipeline.burst(conv, m, async (batch) => {
+      if (isPaused(now) || budgetSpent()) return;
+      const asked = st.addressed;
+      let delay = 0;
+      let hint: string | undefined;
+      if (!asked) {
+        const looked = new Date();
+        try {
+          const v = await (brain.gate ?? askGate)({ conv, trigger: "message", now, tail: brain.recent(m.groupId), secondsSinceMine: st.lastSpoke ? Math.round((Date.now() - st.lastSpoke) / 1000) : undefined });
+          recordWake(pipeline, conv, v.nextCheckMinutes, looked); // the same gate also chose when to look next (wake.ts)
+          if (!v.act) return;
+          delay = v.delaySeconds;
+          hint = v.instructions;
+        } catch (e) {
+          console.error("group: gate failed:", (e as Error).message); // not addressed: nobody is waiting for an answer
+          return;
+        }
+        if (delay) {
+          await pipeline.wait(delay * 1000);
+          if (batch.stale()) return; // someone wrote meanwhile: that message re-evaluates
+        }
       }
-      if (delay) {
-        await wait(delay * 1000);
-        if (st.epoch !== mine) return; // someone wrote meanwhile: that message re-evaluates
-      }
-    }
-    await pipeline.enqueue(conv, async () => {
-      if (st.epoch !== mine) return; // a message came in while this waited for the group's turn: it re-evaluates (an address is sticky)
-      const addressed = asked && { line: asked.line, quote: asked.incoming, voice: asked.voice };
-      const build: PromptBuilder = (since) => {
-        const { lines, seenAt } = (brain.context ?? groupContext)(m.groupId, since);
-        return { prompt: groupPrompt(now, lines, addressed, !!since, hint, pipeline.canSpeak()), seenAt };
-      };
-      // Like a private chat, it may answer with an emoji reaction (on the message it is answering), with or without words.
-      const res = await pipeline.runTurn(conv, {
-        run: async () => ({ text: await (brain.run ?? realRunner)(build, { conv, now }) }),
-        target: m.author ? { author: m.author, timestamp: m.timestamp } : undefined,
-        threadUnder: asked?.quote,
-        announce: !!asked,
+      await batch.run(async (items) => {
+        const last = items[items.length - 1]!; // one turn for the burst: it answers the newest, and the run sees all of them in the log
+        const addressed = asked && { line: asked.line, quote: asked.incoming, voice: asked.voice };
+        const build: PromptBuilder = (since) => {
+          const { lines, seenAt } = (brain.context ?? groupContext)(m.groupId, since);
+          return { prompt: groupPrompt(now, lines, addressed, !!since, hint, pipeline.canSpeak()), seenAt };
+        };
+        // Like a private chat, it may answer with an emoji reaction (on the message it is answering), with or without words.
+        const res = await pipeline.runTurn(conv, {
+          run: async () => ({ text: await (brain.run ?? realRunner)(build, { conv, now }) }),
+          target: last.author ? { author: last.author, timestamp: last.timestamp } : undefined,
+          threadUnder: asked?.quote,
+          announce: !!asked,
+        });
+        if (!res.error) st.addressed = undefined;
+        if (res.noticed) st.addressed = undefined;
+        if (res.spoke) st.lastSpoke = Date.now();
       });
-      if (!res.error) st.addressed = undefined;
-      if (res.noticed) st.addressed = undefined;
-      if (res.spoke) st.lastSpoke = Date.now();
     });
   };
 }

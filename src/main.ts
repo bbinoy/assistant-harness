@@ -13,7 +13,7 @@ import { groupDir, recordGroup } from "./groupstore.ts";
 import { logTail } from "./gate.ts";
 import { createWakeups } from "./wake.ts";
 import { createHandler } from "./handler.ts";
-import { startHeartbeat } from "./heartbeat.ts";
+import { startHeartbeat, startJobs } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
 import { compactIfNeeded, recordMessage, type Kind } from "./messages.ts";
 import { summarizeWithHaiku } from "./summarize.ts";
@@ -149,24 +149,20 @@ const radar = createRadar({ approve, notify: say, briefDue: isBriefDue });
 const legacy = settings.scheduler === "legacy";
 const briefDue = () => (legacy ? isBriefDue() : wakeups.briefPending());
 
-// Independent jobs: each starts on every tick in its own try/catch and none waits for another (the dream runs before the
-// brief: in legacy mode as the brief's first step, with the gate scheduler inside the brief preset).
-const job = (name: string, f: () => unknown) => {
-  try {
-    void Promise.resolve(f()).catch((e) => console.error(`${name}: tick failed:`, (e as Error).message));
-  } catch (e) {
-    console.error(`${name}: tick failed:`, (e as Error).message);
-  }
-};
-
+// Independent jobs: each starts on every tick in its own try/catch and none waits for another (startJobs, heartbeat.ts; the
+// dream runs before the brief: in legacy mode as the brief's first step, with the gate scheduler inside the brief preset).
 startHeartbeat({
   alert: notify,
   handle: handler.enqueue,
   briefDue,
   onTick: () => {
-    job("wake", () => wakeups.tick());
-    if (!legacy) return; // the gate scheduler: the brief and the radar are started by the wake-ups' look at the owner's chat
-    job("brief", () => (isBriefDue() ? dream() : Promise.resolve()).then(() => maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify })));
-    job("radar", () => radar());
+    startJobs({
+      wake: () => wakeups.tick(),
+      // the gate scheduler: the brief and the radar are started by the wake-ups' look at the owner's chat
+      ...(legacy && {
+        brief: () => (isBriefDue() ? dream() : Promise.resolve()).then(() => maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify })),
+        radar: () => radar(),
+      }),
+    });
   },
 });

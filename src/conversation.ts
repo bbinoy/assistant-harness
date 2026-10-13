@@ -9,12 +9,14 @@ import { NOTES_DIR } from "./notes.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, voiceOption } from "./voicereply.ts";
+import { settings } from "./settings.ts";
 import { MAX_SPOKEN_CHARS, type IncomingMessage, type IncomingReaction, type Quote } from "@ted-personal-assistant/signal";
 
 // The one pipeline every conversation goes through: the owner's private chat and each group. What differs
 // between them is DATA on a Conversation, and a Conversation is made only by owner() and group(id), so trust
 // cannot be mixed up by building one by hand. What is the same is the code: read receipt, voice message in,
 // record, run, [[voice]] / [[react]] / [[silent]], quote threading, typing, error notice, one turn at a time.
+// A burst of messages is one turn in both (burst below): a short settling pause, then everything that arrived is answered together.
 //   owner   its own Signal chat; the full toolset (policy source "chat"); approvals exist; always answered
 //   group   one Signal group; no private data (policy source "group"); the participation gate decides (group.ts)
 
@@ -110,6 +112,15 @@ export interface PipelineDeps {
   compact?: (conv: Conversation) => Promise<void>; // after an answer is out; the next message waits for it. Every conversation
   afterTurn?: (conv: Conversation) => void; // after any turn, success or not (the owner: warm up the process for the next message)
   now?: () => number;
+  wait?: (ms: number) => Promise<void>; // the settling pause (tests)
+  settleMs?: () => number; // how long a burst must be quiet before it is answered (default: settings.settleSeconds)
+}
+
+// What a settled burst hands its owner: whether a newer message has taken over, and the one queued run that takes every
+// message gathered by the time the run starts (oldest first).
+export interface Batch<T> {
+  stale: () => boolean;
+  run: (job: (items: T[]) => Promise<void>) => Promise<void>;
 }
 
 const SILENT = /^\s*\[\[silent\]\]\s*$/i;
@@ -127,6 +138,32 @@ export function createPipeline(deps: PipelineDeps) {
     tails.set(conv.key, tail);
     void tail.then(() => tails.get(conv.key) === tail && tails.delete(conv.key));
     return run;
+  }
+
+  // Burst handling, the same for every conversation: after each message wait a short settling pause; a newer message
+  // restarts it and takes over, so a burst is ONE turn. Messages that arrive while that turn is queued join it; ones that
+  // arrive while a run is in progress wait in the queue and make the next turn. Messages are kept here, in the order they came.
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const wait = deps.wait ?? sleep;
+  const bursts = new Map<string, { epoch: number; pending: unknown[]; queued: boolean }>();
+  async function burst<T>(conv: Conversation, item: T, settled: (b: Batch<T>) => Promise<void>): Promise<void> {
+    const st = bursts.get(conv.key) ?? { epoch: 0, pending: [], queued: false };
+    bursts.set(conv.key, st);
+    st.pending.push(item);
+    const mine = ++st.epoch;
+    await wait(deps.settleMs ? deps.settleMs() : settings.settleSeconds * 1000);
+    if (st.epoch !== mine || st.queued || !st.pending.length) return; // a newer message took over, or a queued run will take this one too
+    await settled({
+      stale: () => st.epoch !== mine,
+      run: (job) => {
+        st.queued = true;
+        return enqueue(conv, async () => {
+          st.queued = false;
+          const items = st.pending.splice(0) as T[];
+          if (items.length) await job(items);
+        });
+      },
+    });
   }
 
   const record = (conv: Conversation, kind: Kind, ts: number, text: string) => deps.record(conv.groupId, kind, ts, text);
@@ -207,9 +244,10 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
-  // The owner's message, as the model sees it.
-  function ownerPrompt(m: IncomingMessage): string {
-    const text = withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.text, m.quote);
+  // The owner's messages of one burst, as the model sees them: oldest first, each with its own quote and voice marks.
+  function ownerPrompt(ms: readonly IncomingMessage[]): string {
+    const one = (m: IncomingMessage) => withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.text, m.quote);
+    const text = ms.length === 1 ? one(ms[0]!) : `${ms.length} messages arrived one after another, oldest first. Answer them together, as one reply:\n\n${ms.map(one).join("\n\n")}`;
     return canSpeak() ? `${text}\n\n${voiceOption(true)}` : text;
   }
 
@@ -251,18 +289,24 @@ export function createPipeline(deps: PipelineDeps) {
       if (outcome === "modified" && changes) await out.replyPlain(`Applied your change: ${changes.map((c) => `${c.field} → ${c.value}`).join(", ")}`);
       return;
     }
-    await enqueue(conv, () => {
-      console.log(`owner message (${m.text.length} chars)`);
-      if (m.quote) console.log(`owner is replying to an earlier message (${m.quote.text.length} chars)`);
-      const prompt = ownerPrompt(m);
-      return runTurn(conv, {
-        run: () => deps.runOwner(prompt, m.text),
-        target,
-        threadUnder: { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp },
-        hadQuote: !!m.quote,
-        announce: true,
-      });
-    });
+    await burst(conv, m, (b) =>
+      b.run(async (items) => {
+        const ms = items.sort((a, c) => a.timestamp - c.timestamp);
+        const last = ms[ms.length - 1]!;
+        for (const x of ms) {
+          console.log(`owner message (${x.text.length} chars)`);
+          if (x.quote) console.log(`owner is replying to an earlier message (${x.quote.text.length} chars)`);
+        }
+        const prompt = ownerPrompt(ms);
+        await runTurn(conv, {
+          run: () => deps.runOwner(prompt, ms.map((x) => x.text).join("\n")),
+          target: { author: last.from, timestamp: last.timestamp },
+          threadUnder: { text: last.text.slice(0, 200), author: last.from, timestamp: last.timestamp },
+          hadQuote: ms.some((x) => x.quote),
+          announce: true,
+        });
+      }),
+    );
   }
 
   // Any reaction that is not an approval answer is feedback on a message. The model is told which message
@@ -308,7 +352,7 @@ export function createPipeline(deps: PipelineDeps) {
     return ev.type === "message" ? groupMessage(conv, ev.m) : groupReaction(conv, ev.r);
   }
 
-  return { handleIncoming, enqueue, runTurn, deliver, record, canSpeak };
+  return { handleIncoming, enqueue, burst, wait, runTurn, deliver, record, canSpeak };
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>;

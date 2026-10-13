@@ -1,0 +1,82 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { startHeartbeat, startJobs, type MailSource } from "../src/heartbeat.ts";
+import { settings } from "../src/settings.ts";
+
+// The heartbeat's mail check and the tick jobs (wake-ups, dream, brief, radar) are independent: a failing or hanging one
+// never keeps another from running.
+
+const tick = () => new Promise((r) => setTimeout(r, 10));
+
+test("startJobs: a job that throws (sync or async) or never finishes does not stop the others", async () => {
+  const ran: string[] = [];
+  const errors: string[] = [];
+  const was = console.error;
+  console.error = (...a: unknown[]) => void errors.push(a.join(" "));
+  try {
+    startJobs({
+      throws: () => { throw new Error("sync boom"); },
+      rejects: async () => { throw new Error("async boom"); },
+      hangs: () => new Promise(() => {}), // a slow job: never awaited
+      wake: () => void ran.push("wake"),
+      brief: async () => void ran.push("brief"),
+      radar: () => void ran.push("radar"),
+    });
+    await tick();
+  } finally {
+    console.error = was;
+  }
+  assert.deepEqual(ran, ["wake", "brief", "radar"]);
+  assert.equal(errors.length, 2);
+  assert.ok(errors.some((e) => /throws: tick failed: sync boom/.test(e)) && errors.some((e) => /rejects: tick failed: async boom/.test(e)));
+});
+
+test("heartbeat: a failing mail check does not skip the tick jobs, and a hanging job does not block the mail check", async () => {
+  const s = settings as unknown as Record<string, unknown>;
+  const was = { quietStartHour: s.quietStartHour, quietEndHour: s.quietEndHour };
+  Object.assign(s, { quietStartHour: 0, quietEndHour: 0 }); // never "night" for this test
+  const timers: (() => void)[] = [];
+  let inboxCalls = 0;
+  const mail: MailSource = {
+    inboxes: async () => (inboxCalls++, Promise.reject(new Error("Mailbird is down"))),
+    call: async () => assert.fail("not reached"),
+    close: async () => {},
+  } as unknown as MailSource;
+  const ran: string[] = [];
+  const quiet = console.error;
+  const errors: string[] = [];
+  console.error = (...a: unknown[]) => void errors.push(a.join(" "));
+  const log = console.log;
+  console.log = () => {};
+  try {
+    const hb = startHeartbeat(
+      {
+        alert: async () => {},
+        handle: () => {},
+        briefDue: () => false,
+        onTick: () => startJobs({
+          wake: () => void ran.push("wake"),
+          dream: () => { throw new Error("dream broke"); },
+          brief: () => new Promise(() => {}), // takes "minutes"
+          radar: async () => void ran.push("radar"),
+        }),
+      },
+      { mail, setTimeout: (f) => void timers.push(f), setInterval: (f) => void timers.push(f) },
+    );
+    assert.equal(timers.length, 2); // the first-tick timer and the interval, both ours
+    timers[0]!(); // the timer fires
+    await tick();
+    assert.equal(inboxCalls, 1, "the mail check ran (and failed)");
+    assert.deepEqual(ran, ["wake", "radar"], "a failing mail check, a throwing job and a hanging job skipped nothing");
+    assert.ok(errors.some((e) => /heartbeat error: Mailbird is down/.test(e)));
+    timers[1]!(); // the next tick: mail still tried, jobs still start (the hanging brief is simply started again)
+    await tick();
+    assert.equal(inboxCalls, 2);
+    assert.deepEqual(ran, ["wake", "radar", "wake", "radar"]);
+    void hb;
+  } finally {
+    console.error = quiet;
+    console.log = log;
+    Object.assign(s, was);
+  }
+});

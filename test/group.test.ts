@@ -107,13 +107,13 @@ const rig = (over: object = {}) => {
     vouch: (over as any).vouch ?? (async () => true),
     isOwner: (w) => w.from === OWNER,
     admitGroup: async (_c, m) => brain(m),
+    wait: (over as any).wait ?? (async (ms: number) => void waits.push(ms)),
   });
   const brain = createGroupBrain({
     pipeline,
     recent: () => [] as string[],
     run: async () => "Howdy!",
     gate: async () => ({ act: true, task: "task" as const, delaySeconds: 0, nextCheckMinutes: 30 }),
-    wait: async (ms: number) => void waits.push(ms),
     ...over,
   });
   // Feed it as Signal would (conversation.ts checks the group, then the brain decides).
@@ -186,6 +186,26 @@ test("groups: a newer message supersedes the evaluation of the older one", async
   release();
   await a;
   assert.equal(r.sent.length, 1); // one answer for the burst
+});
+
+test("groups: a burst is one run after the settling pause, and a sticky address is still answered when a later message is not addressed", async () => {
+  const g = gid();
+  let release!: () => void;
+  const settle = new Promise<void>((r) => (release = r));
+  const prompts: string[] = [];
+  const r = rig({ wait: () => settle, gate: async () => assert.fail("addressed earlier in the burst: no gate"), run: async (build: (s?: string) => { prompt: string }) => (prompts.push(build().prompt), "On it!") });
+  const all = [
+    r.on(mk({ groupId: g, timestamp: 1, text: "@Ted what time is the game?" })),
+    r.on(mk({ groupId: g, timestamp: 2, addressedToMe: false, text: "also bring water" })),
+    r.on(mk({ groupId: g, timestamp: 3, addressedToMe: false, text: "and the ball" })),
+  ];
+  await new Promise((res) => setTimeout(res, 5));
+  assert.equal(prompts.length, 0); // still settling
+  release();
+  await Promise.all(all);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0]!, /You were addressed[\s\S]*what time is the game/);
+  assert.deepEqual(r.sent, [{ text: "On it!", quoted: true }]); // threaded under the question
 });
 
 test("groups: tagged-only mode answers only when addressed", async () => {

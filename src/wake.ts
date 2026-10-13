@@ -25,7 +25,7 @@ import { OWNER, settings } from "./settings.ts";
 // For the owner the gate also chooses the presets "brief" and "radar" (tasks.ts: WHEN is the gate's, HOW is code) when
 // SCHEDULER=gate. Presets are owner-only: a group's gate output is always a plain task. Besides, one deterministic rule
 // that needs no model: if no brief is logged for today by BRIEF_BACKSTOP_HOUR, or an attempt came out incomplete, the brief
-// runs anyway (the dream first). Presets are not queued behind the chat (a brief takes minutes); free-form tasks are.
+// runs anyway (the dream first). Presets are not queued behind the chat (a brief takes minutes) and not awaited by the look either: they run as detached jobs, one per task at a time; free-form tasks are queued.
 // The model decides; THESE are the guards, in code: pause, the daily budget (budgetSpent: asking never uses up the
 // owner's once-a-day notice), the owner's quiet hours, the next look clamped to 15..60 minutes, per preset its own rules
 // (tasks.ts presetRefusal: brief once a day and its attempt cap; radar not too soon, not before the brief, the cap on posts
@@ -91,18 +91,37 @@ export function createWakeups(deps: WakeDeps) {
     record: (text) => pipeline.record(conv, "action", Date.now(), text),
   });
 
-  // A preset runs outside the conversation's queue (a brief takes minutes; the chat must stay answerable).
-  async function runPreset(conv: Conversation, task: Task, st: LookState, now: Date): Promise<string> {
+  // A preset runs outside the conversation's queue AND outside the look: it is started as a detached job (I/O-bound, so no
+  // worker thread) and the look returns at once, so a brief or radar that takes minutes never delays the next look at the
+  // owner's chat. One job per task at a time (the running guard); its ledger lines are written when the run ends, a failure
+  // is logged and audited, and `idle()` lets a test (or a shutdown) wait for the jobs.
+  const running = new Map<string, Promise<string>>();
+  function runPreset(conv: Conversation, task: Task, st: LookState, now: Date, after?: () => void): string {
     const refused = presetRefusal(task, st, now);
     if (refused) {
       audit("wake", `refused-${refused}`, source(conv));
       return `refused:${refused}`;
     }
+    if (running.has(task.name)) return `${task.name}-running`;
     const io = presetIO(conv, now);
-    const result = task.name === "brief" ? `brief-${await runBriefTask(io, task, st, now)}` : `radar-${await runRadarTask(io, task, st, now)}`;
-    audit("wake", result, source(conv));
-    return result;
+    const job = (async () => {
+      try {
+        const result = task.name === "brief" ? `brief-${await runBriefTask(io, task, st, now)}` : `radar-${await runRadarTask(io, task, st, now)}`;
+        audit("wake", result, source(conv));
+        return result;
+      } catch (e) {
+        console.error(`wake: ${task.name} failed:`, (e as Error).message);
+        audit("wake", `${task.name}-failed`, source(conv));
+        return `${task.name}-failed`;
+      } finally {
+        running.delete(task.name);
+        after?.();
+      }
+    })();
+    running.set(task.name, job);
+    return `${task.name}-started`;
   }
+  const idle = async (): Promise<string[]> => Promise.all([...running.values()]);
 
   const briefTask = (): Task => buildTask("owner", { task: "brief" }, { scheduler: "gate" })!;
 
@@ -111,7 +130,7 @@ export function createWakeups(deps: WakeDeps) {
   async function backstop(conv: Conversation, st: LookState, now: Date): Promise<string | undefined> {
     if (conv.kind !== "owner" || settings.scheduler !== "gate" || !briefOwed(st, now)) return undefined;
     if (paused(clock()) || spent()) return "guarded";
-    return runPreset(conv, briefTask(), st, now).catch((e) => (console.error("wake: brief failed:", (e as Error).message), "brief-failed"));
+    return runPreset(conv, briefTask(), st, now);
   }
 
   // The ledger's reading, remembered while the log file is unchanged (same stat), the day is the same and no radar key
@@ -153,9 +172,8 @@ export function createWakeups(deps: WakeDeps) {
 
     if (task.name !== "task") {
       if (conv.kind !== "owner") return "no"; // defence in depth: buildTask never returns this
-      const res = await runPreset(conv, task, st, now).catch((e) => (console.error(`wake: ${task.name} failed:`, (e as Error).message), `${task.name}-failed`));
-      recordWake(pipeline, conv, out.nextCheckMinutes, now);
-      return res;
+      // The wake line is written again when the run ends: the ledger lines it wrote are not news.
+      return runPreset(conv, task, st, now, () => recordWake(pipeline, conv, out.nextCheckMinutes, now));
     }
     const result = await act(conv, task.instructions, now).catch((e) => (console.error(`wake: ${conv.kind} run failed:`, (e as Error).message), "failed" as const));
     pipeline.record(conv, "action", Date.now(), `wake-up: ${task.instructions.slice(0, 200)} → ${result === "posted" ? "posted" : result === "silent" ? "stayed silent" : "failed"}`);
@@ -193,5 +211,5 @@ export function createWakeups(deps: WakeDeps) {
     );
   }
 
-  return { tick, look, briefPending: briefIsPending };
+  return { tick, look, idle, briefPending: briefIsPending };
 }

@@ -28,7 +28,7 @@ record → run → parse `[[react]]`/`[[voice]]`/`[[silent]]` → speak/send/thr
   `deliver(conv, reply, trigger)` for the reply. Errors become a notice in both (texts in `src/errors.ts`),
   rate-limited in groups.
 - A per-conversation serial queue (the owner's chat already has one; groups currently can run twice at once).
-  Approval answers stay a pre-queue step, owner only. The group gate's debounce/epoch logic stays, inside the queue.
+  Approval answers stay a pre-queue step, owner only. The group gate's debounce/epoch logic stays, inside the queue. (Later: the settling pause and folding a burst into one turn moved into the shared pipeline, for the owner's chat too.)
 - Move the pipeline out of `main.ts` so it is testable with a fake Signal client. Write those tests FIRST
   against today's private-chat behaviour, so the refactor is verified as no behaviour change for 1:1.
 - Result: groups gain voice replies, quote context and read receipts for free.
