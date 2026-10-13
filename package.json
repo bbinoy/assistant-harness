@@ -1,5 +1,5 @@
 {
-  "name": "number-one",
+  "name": "ted-personal-assistant",
   "private": true,
   "type": "module",
   "scripts": {
@@ -25,7 +25,7 @@
     "@modelcontextprotocol/sdk": "^1.32.1",
     "undici": "^8.11.2",
     "zod": "^4.0.0",
-    "@number-one/signal": "*"
+    "@ted-personal-assistant/signal": "*"
   },
   "engines": {
     "node": ">=24"

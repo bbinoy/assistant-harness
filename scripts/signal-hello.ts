@@ -1,7 +1,7 @@
 // `npm run signal:hello`: the assistant's own Signal account sends you a first message, so the chat
 // exists on your phone (an account without a phone number cannot be found by number). Run it
 // while the agent is running with SIGNAL_ACCOUNT set; it uses the agent's own signal-cli daemon.
-import { SignalClient } from "@number-one/signal";
+import { SignalClient } from "@ted-personal-assistant/signal";
 import { config } from "../src/config.ts";
 import { settings } from "../src/settings.ts";
 

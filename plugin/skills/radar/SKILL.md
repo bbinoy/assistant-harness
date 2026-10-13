@@ -24,7 +24,7 @@ from now, or `null` if there is none in the 36 hours you read.
 ## What to look at
 
 1. **The calendar.** Use the calendars and time zone in the owner's `setup-calendars`
-   note (`number-one:calendar` describes how to read it). One `list_events` per
+   note (`ted-personal-assistant:calendar` describes how to read it). One `list_events` per
    calendar, all in the same turn, covering from now to the next 36 hours. Never guess
    which calendars to use; if there is no setup note or the calendar tools do not
    exist, return no messages (the daily brief reports setup problems, not you).
@@ -35,11 +35,11 @@ from now, or `null` if there is none in the 36 hours you read.
 ## What deserves a message
 
 - **kind `prep`: a meeting about to start.** Any event that starts within the window in
-  the task, that needs prep by the rules in `number-one:meeting-prep` (external or
+  the task, that needs prep by the rules in `ted-personal-assistant:meeting-prep` (external or
   high-stakes: not 1:1 catch-ups, standups, focus time, travel, all-day markers). Find
   the meeting's prep page using the owner's `setup-meetings` note. If one exists, use it.
   If none exists and the note says where they live, create it (bounded research, as
-  `number-one:meeting-prep` describes). The message: time and title on the first line,
+  `ted-personal-assistant:meeting-prep` describes). The message: time and title on the first line,
   then 3 to 5 short lines (who, goal, what is open or owed), then the page link. **key**
   `prep:<event id>@<start time>`.
 - **kind `clash`: overlapping events in the next 24 hours.** Two busy, not-declined,

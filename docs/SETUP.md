@@ -16,11 +16,11 @@ This is a personal project that runs daily for its author. It works, its safety-
 ## Install
 
 ```bash
-git clone https://github.com/<you>/number-one && cd number-one
+git clone https://github.com/<you>/ted-personal-assistant && cd ted-personal-assistant
 npm install
 
 # 1. Link Signal (scan the QR code in Signal → Settings → Linked devices)
-signal-cli link -n "number-one"            # prints a sgnl:// link; turn it into a QR code, e.g.
+signal-cli link -n "ted-personal-assistant"            # prints a sgnl:// link; turn it into a QR code, e.g.
                                       #   brew install qrencode && qrencode -t ANSIUTF8 '<link>'
 
 # 2. Configure

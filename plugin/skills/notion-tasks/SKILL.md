@@ -1,6 +1,6 @@
 ---
 name: notion-tasks
-description: Use when reviewing, tidying, or updating the owner's Notion task list, keeping it in sync with email activity, or reporting on tasks - typically as part of the daily brief, or an ad-hoc "what's on my list / add a task / mark this done". Pairs with `number-one:mailbird` and `number-one:daily-brief`.
+description: Use when reviewing, tidying, or updating the owner's Notion task list, keeping it in sync with email activity, or reporting on tasks - typically as part of the daily brief, or an ad-hoc "what's on my list / add a task / mark this done". Pairs with `ted-personal-assistant:mailbird` and `ted-personal-assistant:daily-brief`.
 ---
 
 # Notion task list
@@ -18,7 +18,7 @@ note says the tasks are a database, use `notion-create-pages` and
 **If the Notion tools (`notion-search`, `notion-fetch`) do not exist** (the connector is not connected in the owner's Claude account), say so plainly, never guess or invent tasks data, skip this part, and in an unattended run end the brief with one line: "🔌 <connector> isn't connected, so tasks was skipped." In chat, add how to fix it: connect it under Settings, Connectors in their Claude account, then message you again.
 
 **If there is no `setup-tasks` note:**
-- in chat, find it yourself and save it: load `number-one:setup` (it searches Notion
+- in chat, find it yourself and save it: load `ted-personal-assistant:setup` (it searches Notion
   for the task list, saves the note, and asks the owner only if it finds nothing or
   several candidates), then carry on with the owner's request;
 - in an unattended run (nobody to ask, and you cannot save notes), you may search
@@ -60,7 +60,7 @@ Only when the link is unambiguous:
   Area from context, Priority 🟡 unless clearly urgent.
 - **Nudge** when a task is "waiting on <person>" past its date and no
   reply has come: surface it in the brief with a draft follow-up (via
-  `number-one:mailbird`), do not auto-send.
+  `ted-personal-assistant:mailbird`), do not auto-send.
 
 When the link is fuzzy, do **not** edit - list it in the brief as a
 question ("looks like 'Foo' may be done - confirm?").
@@ -77,7 +77,7 @@ question ("looks like 'Foo' may be done - confirm?").
 ## Deadlines are tasks
 
 Keep it simple: every deadline lives here as a task row. When
-`number-one:mailbird` or `number-one:meeting-prep` surface a date-bound thing (payment
+`ted-personal-assistant:mailbird` or `ted-personal-assistant:meeting-prep` surface a date-bound thing (payment
 due, RSVP-by, sign-by, respond-by, application deadline, memo due, doc
 to sign) and no matching row exists, add one with its Due date and a
 short source hint. There is no separate deadline list - the Tasks

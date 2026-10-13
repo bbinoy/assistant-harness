@@ -58,7 +58,7 @@ When the background handler drafts an in-thread reply (a scheduling answer, say)
 
 ## The proactive radar
 
-The heartbeat watches mail every few minutes with no model. The calendar can only be read through the model, so the radar is a periodic look instead: adaptive, about an hour before your next meeting and at most every `RADAR_MINUTES` (180) apart, while you are awake and after the daily brief has run, one Sonnet run (`src/radar.ts`, skill `number-one:radar`) reads your calendar, the heartbeat's digest and what it already told you, and returns JSON: zero or more messages (a meeting about to start with its prep, a clash with two alternative slots, mail that the calendar makes urgent). Each run also reports when the next meeting starts, and code schedules the next run from that (never sooner than 45 minutes, never later than `RADAR_MINUTES`). When the assistant itself creates, changes or deletes a calendar event, the next run is pulled forward to 30 minutes after the last. An event you add yourself in your calendar app sends no signal, so the longest wait is the blind spot. Most runs return nothing.
+The heartbeat watches mail every few minutes with no model. The calendar can only be read through the model, so the radar is a periodic look instead: adaptive, about an hour before your next meeting and at most every `RADAR_MINUTES` (180) apart, while you are awake and after the daily brief has run, one Sonnet run (`src/radar.ts`, skill `ted-personal-assistant:radar`) reads your calendar, the heartbeat's digest and what it already told you, and returns JSON: zero or more messages (a meeting about to start with its prep, a clash with two alternative slots, mail that the calendar makes urgent). Each run also reports when the next meeting starts, and code schedules the next run from that (never sooner than 45 minutes, never later than `RADAR_MINUTES`). When the assistant itself creates, changes or deletes a calendar event, the next run is pulled forward to 30 minutes after the last. An event you add yourself in your calendar app sends no signal, so the longest wait is the blind spot. Most runs return nothing.
 
 The model decides **what** deserves an interruption; code decides whether it **may** be sent (`src/radar-rules.ts`): never the same message twice (a dedupe key per event), at most 3 per run and `MAX_PROACTIVE_PER_DAY` (8) per day, and nothing while paused, during quiet hours, while the daily brief is still due, or over the spend limit. The run is read-only apart from a meeting prep page in Notion; a calendar change or a sent mail still asks on your phone (policy source `radar`). It must report how many events it read, so a run that never looked shows up in the log. Everything the assistant sends on its own is kept in `memory/recent-pings.json`, so the chat knows what "yes, do that" refers to. Switch it off with `PROACTIVE=off`.
 
@@ -94,7 +94,7 @@ What is left is model time: a tool question is two or three model calls of 2 to 
 
 ```
 src/main.ts          wiring: Signal in, chat turns, heartbeat, brief, approvals
-packages/signal/     @number-one/signal: signal-cli JSON-RPC client, daemon supervision, local voice transcription (a workspace package, usable on its own)
+packages/signal/     @ted-personal-assistant/signal: signal-cli JSON-RPC client, daemon supervision, local voice transcription (a workspace package, usable on its own)
 src/markdown.ts      Markdown → Signal text styles (UTF-16 offsets)
 src/outbound.ts      sending, chunking, echo guard
 src/guards.ts        owner allowlist (pure, tested)

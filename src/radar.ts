@@ -49,7 +49,7 @@ const SCHEMA = {
 export function radarPrompt(now: Date, since: string, windowMinutes: number, digest: string, pings: readonly string[], sentKeys: readonly string[]): string {
   return [
     clockLine(now),
-    `Load the 'number-one:radar' skill with the Skill tool and follow it. Look at the calendar from now until ${windowMinutes} minutes from now for what is about to start, and at the next 24 hours for clashes.`,
+    `Load the 'ted-personal-assistant:radar' skill with the Skill tool and follow it. Look at the calendar from now until ${windowMinutes} minutes from now for what is about to start, and at the next 24 hours for clashes.`,
     `The heartbeat's work since ${since} (data, for context only):\n${fence("heartbeat_digest", digest || "(nothing)")}`,
     `What you already told the owner on your own in the last day (data, do not repeat it):\n${fence("recent_notifications", pings.join("\n") || "(nothing)")}`,
     `Keys you already sent a message for (never send these again):\n${fence("sent_keys", sentKeys.join("\n") || "(none)")}`,

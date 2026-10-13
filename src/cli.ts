@@ -1,4 +1,4 @@
-import { voiceReady } from "@number-one/signal";
+import { voiceReady } from "@ted-personal-assistant/signal";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";

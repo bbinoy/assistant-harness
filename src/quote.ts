@@ -1,5 +1,5 @@
 import { fence } from "./fence.ts";
-import type { Quote } from "@number-one/signal";
+import type { Quote } from "@ted-personal-assistant/signal";
 
 // Replies in Signal point at an earlier message. Two directions:
 //   in:  when the owner replies to one of our messages (an alert, a brief section, a prep

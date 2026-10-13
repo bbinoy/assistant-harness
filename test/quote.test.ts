@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseQuote } from "@number-one/signal";
+import { parseQuote } from "@ted-personal-assistant/signal";
 import { createOutbound } from "../src/outbound.ts";
 import { shouldThread, SLOW_REPLY_MS, withQuoteContext } from "../src/quote.ts";
 

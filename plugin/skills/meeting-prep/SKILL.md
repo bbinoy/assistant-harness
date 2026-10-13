@@ -1,11 +1,11 @@
 ---
 name: meeting-prep
-description: Use when deciding which upcoming meetings need preparation, creating and drafting a prep page in the owner's Notion "Meetings" database, and running the post-meeting follow-up pass. Part of the daily brief. Gets the event list from `number-one:calendar`; pairs with `number-one:mailbird`, `number-one:notion-tasks`, `number-one:daily-brief`.
+description: Use when deciding which upcoming meetings need preparation, creating and drafting a prep page in the owner's Notion "Meetings" database, and running the post-meeting follow-up pass. Part of the daily brief. Gets the event list from `ted-personal-assistant:calendar`; pairs with `ted-personal-assistant:mailbird`, `ted-personal-assistant:notion-tasks`, `ted-personal-assistant:daily-brief`.
 ---
 
 # Meeting prep
 
-`number-one:calendar` produces the reviewed event list for the window. This skill
+`ted-personal-assistant:calendar` produces the reviewed event list for the window. This skill
 decides what needs prep, drafts it, and follows up after meetings happen.
 
 ## Which meetings need prep
@@ -29,7 +29,7 @@ exactly that; do not guess a location.
 **If the Notion tools (`notion-search`, `notion-fetch`) do not exist** (the connector is not connected in the owner's Claude account), say so plainly, never guess or invent meeting prep data, skip this part, and in an unattended run end the brief with one line: "🔌 <connector> isn't connected, so meeting prep was skipped." In chat, add how to fix it: connect it under Settings, Connectors in their Claude account, then message you again.
 
 **If there is no `setup-meetings` note:**
-- in chat, find it yourself and save it: load `number-one:setup` (it searches Notion
+- in chat, find it yourself and save it: load `ted-personal-assistant:setup` (it searches Notion
   for the meetings database or page, saves the note, and asks the owner only if it
   finds nothing or several candidates), then carry on with the owner's request;
 - in an unattended run (nobody to ask, and you cannot save notes), still decide
@@ -64,13 +64,13 @@ rebuild or re-research.
      person / company (their `Summary` first; open a body only if the
      Summary is thin);
    - at most the **2 most recent** email threads with the attendee -
-     one `number-one:mailbird` `search_conversations`, skim the result, open at
+     one `ted-personal-assistant:mailbird` `search_conversations`, skim the result, open at
      most those two;
    - any single doc the invite directly links.
    Structure: **Context** (who they are, how the owner knows them, last
    contact), **Goal**, **Talking points / questions** (3-6), **Open
    threads / asks**, **Prep to do** (if any - also add it to
-   `number-one:notion-tasks`).
+   `ted-personal-assistant:notion-tasks`).
 4. Put a short version + the Notion link in the briefing.
 
 ## Post-meeting follow-up (every run)
@@ -80,8 +80,8 @@ For meetings that already happened in the look-back window:
 1. Find the Meetings DB row (by name / attendee / date).
 2. **If it has real notes / a Summary:** read them, pull out follow-ups
    (a promise the owner made, a next step, a doc to send). For each, add a
-   task to `number-one:notion-tasks` if none exists and list it in the brief;
-   draft any follow-up email in-thread via `number-one:mailbird`.
+   task to `ted-personal-assistant:notion-tasks` if none exists and list it in the brief;
+   draft any follow-up email in-thread via `ted-personal-assistant:mailbird`.
 3. **If there are no notes:** in the brief, ask "add notes from your
    <meeting> with <person>?" and, if the meeting type usually needs a
    follow-up, suggest a placeholder task.
@@ -89,8 +89,8 @@ For meetings that already happened in the look-back window:
 ## Guardrails
 
 - May: create meeting rows, set their properties, write / update prep
-  body content, add a matching task via `number-one:notion-tasks`.
-- May not: delete meeting rows, touch the calendar (that is `number-one:calendar`),
+  body content, add a matching task via `ted-personal-assistant:notion-tasks`.
+- May not: delete meeting rows, touch the calendar (that is `ted-personal-assistant:calendar`),
   send invites, change other people's notes.
 - Draft only - never email an attendee or share prep without the owner.
 

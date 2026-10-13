@@ -18,7 +18,7 @@ import { createRadar } from "./radar.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { appendLine, openLog } from "./state.ts";
-import { ensureSignalDaemon, SignalClient, transcribe, voiceReady, type IncomingMessage, type IncomingReaction } from "@number-one/signal";
+import { ensureSignalDaemon, SignalClient, transcribe, voiceReady, type IncomingMessage, type IncomingReaction } from "@ted-personal-assistant/signal";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 

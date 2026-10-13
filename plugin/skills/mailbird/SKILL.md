@@ -109,7 +109,7 @@ outreach and is triaged normally.
 ### Newsletter radar (skim a few before archiving)
 
 Newsletters are still archived, but a **small, selective** number are
-skimmed first to feed the brief's **Radar** section (`number-one:daily-brief`).
+skimmed first to feed the brief's **Radar** section (`ted-personal-assistant:daily-brief`).
 This is the one exception to "archive newsletters unopened".
 
 - **Which:** newsletters whose sender/subject plausibly covers the topics
@@ -138,7 +138,7 @@ reply isn't expected.
 
 Scan the owner's **Sent** mail from the last few days for promises they made:
 "I'll send you X", "by <day>", "next week I'll...", "let me get back to
-you on...". If there's no matching task in `number-one:notion-tasks`, add one
+you on...". If there's no matching task in `ted-personal-assistant:notion-tasks`, add one
 (with the recipient + what was promised + any date), and note it in the
 brief. Don't create duplicates for things already tracked.
 
@@ -146,7 +146,7 @@ brief. Don't create duplicates for things already tracked.
 
 While triaging, pull any explicit date-bound ask - payment due, RSVP
 by, sign by, respond by, application deadline - and hand it to
-`number-one:notion-tasks` as a task with that Due date (if no matching row
+`ted-personal-assistant:notion-tasks` as a task with that Due date (if no matching row
 exists). Every deadline is a task; there is no separate list.
 
 ### Automated runs
@@ -160,7 +160,7 @@ This skill is run unattended by the agent, in two ways:
   handler that drafts replies. The classifier archives by intent (only what leaves
   nothing to do) and keeps anything open; the rules are in `src/triage.ts`.
 - **Daily brief, once per day** on the first heartbeat after the start hour:
-  the `number-one:daily-brief` skill sweeps what is left, then delivers one brief by
+  the `ted-personal-assistant:daily-brief` skill sweeps what is left, then delivers one brief by
   email and Signal.
 
 Operate the agent with `npm run doctor` (health), `npm run report` (what it
@@ -178,7 +178,7 @@ owner's `style-` notes; follow those too.
 **If there is no `voice-writing` note:** still draft (short, plain, polite, in the
 thread's language, signed with the owner's first name), and:
 - in chat, offer once to learn their voice from their sent mail: load
-  `number-one:setup`;
+  `ted-personal-assistant:setup`;
 - in an unattended run, add one line at the end of the brief: "I don't know how
   you write yet. Message me 'set up my writing' and I'll learn it from your sent mail."
 

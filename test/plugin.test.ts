@@ -11,7 +11,7 @@ const skills = readdirSync(skillsDir);
 
 test("plugin: manifest is valid and every skill has a name and description matching its folder", () => {
   const manifest = JSON.parse(readFileSync(join(settings.pluginDir, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(manifest.name, "number-one");
+  assert.equal(manifest.name, "ted-personal-assistant");
   for (const s of skills) {
     const text = readFileSync(join(skillsDir, s, "SKILL.md"), "utf8");
     const front = /^---\nname: (.+)\ndescription: (.+)\n---\n/.exec(text);
@@ -46,7 +46,7 @@ test("setup: missing items are listed, in prompts as an offer in chat and a skip
   assert.deepEqual(missingSetup(SETUP_ITEMS.map((i) => note(i.file))), []);
   assert.equal(missingSetup([note("setup-calendars.md")]).length, SETUP_ITEMS.length - 1);
   const missing = missingSetup([]);
-  assert.match(chatSystem(undefined, new Date("2026-10-12T09:00:00"), missing), /number-one:setup skill\. For the Notion task list and meeting notes, find them yourself and save them, and ask .* only if you find nothing or several candidates/);
+  assert.match(chatSystem(undefined, new Date("2026-10-12T09:00:00"), missing), /ted-personal-assistant:setup skill\. For the Notion task list and meeting notes, find them yourself and save them, and ask .* only if you find nothing or several candidates/);
   assert.match(briefSystem("", missing), /You cannot ask anyone[\s\S]*message "set up"/);
   assert.match(handlerSystem("", missing), /Not set up yet/);
   assert.ok(!chatSystem(undefined, new Date(), []).includes("Not set up yet"));

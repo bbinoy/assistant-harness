@@ -1,4 +1,4 @@
-# Number One
+# Ted
 
 **A personal assistant that lives on your Mac and talks to you on Signal.**
 It runs your day, not just your inbox: it triages mail, keeps your Notion tasks tidy, watches your Google Calendar, preps your meetings from your Notion notes, drafts email replies and proposes fixes for calendar conflicts. It tells you only about what matters, and asks before it does anything that counts.
@@ -12,7 +12,7 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
   - 🖋️ **Prepares meetings.** For each meeting it pulls the context from your Notion notes and past threads, and drafts the meeting agenda and email answers. 
   - ✅ **Organises your tasks.** It reads your Notion task list, spots what is overdue or due soon, adds tasks from emails, removes tasks that are clearly completed via emails/meeting notes.
   - 📆 **Organises your calendar.** Creates calendar entries from emails and meetings, keeps an eye on conflicts and helps you to resolve them, and makes sure meetings are prepared.
-  - 📰 **Summarises your newsletters into a short news digest**: Actually interested in the newsletters you subscribed to but started ignoring them after a while? Number One gives you the top 3 nuggets based on your preferences, and archives the newsletters for you.
+  - 📰 **Summarises your newsletters into a short news digest**: Actually interested in the newsletters you subscribed to but started ignoring them after a while? Ted gives you the top 3 nuggets based on your preferences, and archives the newsletters for you.
 - 🤝 **Is helpful**
   - 💬 **Listens to your messages on Signal.** Chat with it like a contact and talk to your mail, calendar and tasks in plain language. **Recommended: give it its own Signal account** (a name, a picture, "typing…" while it works; [how, in 10 minutes](docs/SIGNAL-ACCOUNT.md)). It feels far more like talking to an assistant than messaging yourself, which is what the zero-setup default (Signal's *Note to Self*) does. It has a personality (warm, folksy and relentlessly optimistic, in the style of Ted Lasso, by default; change it to taste).
   - ✋ **Is proactive.** Reaches out to you on Signal if something needs your attention: urgent mail right away, and every couple of hours a look at your calendar for meetings about to start (with their prep) and clashes.
@@ -74,33 +74,33 @@ The email has the rest, kept to the day ahead:
 > 🤝 Handled 1:
 > Roy Kent: drafted a reply offering Tue 15:00 or Wed 10:30, both free (he'd like it "quick and without any bloody small talk")
 
-**Any time.** Just talk to Number One, in text or in a voice note (transcribed on your Mac, nothing leaves it). While it works you see "typing…", and sometimes it answers with just an emoji on your message. (In Note to Self, which has no typing indicator, small icons show the state instead: 👀 working, ✅ done, ⚠️ broke.)
+**Any time.** Just talk to Ted, in text or in a voice note (transcribed on your Mac, nothing leaves it). While it works you see "typing…", and sometimes it answers with just an emoji on your message. (In Note to Self, which has no typing indicator, small icons show the state instead: 👀 working, ✅ done, ⚠️ broke.)
 
 > **You:** what's on my plate today?
-> **Number One:** Three things, and not one of them is a lion! 🦁
+> **Ted:** Three things, and not one of them is a lion! 🦁
 > - **Rebecca** wants an answer on the budget by 11:00. Her second message is just "Ted. Budget."
 > - Kickball clinic at 17:30 collides with the Sponsors' Brunch. I'd move the brunch. Nobody ever won a championship over a quiche.
 > - Your coaching licence is 4 days overdue. No judgment here, buddy. Just a gentle nudge, like a friendly goat.
 >
 > **You:** draft a reply to Rebecca: yes to the pivot, not the logo
-> **Number One:** Draft's waiting in the thread. Yes to the sponsorship pivot, a kind no to the logo (it looked a little like a sad pie), zero exclamation marks. Not sent, of course. Even the boss gets a proofread.
+> **Ted:** Draft's waiting in the thread. Yes to the sponsorship pivot, a kind no to the logo (it looked a little like a sad pie), zero exclamation marks. Not sent, of course. Even the boss gets a proofread.
 >
 > **You:** delete the angry email from the Tottenham fan club
-> **Number One:** That one's on my never-delete list. I can archive it though, so it's out of sight but safe, like a shy turtle. Want that?
+> **Ted:** That one's on my never-delete list. I can archive it though, so it's out of sight but safe, like a shy turtle. Want that?
 > **You:** ok
-> **Number One:** Archived. It can't yell at you now.
+> **Ted:** Archived. It can't yell at you now.
 >
 > **You:** remember that messages from Jamie are never urgent
-> **Number One:** Saved: Jamie's "URGENT!!!" emails will now wait their turn. Which, between you and me, is a long line.
+> **Ted:** Saved: Jamie's "URGENT!!!" emails will now wait their turn. Which, between you and me, is a long line.
 
 **11:20.** Plain things on your own calendar just happen, and you are told. Anything that involves other people waits for your say-so:
 
 > **You:** put "find a decent cup of tea" in my calendar tomorrow at 15:00
-> **Number One:** ✅ Done without asking: 📅 Create calendar event "find a decent cup of tea", Wed 14 Oct, 15:00-16:00
+> **Ted:** ✅ Done without asking: 📅 Create calendar event "find a decent cup of tea", Wed 14 Oct, 15:00-16:00
 >
 > **You:** and invite Coach Beard to it
 >
-> **Number One:** Approve?
+> **Ted:** Approve?
 > 📅 Change calendar event
 > "find a decent cup of tea"
 > 👥 Coach Beard
@@ -108,7 +108,7 @@ The email has the rest, kept to the day ahead:
 > Reply yes, no, or tell me what to change, or react 👍 / 👎 (5 min, then I assume no).
 >
 > **You:** yes but make it 16:00
-> **Number One:** Applied your change: startTime → 2026-10-14T16:00:00, endTime → 2026-10-14T17:00:00
+> **Ted:** Applied your change: startTime → 2026-10-14T16:00:00, endTime → 2026-10-14T17:00:00
 
 You can answer that question with `yes`, `sure, go ahead`, an edit like the one above, or a 👍 on the message. Everything the assistant did (archived, alerted, handled, approved) is kept in a log you can read with `npm run report`, and an archive is one command from being undone.
 
@@ -128,7 +128,7 @@ The details are in [docs/SAFETY.md](docs/SAFETY.md).
 
 Personal agents are having a moment. This one is deliberately narrow: it does your inbox, calendar, tasks and a daily brief, on your own Mac, and asks before anything that leaves it.
 
-| | **Number One** | **[OpenClaw](https://en.wikipedia.org/wiki/OpenClaw)** | **[Grok Bot](https://www.vellum.ai/blog/official-grok-bot-breakdown)** | **[Instinct](https://www.vellum.ai/blog/official-instinct-breakdown)** |
+| | **Ted** | **[OpenClaw](https://en.wikipedia.org/wiki/OpenClaw)** | **[Grok Bot](https://www.vellum.ai/blog/official-grok-bot-breakdown)** | **[Instinct](https://www.vellum.ai/blog/official-instinct-breakdown)** |
 |---|---|---|---|---|
 | **What it is** | A lean inbox, calendar and daily standup assistant built on [Mailbird](https://www.getmailbird.com/) MCP locally | A general-purpose agent platform | A general agent on a cloud computer | A general assistant you text or call |
 | **Comes with existing personal assistant skills** | Yes: daily brief, mail triage and drafting, calendar review, Notion tasks, meeting prep and a guided setup, ready to use | Not listed as a bundle: 100+ general skills and a marketplace | Not listed | Not listed |
@@ -148,7 +148,7 @@ Personal agents are having a moment. This one is deliberately narrow: it does yo
 ## Quick start
 
 ```bash
-git clone https://github.com/<you>/number-one && cd number-one
+git clone https://github.com/<you>/ted-personal-assistant && cd ted-personal-assistant
 npm install
 cp .env.example .env && chmod 600 .env     # add your Signal number and names
 npm run doctor                              # checks everything is in place

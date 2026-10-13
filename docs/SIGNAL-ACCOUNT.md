@@ -28,8 +28,8 @@ The recovery key is the 64-character key under Signal's Settings → Backups, an
 ## 2. Give it a name (and optionally a username)
 
 ```bash
-signal-cli -a ACCOUNT updateProfile --given-name "Number One" --avatar ~/Pictures/number-one.png   # run it BEFORE step 3: once the assistant is running, signal-cli holds the account and a second command would hang
-signal-cli -a ACCOUNT updateAccount -u numberone      # optional: you can then find it by username
+signal-cli -a ACCOUNT updateProfile --given-name "Ted" --avatar ~/Pictures/ted.png   # run it BEFORE step 3: once the assistant is running, signal-cli holds the account and a second command would hang
+signal-cli -a ACCOUNT updateAccount -u tedassistant      # optional: you can then find it by username
 ```
 
 `ACCOUNT` is the number from A, or the account key from B.

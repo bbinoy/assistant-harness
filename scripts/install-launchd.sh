@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")/.."
 [[ -f .env ]] || { echo "Create .env first (copy .env.example)."; exit 1; }
 set -a; source .env; set +a
-LABEL="${LAUNCHD_LABEL:-com.$USER.number-one}"
+LABEL="${LAUNCHD_LABEL:-com.$USER.ted-personal-assistant}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 command -v node >/dev/null || { echo "node not found on PATH"; exit 1; }
 command -v signal-cli >/dev/null || echo "warning: signal-cli not found on PATH (brew install signal-cli)"

@@ -1,5 +1,5 @@
 {
-  "name": "@number-one/signal",
+  "name": "@ted-personal-assistant/signal",
   "version": "0.1.0",
   "description": "A small, typed client for signal-cli's JSON-RPC daemon: Note to Self, quotes, reactions, voice notes (local whisper.cpp transcription), echo guards.",
   "type": "module",

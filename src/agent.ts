@@ -105,7 +105,7 @@ const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compa
 const down = () => disconnected(readConnectors());
 // The only skills the model can load. The SDK enforces this list (anything else is refused with
 // "not in this session's skills allowlist"); Skill calls never reach canUseTool.
-const OFFERED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].map((s) => `number-one:${s}`);
+const OFFERED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].map((s) => `ted-personal-assistant:${s}`);
 
 interface Resume {
   resume?: string; // session to continue (chat only)

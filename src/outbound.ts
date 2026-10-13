@@ -1,6 +1,6 @@
 import type { Kind as MessageKind } from "./messages.ts";
 import { renderMarkdown, signalSummary, splitSections, toSignalStyles } from "./markdown.ts";
-import type { Quote, SignalClient } from "@number-one/signal";
+import type { Quote, SignalClient } from "@ted-personal-assistant/signal";
 
 const CHUNK_LIMIT = 1800; // keep each Signal message comfortably short
 const ECHO_WINDOW_MS = 5 * 60_000;

@@ -1,6 +1,6 @@
 ---
 name: calendar
-description: Use for reviewing the owner's Google Calendar - listing the day's / week's events, flagging conflicts and overlaps, proposing reschedule slots, and creating calendar events from travel bookings. Part of the daily brief; also for ad-hoc "what's my day / find me a slot / is X on my calendar". Pairs with `number-one:mailbird`, `number-one:meeting-prep`, `number-one:daily-brief`.
+description: Use for reviewing the owner's Google Calendar - listing the day's / week's events, flagging conflicts and overlaps, proposing reschedule slots, and creating calendar events from travel bookings. Part of the daily brief; also for ad-hoc "what's my day / find me a slot / is X on my calendar". Pairs with `ted-personal-assistant:mailbird`, `ted-personal-assistant:meeting-prep`, `ted-personal-assistant:daily-brief`.
 ---
 
 # Calendar review
@@ -14,7 +14,7 @@ or `MEMORY.md`). Use exactly those; do not guess calendar ids.
 **If the calendar tools (`list_calendars`, `list_events`) do not exist** (the connector is not connected in the owner's Claude account), say so plainly, never guess or invent calendar data, skip this part, and in an unattended run end the brief with one line: "🔌 <connector> isn't connected, so calendar was skipped." In chat, add how to fix it: connect it under Settings, Connectors in their Claude account, then message you again.
 
 **If there is no `setup-calendars` note:**
-- in chat, load `number-one:setup` and set it up with the owner now;
+- in chat, load `ted-personal-assistant:setup` and set it up with the owner now;
 - in an unattended run (nobody to ask), skip the calendar parts, and end the brief
   with one line: "Calendar is not set up yet. Message me 'set up my calendar'."
 
@@ -27,10 +27,10 @@ is complete, and if a workday looks empty, say so.
 ## Window
 
 - **Daily brief run:** today + tomorrow (forward), and back to the previous
-  brief's send time (for the post-meeting pass handoff to `number-one:meeting-prep`).
+  brief's send time (for the post-meeting pass handoff to `ted-personal-assistant:meeting-prep`).
 
 Produce a clean event list for the window - time, title, attendees,
-location - and hand it to `number-one:meeting-prep`, which decides what needs prep.
+location - and hand it to `ted-personal-assistant:meeting-prep`, which decides what needs prep.
 
 ## Conflicts and hygiene (flag in the brief, never fix)
 
@@ -49,7 +49,7 @@ Do **not** call `update_event` on your own - the owner decides, then asks.
 ## Travel bookings -> calendar (the one automatic write)
 
 Scan recent booking-confirmation emails (flights, trains, hotels,
-buses) via `number-one:mailbird` `search_conversations`. For each **confirmed**
+buses) via `ted-personal-assistant:mailbird` `search_conversations`. For each **confirmed**
 booking with a firm date/time that is **not already on the calendar**:
 
 - `create_event` on the calendar the setup note names for bookings: clear title ("Flight
@@ -75,4 +75,4 @@ booking with a firm date/time that is **not already on the calendar**:
 - **Conflicts / reschedules** section - only if there is something;
   each as a suggestion.
 - Created travel events -> "Changed by the assistant".
-- The meeting list itself is rendered by `number-one:meeting-prep`.
+- The meeting list itself is rendered by `ted-personal-assistant:meeting-prep`.

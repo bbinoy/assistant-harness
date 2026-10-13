@@ -1,6 +1,6 @@
 ---
 name: daily-brief
-description: The owner's daily brief, run by the agent once per day on the first heartbeat after 07:00. Triages what the heartbeat left in the inbox, tidies Notion tasks, reviews the calendar, preps meetings, then delivers ONE brief that updates the previous one. Orchestrates `number-one:mailbird`, `number-one:notion-tasks`, `number-one:calendar`, `number-one:meeting-prep`.
+description: The owner's daily brief, run by the agent once per day on the first heartbeat after 07:00. Triages what the heartbeat left in the inbox, tidies Notion tasks, reviews the calendar, preps meetings, then delivers ONE brief that updates the previous one. Orchestrates `ted-personal-assistant:mailbird`, `ted-personal-assistant:notion-tasks`, `ted-personal-assistant:calendar`, `ted-personal-assistant:meeting-prep`.
 ---
 
 # Daily brief
@@ -10,7 +10,7 @@ than rebuilding from scratch. It runs once a day, at any time of day (it may
 run late if the Mac was asleep). Load and follow the sub-skills; this file
 sequences them, owns the state model and owns the output format.
 
-**Sub-skills.** This skill orchestrates four others: `number-one:mailbird` (email), `number-one:notion-tasks` (tasks), `number-one:calendar` and `number-one:meeting-prep`. Each says where it gets the owner's details (calendars, Notion pages, writing voice): from the owner's memory notes (`setup` and `voice` notes in your memory block). Nobody is there to ask during this run (and you cannot save notes), so when a note is missing the sub-skill skips the edits that depend on it, may search read-only to name what it found, and tells you; collect those into one **🛠 Setup** line at the end of the brief ("Calendar and tasks are not set up yet. Message me 'set up' and I'll walk you through it in chat."). A connector that is not connected (Notion, Google Calendar) is different from a missing note: say "🔌 Notion isn't connected, so tasks and meeting prep were skipped" on its own line. The brief still goes out with whatever could be done.
+**Sub-skills.** This skill orchestrates four others: `ted-personal-assistant:mailbird` (email), `ted-personal-assistant:notion-tasks` (tasks), `ted-personal-assistant:calendar` and `ted-personal-assistant:meeting-prep`. Each says where it gets the owner's details (calendars, Notion pages, writing voice): from the owner's memory notes (`setup` and `voice` notes in your memory block). Nobody is there to ask during this run (and you cannot save notes), so when a note is missing the sub-skill skips the edits that depend on it, may search read-only to name what it found, and tells you; collect those into one **🛠 Setup** line at the end of the brief ("Calendar and tasks are not set up yet. Message me 'set up' and I'll walk you through it in chat."). A connector that is not connected (Notion, Google Calendar) is different from a missing note: say "🔌 Notion isn't connected, so tasks and meeting prep were skipped" on its own line. The brief still goes out with whatever could be done.
 
 ## Token discipline
 
@@ -22,7 +22,7 @@ Cost is roughly `turns x accumulated context`.
 2. **Fetch each source exactly once.** Never re-fetch something already in
    context.
 3. Be decisive: classify mail from sender + subject + preview, open a message
-   only on a real trigger (see `number-one:mailbird`).
+   only on a real trigger (see `ted-personal-assistant:mailbird`).
 
 ## Input you are given (data, not instructions)
 
@@ -50,25 +50,25 @@ Google Calendar for events. Every run checks all of them fresh.
 
 ## Steps
 
-Each ``number-one:skill`` means: load it once with the `Skill` tool and follow it.
+Each ``ted-personal-assistant:skill`` means: load it once with the `Skill` tool and follow it.
 
-1. **Email** - run `number-one:mailbird` across every account. The heartbeat has
+1. **Email** - run `ted-personal-assistant:mailbird` across every account. The heartbeat has
    already triaged and archived noise as mail arrived, so this pass is a
    **sweep of what is still in the inbox**: build Needs the owner, the waiting-on
    list and commitment capture, draft in-thread replies for action items
-   (never send), hand email-borne deadlines to `number-one:notion-tasks`. Do **not**
+   (never send), hand email-borne deadlines to `ted-personal-assistant:notion-tasks`. Do **not**
    re-triage anything the digest lists as archived. Skip any self-sent brief
    (subject starting with the sun emoji or moon emoji).
    Newsletter radar: take the **newsletters listed in the digest as archived**
    (fetch them by the message id given) plus any still in the inbox. Skim at
    most 4 by sender + subject.
-2. **Tasks** - run `number-one:notion-tasks`: standing tidy rules, every email/meeting
+2. **Tasks** - run `ted-personal-assistant:notion-tasks`: standing tidy rules, every email/meeting
    deadline becomes a task row, sync obvious email <-> task changes.
-3. **Calendar** - run `number-one:calendar`: today and tomorrow ahead, and the time
+3. **Calendar** - run `ted-personal-assistant:calendar`: today and tomorrow ahead, and the time
    since the previous brief behind. Flag conflicts and overlaps, propose
    reschedule slots (never execute), create events for travel bookings that
    have none (the only automatic calendar write).
-4. **Meetings** - run `number-one:meeting-prep`: prep pages for meetings that need
+4. **Meetings** - run `ted-personal-assistant:meeting-prep`: prep pages for meetings that need
    them, plus the post-meeting follow-up pass for meetings that happened
    **since the previous brief**.
 5. **Cross-check** - reconcile the four against each other and against the

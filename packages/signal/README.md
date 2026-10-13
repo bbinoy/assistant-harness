@@ -1,6 +1,6 @@
-# @number-one/signal
+# @ted-personal-assistant/signal
 
-A small, typed client for [signal-cli](https://github.com/AsamK/signal-cli)'s JSON-RPC daemon, extracted from the Number One assistant. Zero dependencies, Node 24+ (runs TypeScript directly).
+A small, typed client for [signal-cli](https://github.com/AsamK/signal-cli)'s JSON-RPC daemon, extracted from the Ted personal assistant. Zero dependencies, Node 24+ (runs TypeScript directly).
 
 It supports two ways of talking to a person, chosen by one constructor argument:
 
@@ -14,7 +14,7 @@ Own-account mode needs a Signal account for the assistant: a spare number, or Si
 ## Use
 
 ```ts
-import { SignalClient, ensureSignalDaemon } from "@number-one/signal";
+import { SignalClient, ensureSignalDaemon } from "@ted-personal-assistant/signal";
 
 const me = process.env.SIGNAL_NUMBER!;        // your number, international format
 const bot = process.env.SIGNAL_ACCOUNT;       // optional: the assistant's own account (number or account key)
