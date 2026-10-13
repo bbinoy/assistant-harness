@@ -10,6 +10,15 @@ Notion pages are and how the owner writes all live in the owner's **memory notes
 (`setup-*` and `voice-*` files). This skill fills them in, in conversation. The
 owner never touches a file or a terminal.
 
+## At the end: the separate account (once, briefly)
+
+When the items are done, if your prompt says you are talking in Note to Self, mention once,
+in a line or two, that the assistant can have its own Signal account, so the owner chats
+with a contact that has a name instead of with themselves (`docs/SIGNAL-ACCOUNT.md` in
+the repo: a spare number, or Signal Login on Android). Offer to walk them through it and
+do not push: it needs a new account and a few commands on the Mac, one step at a time.
+Never ask for or store account keys or recovery keys in this chat.
+
 ## Rules
 
 - **One thing at a time.** Say what you need and why in one line, ask one small

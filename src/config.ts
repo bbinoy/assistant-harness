@@ -31,6 +31,10 @@ function authMode(): AuthMode {
 export const config = {
   credential: authMode(),
   ownerNumber: required("SIGNAL_OWNER_NUMBER"),
+  // Optional: the assistant's OWN Signal account (a number, or an account key from Signal Login).
+  // Unset: the assistant is a linked device of the owner's account and talks in Note to Self.
+  signalAccount: process.env.SIGNAL_ACCOUNT?.trim() || required("SIGNAL_OWNER_NUMBER"),
+  ownerAci: process.env.SIGNAL_OWNER_ACI?.trim() || undefined, // only if Signal hides the owner's number from the assistant
 };
 
 // Numbers never go to logs in full.

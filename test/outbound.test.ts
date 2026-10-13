@@ -6,7 +6,7 @@ import { createOutbound } from "../src/outbound.ts";
 function fake() {
   const sent: { text: string; styles: string[] }[] = [];
   let ts = 1000;
-  const signal = { sendNoteToSelf: async (text: string, styles: string[] = []) => (sent.push({ text, styles }), ++ts) } as any;
+  const signal = { send: async (text: string, styles: string[] = []) => (sent.push({ text, styles }), ++ts) } as any;
   return { signal, sent };
 }
 
@@ -21,7 +21,7 @@ test("echo guard: our own reply is recognised even before the send returns", asy
   const { signal } = fake();
   let out!: ReturnType<typeof createOutbound>;
   // the echo "arrives" while the send is still in flight
-  signal.sendNoteToSelf = async (text: string) => {
+  signal.send = async (text: string) => {
     assert.equal(out.isOwnEcho({ text, timestamp: 999 }), true, "echo must be recognised by text, timestamp unknown yet");
     return 1234;
   };

@@ -12,7 +12,7 @@ export interface IncomingMessage {
   from: string; // sender's number
   text: string;
   timestamp: number;
-  noteToSelf: boolean; // sent by us from another device, addressed to ourselves
+  direct: boolean; // a one-to-one conversation with the assistant: Note to Self (self mode) or the assistant's own chat (peer mode); never a group
   quote?: Quote; // set when the message is a reply to an earlier one
   audio?: AudioRef; // a voice message (no text); main.ts transcribes it
   voice?: boolean; // the text is a transcript of a voice message
@@ -52,10 +52,62 @@ export interface IncomingReaction {
   emoji: string;
   targetTimestamp: number; // timestamp of the message that was reacted to
   isRemove: boolean;
-  noteToSelf: boolean; // made by us from another device, in our own Note to Self
+  direct: boolean; // as IncomingMessage.direct
+  targetAuthor?: string; // who wrote the message that was reacted to
 }
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
+
+export interface Channel {
+  account: string; // the signal-cli account we run as
+  peer?: string; // set: the assistant has its OWN account and talks to this person (peer mode). Unset: Note to Self (self mode)
+  peerAci?: string; // the peer's account id, for when Signal hides their number from us
+}
+
+// Pure: what a signal-cli "receive" envelope means for us. In self mode we are the owner's linked
+// device, and the owner's messages in Note to Self arrive as something THEY sent from another device.
+// In peer mode we are our own account, and the owner's messages arrive as ordinary incoming ones;
+// a sender is the peer only if their number (or account id) matches, and groups are never direct.
+export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMessage; reaction?: IncomingReaction } {
+  if (!env) return {};
+  const data = env.dataMessage;
+  const sent = env.syncMessage?.sentMessage; // something WE did on another device (self mode: the phone)
+  const number = env.sourceNumber ?? env.source ?? "";
+
+  let from = number;
+  let direct: boolean;
+  let body = data;
+  if (ch.peer !== undefined) {
+    const isPeer = !!ch.peer && (number === ch.peer || (!!ch.peerAci && env.sourceUuid === ch.peerAci));
+    from = isPeer ? ch.peer : number;
+    direct = isPeer && !!data && !data.groupInfo;
+  } else {
+    const toSelf = !!sent && (sent.destinationNumber ?? sent.destination) === ch.account;
+    direct = toSelf;
+    body = data ?? sent;
+    if (data) direct = false; // a message from someone else
+  }
+  if (!body) return {};
+
+  if (body.reaction) {
+    const r = body.reaction;
+    return {
+      reaction: {
+        from,
+        emoji: String(r.emoji ?? ""),
+        targetTimestamp: Number(r.targetSentTimestamp ?? 0),
+        isRemove: Boolean(r.isRemove),
+        direct,
+        targetAuthor: r.targetAuthorNumber ?? r.targetAuthor ?? undefined,
+      },
+    };
+  }
+  const audio = parseAudio(body.attachments);
+  if (!body.message && !audio) return {};
+  return {
+    message: { from, text: body.message ?? "", timestamp: body.timestamp ?? env.timestamp, direct, quote: parseQuote(body.quote), audio },
+  };
+}
 
 // Minimal JSON-RPC 2.0 client over signal-cli's TCP socket.
 // Framing: one JSON object per line, in both directions.
@@ -74,11 +126,37 @@ export class SignalClient {
   private host: string;
   private port: number;
   private account: string;
+  private peer: string | undefined;
+  private peerAci: string | undefined;
 
-  constructor(host: string, port: number, account: string) {
+  // `account`: who signal-cli runs as. Without `peer`, that is the owner's own account (we are a
+  // linked device and talk in Note to Self). With `peer`, it is the assistant's own account and
+  // `peer` is the person it talks to.
+  constructor(host: string, port: number, account: string, peer?: { number: string; aci?: string }) {
     this.host = host;
     this.port = port;
     this.account = account;
+    this.peer = peer?.number;
+    this.peerAci = peer?.aci;
+  }
+
+  // Where our messages go: the recipient in peer mode, our own Note to Self otherwise.
+  private to(): object {
+    return this.peer ? { recipient: [this.peer] } : { noteToSelf: true };
+  }
+
+  get separateAccount(): boolean {
+    return this.peer !== undefined;
+  }
+
+  // "typing…" in the chat. Only meaningful in peer mode (Signal does not show it in Note to Self).
+  async typing(stop = false): Promise<void> {
+    if (!this.peer) return;
+    try {
+      await this.call("sendTyping", { recipient: [this.peer], ...(stop ? { stop: true } : {}) });
+    } catch {
+      /* best effort */
+    }
   }
 
   onMessage(handler: (m: IncomingMessage) => void) {
@@ -144,32 +222,9 @@ export class SignalClient {
   }
 
   private onEnvelope(env: any) {
-    if (!env) return;
-    const from = env.sourceNumber ?? env.source ?? "";
-    const sent = env.syncMessage?.sentMessage; // something WE did on another device (our phone)
-    const toSelf = !!sent && (sent.destinationNumber ?? sent.destination) === this.account;
-
-    // A reaction: from someone else (dataMessage), or ours from the phone (sentMessage).
-    const reaction = env.dataMessage?.reaction ?? sent?.reaction;
-    if (reaction) {
-      this.reactionHandler?.({
-        from,
-        emoji: String(reaction.emoji ?? ""),
-        targetTimestamp: Number(reaction.targetSentTimestamp ?? 0),
-        isRemove: Boolean(reaction.isRemove),
-        noteToSelf: !env.dataMessage?.reaction && toSelf,
-      });
-      return;
-    }
-    // A message from someone else.
-    if (env.dataMessage?.message || parseAudio(env.dataMessage?.attachments)) {
-      this.handler?.({ from, text: env.dataMessage.message ?? "", timestamp: env.dataMessage.timestamp ?? env.timestamp, noteToSelf: false, quote: parseQuote(env.dataMessage.quote), audio: parseAudio(env.dataMessage.attachments) });
-      return;
-    }
-    // A message we sent from the phone. Note to Self arrives this way (destination == us).
-    if (sent?.message || parseAudio(sent?.attachments)) {
-      this.handler?.({ from, text: sent.message ?? "", timestamp: sent.timestamp ?? env.timestamp, noteToSelf: toSelf, quote: parseQuote(sent.quote), audio: parseAudio(sent.attachments) });
-    }
+    const { message, reaction } = interpretEnvelope(env, { account: this.account, peer: this.peer, peerAci: this.peerAci });
+    if (reaction) this.reactionHandler?.(reaction);
+    else if (message) this.handler?.(message);
   }
 
   private call<T = any>(method: string, params: object): Promise<T> {
@@ -195,7 +250,7 @@ export class SignalClient {
     this.ownReactions.set(`${target.timestamp}:${emoji}`, Date.now() + 5 * 60_000);
     try {
       await this.call("sendReaction", {
-        noteToSelf: true,
+        ...this.to(),
         emoji,
         targetAuthor: target.author,
         targetTimestamp: target.timestamp,
@@ -205,11 +260,11 @@ export class SignalClient {
     }
   }
 
-  // Sends to our own Note to Self. Returns the sent timestamp (used to ignore
-  // our own echo when it syncs back).
-  async sendNoteToSelf(text: string, textStyle: string[] = [], quote?: Quote): Promise<number> {
+  // Sends a message: to our own Note to Self, or (peer mode) to the peer. Returns the sent
+  // timestamp (used to ignore our own echo when it syncs back, and to match reactions).
+  async send(text: string, textStyle: string[] = [], quote?: Quote): Promise<number> {
     const result = await this.call<{ timestamp: number }>("send", {
-      noteToSelf: true,
+      ...this.to(),
       message: text,
       ...(textStyle.length ? { textStyle } : {}),
       ...(quote ? { quoteTimestamp: quote.timestamp, quoteAuthor: quote.author, quoteMessage: quote.text } : {}),

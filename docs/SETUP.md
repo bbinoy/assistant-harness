@@ -41,6 +41,8 @@ Send yourself a message on Signal. The first heartbeat tick only records a **bas
 
 The skills the agent works with ship in the repo, in `plugin/skills/`, and are loaded straight from there: there is nothing to install or copy. They hold no personal details. What they need to know about you (which calendars to check, where your Notion task list and meeting pages are, how you write) lives in your memory notes, and the agent sets those up with you in the chat.
 
+Prefer a separate contact over chatting with yourself? The assistant can have its own Signal account with its own name; see [SIGNAL-ACCOUNT.md](SIGNAL-ACCOUNT.md). It is optional and you can switch later.
+
 After the agent is running, send it **"set up"** on Signal. It walks you through one item at a time, and you can skip any:
 
 | Item | What it does | Saved as |

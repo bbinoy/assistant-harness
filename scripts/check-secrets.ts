@@ -12,7 +12,7 @@ const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { e
 const rules: { name: string; re: RegExp; skipFiles?: RegExp; allow?: RegExp }[] = [
   { name: "Anthropic key", re: /sk-ant-[A-Za-z0-9_-]{10,}/, allow: /abcdefghijklmnop/ }, // the redaction test uses an obviously fake key
   { name: "bearer token", re: /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/, allow: /Bearer\s+(\*\*\*|\$\{|<)/ },
-  { name: "phone number", re: /\+\d{9,15}/, skipFiles: /package-lock\.json$/, allow: /\+10000000000|\+15555550114|\+15555550105/ }, // placeholder / fake test numbers
+  { name: "phone number", re: /\+\d{9,15}/, skipFiles: /package-lock\.json$/, allow: /\+1000000000\d|\+15555550114|\+15555550105/ }, // placeholder / fake test numbers
   { name: "email address", re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/i, skipFiles: /package-lock\.json$|^test\//, // tests use fake addresses; the exact-value check below still covers real ones
     allow: /@example\.(com|org)|noreply@(github|anthropic)\.com|@users\.noreply\.github\.com/ },
   { name: "personal home path", re: /\/Users\/[a-z0-9_-]+\//i, allow: /\/Users\/(you|alex|name)\// },

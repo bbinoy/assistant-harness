@@ -22,7 +22,12 @@ import { ensureSignalDaemon, SignalClient, transcribe, voiceReady, type Incoming
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 
-const signal = new SignalClient(settings.signalHost, settings.signalPort, config.ownerNumber);
+const signal = new SignalClient(
+  settings.signalHost,
+  settings.signalPort,
+  config.signalAccount,
+  config.signalAccount !== config.ownerNumber ? { number: config.ownerNumber, aci: config.ownerAci } : undefined,
+);
 const out = createOutbound(signal, (kind, ts, text) => {
   recordMessage(kind, ts, text);
   void compactIfNeeded(summarizeWithHaiku).catch((e) => console.error("messages: compaction failed:", e.message));
@@ -111,7 +116,7 @@ async function reacted(r: IncomingReaction) {
     const prompt = reactionPrompt(r.emoji, findMessage(r.targetTimestamp));
     const { text } = await ask(prompt, approve, say, prompt);
     const { reaction, text: words } = splitReaction(text);
-    if (reaction) void signal.react(reaction, { author: r.from, timestamp: r.targetTimestamp });
+    if (reaction) void signal.react(reaction, { author: r.targetAuthor ?? config.signalAccount, timestamp: r.targetTimestamp });
     if (words) await out.reply(words, { kind: "chat" });
   } catch (e) {
     console.error("agent error (reaction):", (e as Error).message); // a reaction needs no apology
@@ -125,6 +130,9 @@ async function chat(m: IncomingMessage) {
   const target = { author: m.from, timestamp: m.timestamp };
   // Status on the owner's message, each replacing the last: 👀 working, ✅ answered, ⚠️ failed.
   void signal.react("👀", target);
+  // In the assistant's own chat Signal shows "typing…" (not in Note to Self); refreshed until the reply is out.
+  void signal.typing();
+  const typing = signal.separateAccount ? setInterval(() => void signal.typing(), 8000) : undefined;
   try {
     if (m.quote) console.log(`owner is replying to an earlier message (${m.quote.text.length} chars)`);
     const started = Date.now();
@@ -146,13 +154,15 @@ async function chat(m: IncomingMessage) {
           : "Something broke on my end. Check the logs, I'm not telling you what it was.",
     );
   } finally {
+    clearInterval(typing);
+    void signal.typing(true);
     prepareChat(approve, say); // warm up the process for the next message
   }
 }
 
-await ensureSignalDaemon(config.ownerNumber, settings.signalHost, settings.signalPort, openLog("logs/signal-daemon.log"));
+await ensureSignalDaemon(config.signalAccount, settings.signalHost, settings.signalPort, openLog("logs/signal-daemon.log"));
 await signal.connect();
-console.log(`connected to signal-cli; accepting only ${mask(config.ownerNumber)}; auth: ${config.credential}`);
+console.log(`connected to signal-cli (${signal.separateAccount ? "own account" : "Note to Self"}); accepting only ${mask(config.ownerNumber)}; auth: ${config.credential}`);
 
 prepareChat(approve, say);
 // A warm process is used only while fresh (agent.ts); keep one ready so a message after a

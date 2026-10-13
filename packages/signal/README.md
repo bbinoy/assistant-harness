@@ -12,10 +12,10 @@ import { SignalClient, ensureSignalDaemon } from "@number-one/signal";
 const me = process.env.SIGNAL_NUMBER!; // your number, in international format
 await ensureSignalDaemon(me, "127.0.0.1", 7583);
 const signal = new SignalClient("127.0.0.1", 7583, me);
-signal.onMessage((m) => m.noteToSelf && signal.sendNoteToSelf(`you said: ${m.text}`));
+signal.onMessage((m) => m.direct && signal.send(`you said: ${m.text}`));
 await signal.connect();
 ```
 
-It does not decide who may talk to your assistant: filter on `noteToSelf` and the sender yourself (the app does, in `src/guards.ts`).
+It does not decide who may talk to your assistant: filter on `direct` and the sender yourself (the app does, in `src/guards.ts`).
 
 Not yet published to npm; the name and scope are placeholders.

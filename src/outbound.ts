@@ -48,7 +48,7 @@ export function createOutbound(signal: SignalClient, record?: (kind: MessageKind
     for (const part of chunk(text)) {
       const r = opts.plain ? { text: part, styles: [] } : renderMarkdown(part);
       remember(`x:${r.text}`);
-      last = await signal.sendNoteToSelf(r.text, toSignalStyles(r.styles), quote);
+      last = await signal.send(r.text, toSignalStyles(r.styles), quote);
       quote = undefined;
       remember(`t:${last}`);
       record?.(opts.kind ?? "other", last, r.text);
