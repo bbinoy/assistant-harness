@@ -94,6 +94,10 @@ export function loadSettings(env: Env) {
     signalHost: "127.0.0.1", // never anything else: signal-cli's socket is unauthenticated
     signalPort: num(env, "SIGNAL_PORT", 7583, 1024, 65_535),
 
+    // Voice notes are transcribed on this Mac with whisper.cpp (src/transcribe.ts); nothing leaves it.
+    whisperModel: env.WHISPER_MODEL || `${env.HOME ?? ""}/.cache/number-one/ggml-small.bin`,
+    signalAttachmentsDir: `${env.HOME ?? ""}/.local/share/signal-cli/attachments`,
+
     launchdLabel: env.LAUNCHD_LABEL || `com.${env.USER ?? "user"}.number-one`,
 
     // Chat session hygiene: the SDK only compacts near the context limit, so a long-lived

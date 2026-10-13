@@ -18,6 +18,7 @@ The agent can read your mail and act on your behalf, so most of the design is ab
 | Robust state | State files are written atomically and updated synchronously: no torn files after a crash, no lost updates between concurrent parts. Settings are validated at startup, so a typo stops the agent instead of misconfiguring it. |
 | Observability | `logs/audit.jsonl` records every tool decision (ids, never email content, for chat). `logs/agent.log` is redacted (numbers, tokens) and rotated. `npm run report` shows what the heartbeat did, `npm run triage-check` shows what it *would* do with your newest mail without acting, and `npm run doctor` warns if the heartbeat has stopped ticking. |
 | Kill switches | `touch state/paused` pauses everything (put a date inside to resume on it). `HEARTBEAT_ACTIONS=log` makes the heartbeat record decisions without acting. |
+| Voice messages | Transcribed locally (whisper.cpp), never sent anywhere. Only a plain audio attachment from your own Note to Self under 25 MB is read, by file name inside signal-cli's folder (no paths). The transcript is shown back so a mishearing is visible, and a spoken reply can never answer an approval. |
 
 Known limits: `signal-cli` stores its keys unencrypted on disk (keep FileVault on); its local socket is unauthenticated (it listens on `127.0.0.1` only); anything running as your user can reach it. Prompt injection cannot be solved, only contained: the design above limits what a hostile email can make the agent do, it does not make it impossible to try.
 

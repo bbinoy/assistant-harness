@@ -17,6 +17,7 @@ import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { ensureSignalDaemon } from "./signal-daemon.ts";
 import { SignalClient, type IncomingMessage } from "./signal.ts";
+import { transcribe, voiceReady } from "./transcribe.ts";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 
@@ -38,8 +39,31 @@ const notify = async (text: string) => {
 signal.onMessage((m) => {
   if (!acceptOwner(m, config.ownerNumber)) return void console.log(`ignored a message from ${mask(m.from)}`);
   if (out.isOwnEcho(m)) return; // one of our own replies coming back
-  route(m).catch((e) => console.error("route error:", e.message));
+  (m.audio ? hear(m) : route(m)).catch((e) => console.error("route error:", e.message));
 });
+
+// A voice message: transcribe it here, show what was heard (so a mishearing is caught), then handle
+// it as chat. A spoken "yes" is never an approval (route skips the approval check for it).
+async function hear(m: IncomingMessage) {
+  const target = { author: m.from, timestamp: m.timestamp };
+  void signal.react("👂", target);
+  let heard = "";
+  try {
+    heard = await transcribe(m.audio!);
+  } catch (e) {
+    const gaps = voiceReady();
+    console.error("voice: transcription failed:", (e as Error).message);
+    void signal.react("⚠️", target);
+    return void (await out.replyPlain(gaps.ok ? "I couldn't make out that voice message. Try again or type it." : `I can't transcribe voice messages yet: missing ${gaps.missing.join(", ")}.`));
+  }
+  console.log(`voice: transcribed (${heard.length} chars)`);
+  if (!heard) {
+    void signal.react("🤷", target);
+    return void (await out.replyPlain("I couldn't hear any words in that voice message."));
+  }
+  await out.replyPlain(`🎙️ I heard: “${heard}”`);
+  await route({ ...m, text: heard, audio: undefined, voice: true });
+}
 
 // The owner's Mailbird connection for proposals: a reply the handler drafted is shown on Signal and
 // sent with a 👍 (propose.ts). No model is involved in sending.
@@ -61,7 +85,7 @@ async function route(m: IncomingMessage) {
   // While an approval is pending, a message may be its answer. That must skip the queue:
   // the queue is blocked on the very turn that is waiting for it.
   const target = { author: m.from, timestamp: m.timestamp };
-  const { outcome, changes } = await approvals.answer(m.text, () => void signal.react("⏳", target));
+  const { outcome, changes } = m.voice ? { outcome: "none" as const, changes: undefined } : await approvals.answer(m.text, () => void signal.react("⏳", target));
   if (outcome !== "none") {
     console.log(`approval ${outcome}${changes ? ` (${changes.map((c) => c.field).join(", ")})` : ""}`);
     void signal.react({ approved: "👍", modified: "👍", declined: "👎", feedback: "💬" }[outcome], target);
@@ -82,7 +106,7 @@ async function chat(m: IncomingMessage) {
   try {
     if (m.quote) console.log(`owner is replying to an earlier message (${m.quote.text.length} chars)`);
     const started = Date.now();
-    const { text, costUsd } = await ask(withQuoteContext(m.text, m.quote), approve, say, m.text);
+    const { text, costUsd } = await ask(withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.text, m.quote), approve, say, m.text);
     console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
     // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
     const { reaction, text: words } = splitReaction(text);

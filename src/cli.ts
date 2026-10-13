@@ -1,3 +1,4 @@
+import { voiceReady } from "./transcribe.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -163,6 +164,9 @@ async function doctor() {
     line(loose.length === 0 ? true : "warn", `${name}/ files are owner-only`, loose.length ? `group/world-readable: ${loose.join(", ")}` : "");
   }
   line(true, "memory/notes/", `${readNotes().length} active note(s)`); // the count only, never the notes
+
+  const voice = voiceReady();
+  line(voice.ok ? true : "warn", "voice messages", voice.ok ? "transcribed locally with whisper.cpp" : `not available, missing: ${voice.missing.join("; ")}`);
 
   const radar = readJson<{ lastRunAt?: string; nextRunAt?: string; sent?: number }>("state/radar.json", {});
   line(true, "proactive radar", settings.proactive ? `adaptive, at most every ${settings.radarMinutes} min; last run ${radar.lastRunAt ? local(radar.lastRunAt) : "not yet"}${radar.nextRunAt ? `, next ${local(radar.nextRunAt)}` : ""}; ${radar.sent ?? 0} message(s) today` : "off (PROACTIVE=off)");

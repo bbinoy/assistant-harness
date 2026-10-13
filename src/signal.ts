@@ -14,6 +14,29 @@ export interface IncomingMessage {
   timestamp: number;
   noteToSelf: boolean; // sent by us from another device, addressed to ourselves
   quote?: Quote; // set when the message is a reply to an earlier one
+  audio?: AudioRef; // a voice message (no text); main.ts transcribes it
+  voice?: boolean; // the text is a transcript of a voice message
+}
+
+// A voice note or audio file signal-cli has downloaded: its id names the file in its attachments folder.
+export interface AudioRef {
+  id: string;
+  size: number;
+}
+
+export const MAX_AUDIO_BYTES = 25_000_000;
+
+// Pure: the first usable audio attachment of a message. The id becomes a file name, so only plain
+// names pass (no path separators), and huge files are refused.
+export function parseAudio(attachments: unknown): AudioRef | undefined {
+  if (!Array.isArray(attachments)) return undefined;
+  for (const a of attachments) {
+    const id = typeof a?.id === "string" ? a.id : "";
+    const size = Number(a?.size ?? 0);
+    if (!String(a?.contentType ?? "").startsWith("audio/") || !/^[\w.-]{1,100}$/.test(id) || id.startsWith(".")) continue;
+    if (size > 0 && size <= MAX_AUDIO_BYTES) return { id, size };
+  }
+  return undefined;
 }
 
 // Pure: signal-cli's `quote` object -> ours. Undefined when there is nothing to show
@@ -128,13 +151,13 @@ export class SignalClient {
       return;
     }
     // A message from someone else.
-    if (env.dataMessage?.message) {
-      this.handler?.({ from, text: env.dataMessage.message, timestamp: env.dataMessage.timestamp ?? env.timestamp, noteToSelf: false, quote: parseQuote(env.dataMessage.quote) });
+    if (env.dataMessage?.message || parseAudio(env.dataMessage?.attachments)) {
+      this.handler?.({ from, text: env.dataMessage.message ?? "", timestamp: env.dataMessage.timestamp ?? env.timestamp, noteToSelf: false, quote: parseQuote(env.dataMessage.quote), audio: parseAudio(env.dataMessage.attachments) });
       return;
     }
     // A message we sent from the phone. Note to Self arrives this way (destination == us).
-    if (sent?.message) {
-      this.handler?.({ from, text: sent.message, timestamp: sent.timestamp ?? env.timestamp, noteToSelf: toSelf, quote: parseQuote(sent.quote) });
+    if (sent?.message || parseAudio(sent?.attachments)) {
+      this.handler?.({ from, text: sent.message ?? "", timestamp: sent.timestamp ?? env.timestamp, noteToSelf: toSelf, quote: parseQuote(sent.quote), audio: parseAudio(sent.attachments) });
     }
   }
 
