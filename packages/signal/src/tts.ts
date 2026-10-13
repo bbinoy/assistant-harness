@@ -21,9 +21,14 @@ export const MAX_SPOKEN_CHARS = 3500;
 
 export interface TtsConfig {
   dir: string; // holds venv/, kokoro-v1.0.onnx and voices-v1.0.bin
-  voice: string; // a Kokoro voice, like am_onyx
+  voice: string; // a Kokoro voice, like am_onyx, or a blend: "am_adam:0.6,am_onyx:0.4" (see isVoiceSpec)
   speed: number; // 1 is normal
 }
+
+// A voice setting: one Kokoro voice, or several joined by commas, each with an optional weight (see kokoro-say.py).
+// Pure; checked before anything is run, since the spec ends up as an argument of the speech script.
+const VOICE_SPEC = /^[a-z]{2}_[a-z]+(:\d+(\.\d+)?)?(,[a-z]{2}_[a-z]+(:\d+(\.\d+)?)?)*$/;
+export const isVoiceSpec = (s: string): boolean => VOICE_SPEC.test(s) && s.split(",").some((p) => !/:0+(\.0+)?$/.test(p));
 
 const files = (dir: string) => ({ python: join(dir, "venv/bin/python"), model: join(dir, "kokoro-v1.0.onnx"), voices: join(dir, "voices-v1.0.bin") });
 

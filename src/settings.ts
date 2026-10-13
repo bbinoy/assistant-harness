@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isVoiceSpec } from "@ted-personal-assistant/signal";
 
 // Every tunable in one place, read from the environment (see .env.example) and validated
 // when the agent starts. A typo fails loudly instead of silently becoming NaN: an interval
@@ -123,7 +124,7 @@ export function loadSettings(env: Env) {
     // Spoken replies to voice messages (src/voicereply.ts): local text to speech with Kokoro (scripts/setup-tts.sh).
     voiceReplies: oneOf(env, "VOICE_REPLIES", "on", ["on", "off"] as const) === "on",
     ttsDir: env.TTS_DIR || `${env.HOME ?? ""}/.cache/ted-personal-assistant/kokoro`,
-    ttsVoice: env.TTS_VOICE || "am_onyx",
+    ttsVoice: env.TTS_VOICE && isVoiceSpec(env.TTS_VOICE) ? env.TTS_VOICE : "am_onyx", // one voice, or a blend like am_adam:0.6,am_onyx:0.4
     ttsSpeed: num(env, "TTS_SPEED", 0.95, 0.5, 2),
     // Group chats (own-account mode, src/group.ts): it takes part in any group the owner is in, speaking only
     // when it fits (see PARTICIPATION in persona.ts).
