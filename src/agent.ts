@@ -1,3 +1,4 @@
+import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
 import { basename } from "node:path";
 import { isJudgeable, judgeAction, mayAutoApprove, type Verdict } from "./autojudge.ts";
 import { readFileSync } from "node:fs";
@@ -181,6 +182,7 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
       const gist = (described ?? body.split("\n")[0]!).slice(0, 160);
       memoryChanges.push(`${tool === "Write" ? "➕ saved" : "✏️ updated"} ${file}: ${gist}`);
     }
+    if (changesCalendar(tool)) nudgeRadar();
     opts.onToolSuccess?.(tool, input, response);
   };
   const hooks: Partial<Record<"PostToolUse", HookCallbackMatcher[]>> = {

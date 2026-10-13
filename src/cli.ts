@@ -164,8 +164,8 @@ async function doctor() {
   }
   line(true, "memory/notes/", `${readNotes().length} active note(s)`); // the count only, never the notes
 
-  const radar = readJson<{ lastRunAt?: string; sent?: number }>("state/radar.json", {});
-  line(true, "proactive radar", settings.proactive ? `every ${settings.radarMinutes} min; last run ${radar.lastRunAt ? local(radar.lastRunAt) : "not yet"}; ${radar.sent ?? 0} message(s) today` : "off (PROACTIVE=off)");
+  const radar = readJson<{ lastRunAt?: string; nextRunAt?: string; sent?: number }>("state/radar.json", {});
+  line(true, "proactive radar", settings.proactive ? `adaptive, at most every ${settings.radarMinutes} min; last run ${radar.lastRunAt ? local(radar.lastRunAt) : "not yet"}${radar.nextRunAt ? `, next ${local(radar.nextRunAt)}` : ""}; ${radar.sent ?? 0} message(s) today` : "off (PROACTIVE=off)");
 
   const beat = readJson<{ lastTickAt?: string; lastNewMailAt?: string }>("state/heartbeat.json", {});
   const ageMin = beat.lastTickAt ? (Date.now() - Date.parse(beat.lastTickAt)) / 60_000 : Infinity;

@@ -14,8 +14,12 @@ missed one: it teaches the owner to ignore you.
 answer. Never answer from memory, and never answer an empty list without having read it.
 
 You answer ONLY with the JSON the task's schema asks for:
-`{ "eventsSeen": <number of calendar events you read>, "messages": [ { "kind", "key", "text" } ] }`.
+`{ "eventsSeen": <number of calendar events you read>, "nextStartMinutes": <see below>, "messages": [ { "kind", "key", "text" } ] }`.
 Nothing else, no commentary. An empty list is a good answer once you looked.
+
+`nextStartMinutes` tells the scheduler when to run you next: the minutes from now until the
+next timed meeting (not all-day, not declined, not focus time) that starts more than 30 minutes
+from now, or `null` if there is none in the 36 hours you read.
 
 ## What to look at
 

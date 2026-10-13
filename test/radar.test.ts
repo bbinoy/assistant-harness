@@ -49,3 +49,20 @@ test("pings: only the last day, oldest first, one line each", async () => {
   assert.match(lines[0]!, /^\[09:30\] first \/ second line$/);
   assert.match(lines[1]!, /^\[11:00\] later$/);
 });
+
+test("radar: the next run is set shortly before the next meeting, within bounds", async () => {
+  const { scheduleNext, nudge, isDue } = await import("../src/radar-rules.ts");
+  const now = new Date("2026-10-13T10:00:00Z");
+  const mins = (iso: string) => (Date.parse(iso) - now.getTime()) / 60_000;
+  assert.equal(mins(scheduleNext(now, 240, 180)), 180); // far away: capped at the longest wait
+  assert.equal(mins(scheduleNext(now, 120, 180)), 60); // an hour before the meeting
+  assert.equal(mins(scheduleNext(now, 70, 180)), 45); // never sooner than 45 minutes
+  assert.equal(mins(scheduleNext(now, null, 180)), 180); // unknown: the longest wait
+  assert.equal(mins(scheduleNext(now, "soon", 180)), 180);
+  const s = { sent: 0, keys: {}, lastRunAt: "2026-10-13T09:50:00Z", nextRunAt: "2026-10-13T13:00:00Z" };
+  assert.equal(nudge(s, now).nextRunAt, "2026-10-13T10:20:00.000Z"); // 30 minutes after the last run
+  assert.equal(isDue(nudge(s, now), new Date("2026-10-13T10:21:00Z"), 180), true);
+  assert.equal(isDue(s, new Date("2026-10-13T12:59:00Z"), 180), false);
+  const sooner = { ...s, nextRunAt: "2026-10-13T10:05:00Z" };
+  assert.equal(nudge(sooner, now).nextRunAt, "2026-10-13T10:05:00.000Z"); // never pushes a run later
+});
