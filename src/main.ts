@@ -47,6 +47,7 @@ const notify = async (text: string) => {
 signal.onMessage((m) => {
   if (!acceptOwner(m, config.ownerNumber)) return void console.log(`ignored a message from ${mask(m.from)}`);
   if (out.isOwnEcho(m)) return; // one of our own replies coming back
+  void signal.markRead(m.timestamp); // the owner sees it was read, as soon as we have it
   (m.audio ? hear(m) : route(m)).catch((e) => console.error("route error:", e.message));
 });
 

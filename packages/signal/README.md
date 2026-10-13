@@ -38,6 +38,7 @@ await signal.connect();
   - `onMessage(h)`, `onReaction(h)`: `IncomingMessage { from, text, timestamp, direct, quote?, audio? }` and `IncomingReaction { from, emoji, targetTimestamp, isRemove, direct, targetAuthor? }`. **`direct`** means a one-to-one conversation with the assistant: your Note to Self (default mode) or the assistant's own chat with you (own-account mode). Groups and other people's chats are never `direct`. Filter on it and on `from`.
   - `send(text, textStyle?, quote?)` → the sent message's timestamp. `textStyle` is signal-cli's `start:length:STYLE` strings; `quote` threads the reply under a message.
   - `react(emoji, { author, timestamp })`: best effort; a new reaction replaces the previous one, so it works as a status icon. `isOwnReaction(r)` recognises our own reactions when they echo back (in Note to Self they look exactly like the person's).
+  - `markRead(timestamp)`: sends a read receipt (the "seen" check) for a message. Own-account mode only.
   - `typing(stop?)`: the "typing…" indicator. Own-account mode only (Signal does not show it in Note to Self); a no-op otherwise.
   - `separateAccount`: which mode you are in.
 - **`interpretEnvelope(envelope, { account, peer?, peerAci? })`**: the pure function behind the above, exported for tests. In Note to Self mode the person's messages arrive as something they sent from another device; in own-account mode they are ordinary incoming messages, matched to the person by number, or by account id (`peerAci`) when Signal hides their number.

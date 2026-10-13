@@ -149,6 +149,17 @@ export class SignalClient {
     return this.peer !== undefined;
   }
 
+  // Tells the person we have read their message (the "seen" check under it). Own-account mode only:
+  // in Note to Self there is nobody else to tell. Best effort.
+  async markRead(timestamp: number): Promise<void> {
+    if (!this.peer) return;
+    try {
+      await this.call("sendReceipt", { recipient: [this.peer], targetTimestamp: [timestamp], type: "read" });
+    } catch (e) {
+      console.error("read receipt failed:", (e as Error).message);
+    }
+  }
+
   // "typing…" in the chat. Only meaningful in peer mode (Signal does not show it in Note to Self).
   async typing(stop = false): Promise<void> {
     if (!this.peer) return;
