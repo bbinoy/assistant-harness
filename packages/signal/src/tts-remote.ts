@@ -3,14 +3,14 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { toolEnv } from "./internal/exec.ts";
 
 // Shared parts of the optional remote speech providers (tts-elevenlabs.ts, tts-http.ts): a bounded HTTPS
 // request, a check that what came back is audio, and the same ffmpeg step to AAC as the local voice.
 // The text sent is only the words Ted would speak; keys and tokens come from settings and are never logged.
 
 const run = promisify(execFile);
-const EXTRA_PATH = "/opt/homebrew/bin:/usr/local/bin";
-const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+const MAX_REMOTE_AUDIO_BYTES = 25 * 1024 * 1024;
 
 export type Fetch = typeof fetch;
 export type AudioKind = "wav" | "mp3" | "ogg";
@@ -74,16 +74,16 @@ export async function synthesizeRemote(req: RemoteRequest, name: string): Promis
   }
   if (!res.ok) throw new Error(`${name} ${describe(res.status, await res.text().catch(() => ""), req.secrets)}`);
   const declared = Number(res.headers.get("content-length") ?? 0);
-  if (declared > MAX_AUDIO_BYTES) throw new Error(`${name} answer too large (${declared} bytes)`);
+  if (declared > MAX_REMOTE_AUDIO_BYTES) throw new Error(`${name} answer too large (${declared} bytes)`);
   const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) throw new Error(`${name} answer has ${bytes.length} bytes`);
+  if (bytes.length === 0 || bytes.length > MAX_REMOTE_AUDIO_BYTES) throw new Error(`${name} answer has ${bytes.length} bytes`);
   const kind = sniffAudio(res.headers.get("content-type"), bytes);
   if (!kind) throw new Error(`${name} answer is not wav, mp3 or ogg audio (content type ${res.headers.get("content-type") ?? "none"})`);
   const dir = await mkdtemp(join(tmpdir(), "speech-"));
   const raw = join(dir, `remote.${kind}`);
   const out = join(dir, "voice.m4a");
   await writeFile(raw, bytes, { mode: 0o600 });
-  const env = { ...process.env, PATH: `${process.env.PATH ?? ""}:${EXTRA_PATH}` };
+  const env = toolEnv();
   try {
     await run("ffmpeg", ["-v", "error", "-y", "-i", raw, "-c:a", "aac", "-b:a", "64k", out], { timeout: 60_000, env });
   } catch (e) {

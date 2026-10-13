@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { onPath, toolEnv } from "./internal/exec.ts";
 
 // Voice messages are transcribed on this machine: ffmpeg turns the recording into 16 kHz mono audio,
 // whisper.cpp (the open-source port of OpenAI's Whisper) turns that into text. No network, no
@@ -11,7 +12,6 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 const TIMEOUT_MS = 120_000;
-const EXTRA_PATH = "/opt/homebrew/bin:/usr/local/bin";
 
 // Whisper marks silence and noise in brackets or parentheses; keep only the words.
 export function cleanTranscript(raw: string): string {
@@ -24,7 +24,6 @@ export function cleanTranscript(raw: string): string {
 // What is missing for transcription: ffmpeg, whisper-cli, or the model file.
 export function voiceReady(model: string): { ok: boolean; missing: string[] } {
   const missing: string[] = [];
-  const onPath = (bin: string) => `${process.env.PATH ?? ""}:${EXTRA_PATH}`.split(":").some((d) => d && existsSync(join(d, bin)));
   if (!onPath("ffmpeg")) missing.push("ffmpeg");
   if (!onPath("whisper-cli")) missing.push("whisper-cli (brew install whisper-cpp)");
   if (!existsSync(model)) missing.push(`model ${model}`);
@@ -35,7 +34,7 @@ export function voiceReady(model: string): { ok: boolean; missing: string[] } {
 export async function transcribe(file: string, model: string): Promise<string> {
   if (!existsSync(file)) throw new Error("the recording is not on disk");
   const dir = await mkdtemp(join(tmpdir(), "voice-"));
-  const env = { ...process.env, PATH: `${process.env.PATH ?? ""}:${EXTRA_PATH}` };
+  const env = toolEnv();
   try {
     const wav = join(dir, "in.wav");
     await run("ffmpeg", ["-v", "error", "-i", file, "-ar", "16000", "-ac", "1", "-f", "wav", wav], { timeout: TIMEOUT_MS, env });
