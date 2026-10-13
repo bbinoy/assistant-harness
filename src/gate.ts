@@ -193,7 +193,8 @@ export interface LookState {
   briefDone: boolean; // a brief was delivered or posted today
   lastRadarAt?: string; // the newest radar start
   radarKeys: Record<string, number>; // dedupe keys of messages the radar sent in the last 3 days -> epoch ms
-  postsToday: number; // things we said on our own today (notices): the generic cap on posts (maxProactivePerDay)
+  postsToday: number; // things we said on our own today (notices of any kind, mail alerts included): informational
+  radarPostsToday: number; // the radar's own messages today, from its "ran" ledger lines: what maxProactivePerDay caps
 }
 
 const INBOUND: ReadonlySet<Kind> = new Set<Kind>(["owner", "member", "reaction"]);
@@ -201,7 +202,7 @@ const INBOUND: ReadonlySet<Kind> = new Set<Kind>(["owner", "member", "reaction"]
 // Pure: what the ledger says about this conversation.
 export function lookState(entries: readonly Sent[], now: Date): LookState {
   const today = localDay(now);
-  const st: LookState = { briefAttempts: 0, briefDone: false, radarKeys: {}, postsToday: 0 };
+  const st: LookState = { briefAttempts: 0, briefDone: false, radarKeys: {}, postsToday: 0, radarPostsToday: 0 };
   for (const e of entries) {
     const isToday = localDay(new Date(e.at)) === today;
     if (e.kind === "wake") {
@@ -214,6 +215,7 @@ export function lookState(entries: readonly Sent[], now: Date): LookState {
       else if (isToday && /^\[brief\] attempt \d+ → delivered/.test(e.text)) st.briefDone = true;
       else if (e.text.startsWith("[radar] started") || e.text.startsWith("[radar] ran")) {
         if (!st.lastRadarAt || e.at > st.lastRadarAt) st.lastRadarAt = e.at;
+        if (isToday) st.radarPostsToday += Number(/^\[radar\] ran: (\d+) message/.exec(e.text)?.[1] ?? 0);
         const raw = RADAR_KEYS.exec(e.text)?.[1];
         if (raw && now.getTime() - Date.parse(e.at) < KEY_TTL_MS) {
           try {

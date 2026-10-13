@@ -10,6 +10,10 @@ import { recordMessage, type Kind } from "../src/messages.ts";
 import { RADAR_SCHEMA } from "../src/radar-rules.ts";
 import { settings } from "../src/settings.ts";
 import { buildTask, isPreset } from "../src/tasks.ts";
+import { ledgerEntries } from "../src/messages.ts";
+import { lookState } from "../src/gate.ts";
+import { dataPath } from "../src/state.ts";
+import { readFileSync } from "node:fs";
 import { createWakeups } from "../src/wake.ts";
 
 const s = settings as unknown as Record<string, unknown>;
@@ -60,7 +64,9 @@ function rig(o: { gate?: (conv: Conversation) => unknown; brief?: "ok" | "incomp
     now: () => now,
     guards: { paused: () => false, budgetSpent: () => false },
   });
-  return { r, w, conv, at: (d: Date) => (now = d) };
+  // The presets run as background jobs, so a look returns "brief-started"; these tests want how the run ended.
+  const wake = { ...w, look: async (c: Conversation, d: Date) => { const res = await w.look(c, d); const done = await w.idle(); return res.endsWith("-started") ? done.at(-1)! : res; } };
+  return { r, w: wake, raw: w, conv, at: (d: Date) => (now = d) };
 }
 const withSettings = async (over: Record<string, unknown>, f: () => Promise<void>) => {
   const was = Object.fromEntries(Object.keys(over).map((k) => [k, s[k]]));
@@ -204,11 +210,12 @@ test("gate picks radar: the radar profile runs, its messages are posted, keys go
 
 test("radar: the generic cap on posts per day applies, and the radar off means no radar", async () => {
   await withSettings({ maxProactivePerDay: 1 }, async () => {
-    const { r, w, conv } = rig({ gate: () => ({ act: true, task: "radar", nextCheckMinutes: 30 }) });
+    const { w, conv } = rig({ gate: () => ({ act: true, task: "radar", nextCheckMinutes: 30 }) });
     recordMessage("brief", 1, "Focus today", T0, conv.logFile);
     recordMessage("notice", 2, "an alert earlier", T0, conv.logFile);
-    assert.equal(await w.look(conv, T0), "refused:post-cap");
-    assert.deepEqual(r.profiles, []);
+    recordMessage("notice", 3, "another mail alert", T0, conv.logFile);
+    assert.equal(await w.look(conv, T0), "radar-posted"); // mail alerts do not count against the radar's own cap
+    assert.equal(await w.look(conv, min(120)), "refused:post-cap"); // its own message today reached the cap: no further run
   });
   await withSettings({ proactive: false }, async () => {
     const { r, w, conv } = rig({ gate: () => ({ act: true, task: "radar", nextCheckMinutes: 30 }) });
@@ -216,6 +223,44 @@ test("radar: the generic cap on posts per day applies, and the radar off means n
     assert.equal(await w.look(conv, T0), "no-instructions");
     assert.deepEqual(r.profiles, []);
   });
+});
+
+test("presets are detached background jobs: the look returns at once, one run per task at a time, the ledger is written when the run ends", async () => {
+  const { r, conv } = rig();
+  recordMessage("brief", 1, "Focus today", T0, conv.logFile);
+  // a radar run that stays open until we say so
+  let finish!: () => void;
+  const open = new Promise<void>((res) => (finish = res));
+  const w = createWakeups({
+    pipeline: { canSpeak: () => false, enqueue: (_c: any, j: any) => j(), record: (c: Conversation, k: Kind, ts: number, text: string) => recordMessage(k, ts, text, T0, conv.logFile), runTurn: async () => ({ spoke: false }) } as any,
+    vouch: async () => true,
+    runProfile: async (profile) => { r.profiles.push(profile); await open; return { text: "", structured: { eventsSeen: 2, messages: [] } }; },
+    presets: { sendBrief: async () => {}, notify: async () => {} },
+    gate: async () => parseGate({ act: true, task: "radar", nextCheckMinutes: 30 }),
+    groups: () => [],
+    notesChangedAt: () => 0,
+    now: () => T0,
+    guards: { paused: () => false, budgetSpent: () => false },
+  });
+  const ownerConv = conv;
+  assert.equal(await w.look(ownerConv, T0), "radar-started"); // returned while the run is still open
+  assert.deepEqual(r.profiles, ["radar"]);
+  const st = () => lookState(ledgerEntries(conv.logFile), T0);
+  assert.notEqual(st().lastRadarAt, undefined); // "[radar] started" is written before the run
+  // looked at again meanwhile: the same task never doubles up
+  const again = await w.look(ownerConv, min(31));
+  assert.ok(["radar-running", "refused:too-soon", "not-due"].includes(again), again);
+  assert.deepEqual(r.profiles, ["radar"]);
+  finish();
+  assert.deepEqual(await w.idle(), ["radar-quiet"]);
+  assert.match(lines(r).join("\n") + readFileSync(dataPath(conv.logFile), "utf8"), /\[radar\] ran: 0 message\(s\) sent, 2 event\(s\) read/);
+});
+
+test("a failing preset run is contained: the guard is freed and the next look can run it again", async () => {
+  const { r, w, conv } = rig({ brief: "incomplete", gate: () => ({ act: true, task: "brief", nextCheckMinutes: 30 }) });
+  assert.equal(await w.look(conv, T0), "brief-incomplete");
+  assert.equal(await w.look(conv, min(11)), "brief-incomplete");
+  assert.deepEqual(r.profiles, ["brief", "brief"]);
 });
 
 test("groups can never run a preset, whatever the gate says", async () => {

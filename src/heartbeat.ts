@@ -46,12 +46,27 @@ export interface HeartbeatHooks {
   onTick: () => void; // tick-driven jobs (wake-ups, dream, brief, radar): independent of the mail check, never awaited
 }
 
+// What the mail check needs of Mailbird (the real client, or a fake in tests).
+export type MailSource = Pick<Mailbird, "inboxes" | "call" | "close">;
+
+// Starts every tick-driven job (wake-ups, dream, brief, radar): each in its own try/catch, none awaited, so a job that throws
+// (even synchronously) or hangs never keeps another from starting.
+export function startJobs(jobs: Record<string, () => unknown>): void {
+  for (const [name, f] of Object.entries(jobs)) {
+    try {
+      void Promise.resolve(f()).catch((e) => console.error(`${name}: tick failed:`, (e as Error).message));
+    } catch (e) {
+      console.error(`${name}: tick failed:`, (e as Error).message);
+    }
+  }
+}
+
 const seenKey = (m: { conversationId: string; lastMessageId?: number; messageId?: number }) =>
   `${m.conversationId}:${m.lastMessageId ?? m.messageId}`;
 
 // The cheap pre-check. Returns conversations whose latest message is new, plus older copies
 // of our own brief to tidy away. Nothing is marked seen until the caller commits.
-async function checkMail(mb: Mailbird) {
+async function checkMail(mb: MailSource) {
   const seen = readJson<Seen>(SEEN, { keys: {} });
   const seeding = !seen.seededAt; // first run ever: record a baseline, triage nothing
   const now = Date.now();
@@ -110,7 +125,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 
 const short = (res: unknown) => String(typeof res === "string" ? res : JSON.stringify(res)).replace(/\s+/g, " ").slice(0, 120);
 
-async function fetchInputs(mb: Mailbird, mails: NewMail[]): Promise<MailInput[]> {
+async function fetchInputs(mb: MailSource, mails: NewMail[]): Promise<MailInput[]> {
   return mapLimit(mails, FETCH_CONCURRENCY, async (m): Promise<MailInput> => {
     const msg = await mb.call<{ body?: string; from?: { displayName?: string; email?: string } }>("get_message", { messageId: m.messageId });
     return {
@@ -127,7 +142,7 @@ async function fetchInputs(mb: Mailbird, mails: NewMail[]): Promise<MailInput[]>
 // Classify all new mail in one batch, act on the plan, record every decision.
 // Returns mail that should be retried next tick. Once the batch is classified nothing here
 // throws: every side effect is guarded, so a failure can never cause a repeat alert.
-async function processNewMail(mb: Mailbird, fresh: NewMail[], hooks: HeartbeatHooks): Promise<NewMail[]> {
+async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: HeartbeatHooks): Promise<NewMail[]> {
   console.log(`heartbeat: ${fresh.length} new conversation(s)`);
 
   const results = await triageBatch(await fetchInputs(mb, fresh));
@@ -199,7 +214,7 @@ async function processNewMail(mb: Mailbird, fresh: NewMail[], hooks: HeartbeatHo
 }
 
 // Older copies of our own brief: archived, keeping the newest one per account.
-async function archiveStaleBriefs(mb: Mailbird, ids: string[]) {
+async function archiveStaleBriefs(mb: MailSource, ids: string[]) {
   for (const id of ids.slice(0, 5)) {
     try {
       await mb.call("archive_conversation", { conversationId: id });
@@ -210,8 +225,9 @@ async function archiveStaleBriefs(mb: Mailbird, ids: string[]) {
   }
 }
 
-export function startHeartbeat(hooks: HeartbeatHooks) {
-  const mb = new Mailbird();
+// `env` is for tests: a fake mail source and fake timers.
+export function startHeartbeat(hooks: HeartbeatHooks, env: { mail?: MailSource; setTimeout?: (f: () => void, ms: number) => unknown; setInterval?: (f: () => void, ms: number) => unknown } = {}) {
+  const mb = env.mail ?? new Mailbird();
   let running = false;
   let failing = false;
 
@@ -253,16 +269,17 @@ export function startHeartbeat(hooks: HeartbeatHooks) {
     void mailCheck().catch((e) => console.error("heartbeat: mail check failed:", (e as Error).message));
   };
 
-  setTimeout(tick, 20_000); // first tick shortly after start
-  setInterval(tick, settings.heartbeatMinutes * 60_000);
+  (env.setTimeout ?? setTimeout)(tick, 20_000); // first tick shortly after start
+  (env.setInterval ?? setInterval)(tick, settings.heartbeatMinutes * 60_000);
   console.log(
     `heartbeat: every ${settings.heartbeatMinutes} min, idle ${settings.quietStartHour}:00-${settings.quietEndHour}:00, actions ${settings.heartbeatLive ? "LIVE" : "log-only"}`,
   );
+  return { tick, mailCheck };
 }
 
 // `npm run triage-check`: classify the newest inbox mail exactly as the heartbeat would, and
 // show what it would do. Acts on nothing, writes nothing: a safe way to check the classifier.
-export async function triageCheck(mb: Mailbird, count: number) {
+export async function triageCheck(mb: MailSource, count: number) {
   const mails: NewMail[] = [];
   for (const inbox of await mb.inboxes()) {
     const rows = await mb.call<Row[]>("list_conversations", { folderId: inbox.folderId, limit: count });

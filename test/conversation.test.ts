@@ -25,7 +25,7 @@ interface Rig {
   spoken: string[];
 }
 
-function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: string; transcript?: (m: IncomingMessage) => Promise<string>; now?: () => number; vouch?: boolean; synth?: (words: string) => Promise<string>; admitGroup?: any } = {}) {
+function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: string; transcript?: (m: IncomingMessage) => Promise<string>; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; admitGroup?: any } = {}) {
   const r: Rig = { sent: [], reacts: [], typing: [], reads: [], records: [], prompts: [], spoken: [] };
   let ts = 5000;
   const signal = {
@@ -49,11 +49,12 @@ function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) =>
       ready: () => over.ready ?? false,
       synth: over.synth ?? (async (words) => (r.spoken.push(words), writeFileSync(join(dir, "v.wav"), "x"), join(dir, "v.wav"))),
     },
-    approvals: { answer: async () => over.approval ?? { outcome: "none" }, answerReaction: () => over.reactionApproval ?? "ignored" },
+    approvals: { answer: async (text: string) => (typeof over.approval === "function" ? over.approval(text) : over.approval) ?? { outcome: "none" }, answerReaction: () => over.reactionApproval ?? "ignored" },
     vouch: async () => over.vouch ?? true,
     isOwner: (w) => w.from === OWNER,
     admitGroup: over.admitGroup ?? (async () => {}),
     now: over.now,
+    wait: over.wait ?? (async () => {}),
   });
   return { r, pipeline };
 }
@@ -199,14 +200,100 @@ test("private chat: a failed turn becomes a notice (login, limit, other), ⚠️
   assert.equal(r.sent.length, 2);
 });
 
-test("private chat: messages are answered one at a time, in order", async () => {
-  let running = 0;
-  let peak = 0;
-  const order: string[] = [];
-  const { pipeline } = rig({ run: async (p) => { peak = Math.max(peak, ++running); await new Promise((res) => setTimeout(res, 15)); order.push(p); running--; return "ok"; } });
-  await Promise.all([pipeline.handleIncoming(owner(), msg({ text: "one" })), pipeline.handleIncoming(owner(), msg({ text: "two", timestamp: 112 }))]);
-  assert.equal(peak, 1);
-  assert.deepEqual(order, ["one", "two"]);
+// A settling pause the test releases by hand.
+const hold = () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  return { wait: () => gate, release };
+};
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
+test("private chat: a burst of three messages is ONE run, oldest first, each with its own quote and voice marks", async () => {
+  const h = hold();
+  const { r, pipeline } = rig({ wait: h.wait, run: async () => "got all three" });
+  const q = { text: "Move standup?", author: ACCOUNT, timestamp: 7 };
+  const all = [
+    pipeline.handleIncoming(owner(), msg({ text: "one", timestamp: 111 })),
+    pipeline.handleIncoming(owner(), msg({ text: "", timestamp: 112, audio: { id: "a.aac", size: 3 } })), // transcribed: "what is on today"
+    pipeline.handleIncoming(owner(), msg({ text: "three", timestamp: 113, quote: q })),
+  ];
+  await tick();
+  assert.equal(r.prompts.length, 0); // still settling
+  h.release();
+  await Promise.all(all);
+  assert.equal(r.prompts.length, 1);
+  const p = r.prompts[0]!;
+  assert.match(p, /3 messages[\s\S]*oldest first/);
+  assert.ok(p.indexOf("one") < p.indexOf("what is on today") && p.indexOf("what is on today") < p.indexOf("three"));
+  assert.match(p, /\[Voice message, transcribed automatically[^\]]*\] what is on today/);
+  assert.equal(p.match(/Voice message, transcribed/g)?.length, 1); // only the voice one
+  assert.match(p, /<quoted_message>[\s\S]*Move standup\?[\s\S]*<\/quoted_message>\n\nthree/);
+  assert.deepEqual(r.sent.map((s) => [s.text, s.quote]), [["got all three", { text: "three", author: OWNER, timestamp: 113 }]]); // one answer, threaded: one of them was a reply
+  assert.equal(r.records.filter((x) => x.kind === "owner").length, 3); // all remembered
+});
+
+test("private chat: a lone message is the prompt itself", async () => {
+  const { r, pipeline } = rig();
+  await pipeline.handleIncoming(owner(), msg({ text: "just this" }));
+  assert.deepEqual(r.prompts, ["just this"]);
+});
+
+test("private chat: a run in progress finishes and sends; messages that arrive meanwhile are the next turn, together", async () => {
+  let finish!: () => void;
+  const first = new Promise<void>((r) => (finish = r));
+  let n = 0;
+  const { r, pipeline } = rig({ run: async (p) => { if (++n === 1) await first; return `answer to: ${p.replace(/\s+/g, " ").slice(0, 60)}`; } });
+  const a = pipeline.handleIncoming(owner(), msg({ text: "one", timestamp: 111 }));
+  await tick();
+  assert.equal(r.prompts.length, 1);
+  const b = pipeline.handleIncoming(owner(), msg({ text: "two", timestamp: 112 }));
+  const c = pipeline.handleIncoming(owner(), msg({ text: "three", timestamp: 113 }));
+  await tick();
+  assert.equal(r.prompts.length, 1); // one at a time: they wait
+  finish();
+  await Promise.all([a, b, c]);
+  assert.equal(r.prompts.length, 2);
+  assert.equal(r.prompts[0], "one");
+  assert.match(r.prompts[1]!, /2 messages[\s\S]*two[\s\S]*three/);
+  assert.equal(r.sent.length, 2); // the first run was not cancelled
+  assert.match(r.sent[0]!.text, /answer to: one/);
+});
+
+test("private chat: approval answers skip the settling pause and the burst; a spoken yes is no approval", async () => {
+  const h = hold();
+  const { r, pipeline } = rig({ wait: h.wait, approval: (text: string) => ({ outcome: text === "yes" ? "approved" : "none" }) });
+  const a = pipeline.handleIncoming(owner(), msg({ text: "check my calendar", timestamp: 111 }));
+  await pipeline.handleIncoming(owner(), msg({ text: "yes", timestamp: 112 })); // returns while the burst is still settling
+  assert.deepEqual(r.reacts.map((x) => x.emoji), ["👍"]);
+  assert.equal(r.prompts.length, 0);
+  h.release();
+  await a;
+  assert.deepEqual(r.prompts, ["check my calendar"]); // the "yes" is not part of the prompt
+  const spoken = rig({ approval: { outcome: "approved" }, transcript: async () => "yes" });
+  await spoken.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 3 } }));
+  assert.equal(spoken.r.prompts.length, 1); // a voice "yes" is a message, not an approval
+});
+
+test("groups: a burst is one run through the shared burst; messages during a run wait for the next one", async () => {
+  const h = hold();
+  const runs: number[] = [];
+  let finish!: () => void;
+  const first = new Promise<void>((r) => (finish = r));
+  const { pipeline } = rig({ wait: h.wait });
+  const conv = group(GID);
+  const send = (n: number) => pipeline.burst(conv, n, (b) => b.run(async (items) => { runs.push(items.length); if (runs.length === 1) await first; }));
+  const all = [send(1), send(2), send(3)];
+  await tick();
+  assert.deepEqual(runs, []);
+  h.release();
+  await tick();
+  assert.deepEqual(runs, [3]); // one run for three
+  const later = [send(4), send(5)]; // the settle gate is already open: they queue behind the run in progress
+  await tick();
+  assert.deepEqual(runs, [3]);
+  finish();
+  await Promise.all([...all, ...later]);
+  assert.deepEqual(runs, [3, 2]);
 });
 
 test("private chat: the owner's reaction is feedback the model judges; it may react back or say something, never apologises", async () => {
