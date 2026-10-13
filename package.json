@@ -3,19 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --env-file=.env src/main.ts",
+    "start": "node --conditions=workspace-source --env-file=.env src/main.ts",
     "daemon": "./run-daemon.sh",
     "typecheck": "tsc",
-    "test": "HARNESS_DATA_DIR=$(mktemp -d) node --test test/*.test.ts packages/*/test/*.test.ts",
-    "report": "node --env-file-if-exists=.env src/cli.ts report",
-    "restore": "node --env-file-if-exists=.env src/cli.ts restore",
-    "doctor": "node --env-file-if-exists=.env src/cli.ts doctor",
-    "check:isolation": "node scripts/memory-isolation.ts",
+    "test": "HARNESS_DATA_DIR=$(mktemp -d) node --conditions=workspace-source --test test/*.test.ts packages/*/test/*.test.ts",
+    "report": "node --conditions=workspace-source --env-file-if-exists=.env src/cli.ts report",
+    "restore": "node --conditions=workspace-source --env-file-if-exists=.env src/cli.ts restore",
+    "doctor": "node --conditions=workspace-source --env-file-if-exists=.env src/cli.ts doctor",
+    "check:isolation": "node --conditions=workspace-source scripts/memory-isolation.ts",
     "check:secrets": "node scripts/check-secrets.ts",
     "install:launchd": "scripts/install-launchd.sh",
     "uninstall:launchd": "scripts/uninstall-launchd.sh",
-    "triage-check": "node --env-file-if-exists=.env src/cli.ts triage-check",
-    "signal:hello": "node --env-file=.env scripts/signal-hello.ts"
+    "triage-check": "node --conditions=workspace-source --env-file-if-exists=.env src/cli.ts triage-check",
+    "signal:hello": "node --conditions=workspace-source --env-file=.env scripts/signal-hello.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

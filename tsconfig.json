@@ -9,6 +9,9 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
+    "customConditions": [
+      "workspace-source"
+    ],
     "types": [
       "node"
     ]
