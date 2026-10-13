@@ -167,7 +167,7 @@ src/redact.ts        keeps phone numbers and credentials out of logs
 src/cli.ts           doctor / report / restore / triage-check
 plugin/skills/       the skills the agent works with (daily-brief, mailbird, calendar, notion-tasks, meeting-prep, setup...), loaded straight from here
 test/                unit tests (node:test)
-scripts/             launchd install, secrets scanner
+scripts/             launchd install, secrets scanner, voice-samples.ts (renders one text in several voice variants, sent to the owner's private chat only)
 ```
 
 ## Development
