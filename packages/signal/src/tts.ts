@@ -33,6 +33,16 @@ export function ttsReady(dir: string): { ok: boolean; missing: string[] } {
   return { ok: missing.length === 0, missing };
 }
 
+// A failed child process says why only in its exit code, signal and stderr: keep them in the error, so a log line is enough to diagnose it.
+async function step<T>(name: string, p: Promise<T>): Promise<T> {
+  try {
+    return await p;
+  } catch (e) {
+    const x = e as { code?: unknown; signal?: unknown; killed?: boolean; stderr?: string; message: string };
+    throw new Error(`${name} failed (exit ${x.code ?? "?"}, signal ${x.signal ?? "none"}${x.killed ? ", killed: timeout?" : ""}): ${(x.stderr ?? "").trim().split("\n").slice(-4).join(" | ") || x.message.slice(0, 200)}`);
+  }
+}
+
 // Speaks `text` and returns the path of an .m4a voice message in a fresh temp folder; the caller
 // sends it and then deletes that folder (dirname of the path).
 export async function synthesize(text: string, cfg: TtsConfig): Promise<string> {
@@ -43,7 +53,7 @@ export async function synthesize(text: string, cfg: TtsConfig): Promise<string> 
   const env = { ...process.env, PATH: `${process.env.PATH ?? ""}:${EXTRA_PATH}` };
   const py = run(f.python, [SCRIPT, f.model, f.voices, cfg.voice, String(cfg.speed), wav], { timeout: TIMEOUT_MS, env });
   py.child.stdin?.end(text);
-  await py;
-  await run("ffmpeg", ["-v", "error", "-y", "-i", wav, "-c:a", "aac", "-b:a", "64k", out], { timeout: TIMEOUT_MS, env });
+  await step("speech model", py);
+  await step("ffmpeg", run("ffmpeg", ["-v", "error", "-y", "-i", wav, "-c:a", "aac", "-b:a", "64k", out], { timeout: TIMEOUT_MS, env }));
   return out;
 }
