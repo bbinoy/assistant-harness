@@ -19,7 +19,15 @@ const KEEP_AFTER_COMPACTION = 0.7; // compact down to this share of the limit, s
 // What was said: the assistant's own messages (chat, notice, approval, draft, brief, other), the OWNER's messages
 // (owner, including voice transcripts) and the owner's reactions (reaction: "👎 on: <the message>"), and what was
 // said in a group is NOT in this log: each group has its own, in the same format (member: what a person wrote there).
-export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction" | "member";
+//
+// The log is also the gate's LEDGER (gate.ts): "action" is something done without posting (a wake-up that stayed
+// silent) and "wake" is the chosen next look (the last one is the state). They are not conversation: everything
+// that reads the log as conversation (chat context, dream, compaction summaries, recent lines, finding the message
+// a reaction was on) skips them; only search_logs and the gate itself see them.
+export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction" | "member" | "action" | "wake";
+
+export const LEDGER_KINDS: ReadonlySet<Kind> = new Set<Kind>(["action", "wake"]);
+export const isLedger = (kind: Kind) => LEDGER_KINDS.has(kind);
 
 export interface Sent {
   ts: number; // Signal timestamp of the message
@@ -70,10 +78,13 @@ export function recordMessage(kind: Kind, ts: number, text: string, now = new Da
 }
 
 // The message a reaction was on, if it is still in the log.
-export const findMessage = (ts: number, file: string = FILE): Sent | undefined => readAll(file).sent.find((m) => m.ts === ts && m.kind !== "reaction");
+export const findMessage = (ts: number, file: string = FILE): Sent | undefined => readAll(file).sent.find((m) => m.ts === ts && m.kind !== "reaction" && !isLedger(m.kind));
 
-// Everything logged after `sinceIso` (all of it when undefined), oldest first.
-export const messagesSince = (sinceIso?: string, file: string = FILE): Sent[] => readAll(file).sent.filter((m) => !sinceIso || m.at > sinceIso);
+// Everything said after `sinceIso` (all of it when undefined), oldest first. Conversation only: no ledger lines.
+export const messagesSince = (sinceIso?: string, file: string = FILE): Sent[] => readAll(file).sent.filter((m) => !isLedger(m.kind) && (!sinceIso || m.at > sinceIso));
+
+// Every line including the ledger, oldest first: for the gate (gate.ts) alone.
+export const ledgerEntries = (file: string = FILE): Sent[] => readAll(file).sent;
 
 const NOTICE_KINDS = new Set<Kind>(["notice", "draft", "brief"]);
 const NOTICE_AGE_MS = 24 * 3600_000;
@@ -124,7 +135,7 @@ export async function compactIfNeeded(summarize: Summarize, maxBytes = settings.
   try {
     const old = lines.slice(0, drop).map(parse).filter((e): e is Sent | Summary => !!e);
     const previous = old.find(isSummary);
-    const folded = old.filter((e): e is Sent => !isSummary(e));
+    const folded = old.filter((e): e is Sent => !isSummary(e) && !isLedger(e.kind)); // ledger lines are not worth a word in the summary
     let text: string;
     try {
       text = limitWords(await summarize(previous, folded), settings.summaryWords);

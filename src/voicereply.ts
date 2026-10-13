@@ -10,6 +10,9 @@ export function splitVoice(reply: string): { voice?: string; text: string } {
   return m ? { voice: reply.slice(m[0].length).trim(), text: reply.slice(m[0].length).trim() } : { text: reply };
 }
 
-// The line added to a transcribed voice message, telling the model it may answer by voice.
+// The voice option, added to every prompt that can produce a reply whenever speech is set up (private chat, group
+// messages addressed or not, wake-ups): the model chooses freely, whatever kind of message it answers. The notes
+// can overrule this default ("never use voice", "voice for pep talks").
 export const VOICE_INVITE =
-  "you may answer by voice: start your reply with [[voice]] and then only the words to say aloud, short and plain (no markdown, emoji, links or lists); keep long, detailed or exact (times, figures, links) answers in text";
+  "you may answer by voice by starting your reply with [[voice]] and then only the words to say aloud, short and plain (no markdown, emoji, links or lists); good for warm, personal or spoken-style replies such as a pep talk or a joke; keep exact, long or detailed answers (times, figures, links, lists) in text. If the notes say how to use voice (or never to), follow them";
+export const voiceOption = (canSpeak: boolean): string => (canSpeak ? `Voice: ${VOICE_INVITE}.` : "");

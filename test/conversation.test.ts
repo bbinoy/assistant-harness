@@ -130,12 +130,22 @@ test("private chat: [[silent]] and an empty answer send nothing", async () => {
 test("private chat: a voice message is transcribed (and the model may answer by voice)", async () => {
   const seen = rig({ ready: true, run: async () => "[[voice]] Two meetings today." });
   await seen.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 10 } }));
-  assert.match(seen.r.prompts[0]!, /^\[Voice message, transcribed automatically, so words may be misheard; you may answer by voice.*\] what is on today$/);
+  assert.match(seen.r.prompts[0]!, /^\[Voice message, transcribed automatically, so words may be misheard\] what is on today\n\nVoice: you may answer by voice/);
   assert.deepEqual(seen.r.spoken, ["Two meetings today."]);
   assert.equal(seen.r.sent.length, 1);
   assert.deepEqual([seen.r.sent[0]!.text, seen.r.sent[0]!.attachments?.length, seen.r.sent[0]!.groupId], ["", 1, undefined]);
   assert.deepEqual(seen.r.records.map((x) => x.text), ["🎙️ what is on today", "🔊 Two meetings today."]);
   assert.deepEqual(seen.r.reads, [{ ts: 111, from: undefined }]);
+});
+
+test("private chat: the voice option is offered with ANY message when speech is set up, typed or spoken; never without speech", async () => {
+  const typed = rig({ ready: true, run: async () => "[[voice]] You've got this, coach" });
+  await typed.pipeline.handleIncoming(owner(), msg({ text: "I need a pep talk" }));
+  assert.match(typed.r.prompts[0]!, /^I need a pep talk\n\nVoice: you may answer by voice/);
+  assert.deepEqual(typed.r.spoken, ["You've got this, coach"]);
+  const mute = rig({ ready: false });
+  await mute.pipeline.handleIncoming(owner(), msg({ text: "hello" }));
+  assert.equal(mute.r.prompts[0], "hello");
 });
 
 test("private chat: voice falls back to text when speech is off, too long, or fails; no invitation without speech", async () => {

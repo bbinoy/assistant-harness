@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { createPipeline, group, owner, type Pipeline } from "./conversation.ts";
-import { ask, setDraftReader, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
+import { ask, runBackgroundTurn, setDraftReader, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
@@ -9,7 +9,9 @@ import { acceptOwner } from "./guards.ts";
 import { createDreamer } from "./dream.ts";
 import { createGroupBrain, groupName, ownerInGroup } from "./group.ts";
 import { createGroupDreamer } from "./groupdream.ts";
-import { groupDir, recentGroupLines, recordGroup } from "./groupstore.ts";
+import { groupDir, recordGroup } from "./groupstore.ts";
+import { logTail } from "./gate.ts";
+import { createWakeups } from "./wake.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
@@ -91,7 +93,7 @@ const pipeline: Pipeline = createPipeline({
   // Warm process: one, for the owner's chat. Groups have none (bursty, many; a cold start per group turn is the price).
   afterTurn: (conv) => void (conv.kind === "owner" && prepareChat(approve, say)),
 });
-const groupBrain = createGroupBrain({ pipeline, recent: recentGroupLines });
+const groupBrain = createGroupBrain({ pipeline, recent: (groupId) => logTail(group(groupId)) });
 
 // The linked device sees ALL of the owner's Signal traffic. Only their own Note to Self is
 // ever acted on; everything else is dropped here, before it can reach anything else.
@@ -131,6 +133,12 @@ handler.resume();
 
 const dreamer = createDreamer();
 const groupDreamer = createGroupDreamer();
+// The clock half of the gate: every tick, each conversation whose next look has come may be woken (wake.ts).
+const wakeups = createWakeups({
+  pipeline,
+  vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
+  runOwner: (prompt) => runBackgroundTurn(prompt, approve),
+});
 const radar = createRadar({ approve, notify: say, briefDue: isBriefDue });
 
 startHeartbeat({
@@ -143,5 +151,6 @@ startHeartbeat({
     const dreaming = isBriefDue() ? dreamer.run().then(() => groupDreamer.run()).catch(() => {}) : Promise.resolve();
     void dreaming.then(() => maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify }));
     void radar();
+    void wakeups.tick().catch((e) => console.error("wake: tick failed:", e.message));
   },
 });

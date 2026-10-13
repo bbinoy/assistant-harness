@@ -6,7 +6,7 @@ import { appendLine, dataPath, readText } from "./state.ts";
 //   meta:   small structured details. Agent tool calls log ids only, never content; heartbeat
 //           triage entries add sender and subject so the brief and `npm run report` can list them.
 
-export type Source = "chat" | "brief" | "handler" | "heartbeat" | "radar" | "dream" | "group";
+export type Source = "chat" | "brief" | "handler" | "heartbeat" | "radar" | "dream" | "group" | "background";
 
 export interface AuditEntry {
   ts: string;

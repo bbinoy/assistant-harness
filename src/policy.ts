@@ -57,6 +57,8 @@ const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
   // The radar reads calendar and mail, and may only write a meeting-prep page in Notion; anything
   // else it tries asks the owner on the phone like the handler's.
   radar: new Set(["mcp__claude_ai_Notion__notion-create-pages", "mcp__claude_ai_Notion__notion-update-page"]),
+  // An unprompted run for the owner's chat (a wake-up, gate.ts): reads, and nothing else without asking.
+  background: new Set(),
   group: new Set(), // group chats get web search and their own notes only (classify)
   dream: new Set(), // the dream has no tools at all: it answers with JSON and code applies it (dream.ts)
 };

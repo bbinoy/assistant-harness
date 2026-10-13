@@ -100,6 +100,11 @@ export function loadSettings(env: Env) {
     memoryRunChars: num(env, "MEMORY_RUN_CHARS", 24_000, 2000, 200_000),
     dream: oneOf(env, "DREAM", "on", ["on", "off"] as const) === "on",
 
+    // Wake-ups (src/gate.ts, src/wake.ts): on every heartbeat tick a small model looks at each conversation whose
+    // "next look" has come and decides whether to do something unprompted ("every morning post a fun fact").
+    wakeups: oneOf(env, "WAKEUPS", "on", ["on", "off"] as const) === "on",
+    maxWakeActsPerDay: num(env, "MAX_WAKE_ACTS_PER_DAY", 4, 0, 50), // per conversation
+
     dailyBudgetUsd: num(env, "DAILY_BUDGET_USD", 20, 0, 10_000),
 
     signalHost: "127.0.0.1", // never anything else: signal-cli's socket is unauthenticated

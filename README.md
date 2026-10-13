@@ -74,7 +74,9 @@ The email has the rest, kept to the day ahead:
 > 🤝 Handled 1:
 > Roy Kent: drafted a reply offering Tue 15:00 or Wed 10:30, both free (he'd like it "quick and without any bloody small talk")
 
-**Any time.** Just talk to Ted, in text or in a voice note (transcribed on your Mac, nothing leaves it), and it can answer a voice note with a voice message of its own, in a voice you pick, also generated locally. While it works you see "typing…", and sometimes it answers with just an emoji on your message. (In Note to Self, which has no typing indicator, small icons show the state instead: 👀 working, ✅ done, ⚠️ broke.)
+**Whenever something is due.** Every conversation, yours and each group Ted is in, gets a look from a small model on every heartbeat tick once its "next look" time has come, or when something was said or a note changed since: it reads the clock, the notes and the tail of the log and decides whether to do anything on its own. So a note like "every morning post a fun fact" or "nudge us on Friday" works in your chat and in a group, and "don't reply so fast" changes the pace. Group wake-ups run with the group's rights only; yours with the radar's (reads; anything else asks on your phone). Capped per day, silent at night (your chat), and it may still decide to say nothing.
+
+**Any time.** Just talk to Ted, in text or in a voice note (transcribed on your Mac, nothing leaves it), and it may answer with a voice message of its own whenever that fits (a pep talk, a joke; never for times and figures) in a voice you pick, also generated locally, in your chat and in groups alike. Tell it in a note if you want more or less of that. While it works you see "typing…", and sometimes it answers with just an emoji on your message. (In Note to Self, which has no typing indicator, small icons show the state instead: 👀 working, ✅ done, ⚠️ broke.)
 
 > **You:** what's on my plate today?
 > **Ted:** Three things, and not one of them is a lion! 🦁

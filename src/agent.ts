@@ -13,7 +13,7 @@ import { describeCall } from "./format.ts";
 import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
 import { isIndex, isNotePath, LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, parseNote, readNotes } from "./notes.ts";
 import { createMemoryServer } from "./memory-tools.ts";
-import { briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem } from "./persona.ts";
+import { backgroundSystem, briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem } from "./persona.ts";
 import { classify, hiddenTools, isReadTool } from "./policy.ts";
 import { recentNotices } from "./messages.ts";
 import { splitReaction } from "./reaction.ts";
@@ -93,7 +93,7 @@ export interface RunOptions {
   memory?: { dir: string; groupId?: string; notify?: (text: string) => Promise<void> };
   seenAt?: string; // groups: stored with the session, see ChatSession.seenAt
   maxTurns: number;
-  maxBudgetUsd: number; // hard per-run spend cap
+  maxBudgetUsd: number; // hard per-run spend cap. Per RUN, not per session: the SDK does not count the cost a resumed session already had (checked), so owner and groups alike need no adjustment here. The previous total is subtracted only when reporting cost (consume)
   outputFormat?: Options["outputFormat"]; // constrained JSON output
   // Fires after a tool call succeeds. Used to capture the brief the agent sends.
   onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void;
@@ -410,6 +410,17 @@ export function runRadarTurn(prompt: string, approve: Approve, outputFormat: Opt
     maxTurns: 30,
     maxBudgetUsd: 1.0,
     outputFormat,
+  });
+}
+
+// An unprompted run in the owner's chat (a wake-up from the gate, wake.ts): fresh session, the radar's rights
+// (reads; anything else asks on the phone), no web search, no memory tools (policy.ts, source "background").
+export function runBackgroundTurn(prompt: string, approve: Approve): Promise<AgentReply> {
+  return runAgent(prompt, approve, {
+    source: "background",
+    systemPrompt: backgroundSystem(memoryFor(["people", "scheduling", "context", "style", "brief", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
+    maxTurns: 20,
+    maxBudgetUsd: 1.0,
   });
 }
 

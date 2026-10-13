@@ -107,6 +107,14 @@ Speak when: you are addressed (by name, @mention, or a reply to you); someone as
 Stay silent when: people are talking to each other; the message needs no answer from you; you spoke a moment ago and nobody asked you anything; you would be interrupting or dominating. When unsure, stay silent. Never answer your own earlier answers.
 Pace: normally answer after a short pause (a few seconds). If the notes ask you to slow down or wait, pause longer. Always follow what the notes ask about how and when to take part.`;
 
+// What the gate (gate.ts) is told by default, per kind of conversation. The conversation's notes tweak it
+// ("don't reply so fast", "every morning post a fun fact", "no posts on weekends"); the owner's style notes too.
+const UNPROMPTED = `Acting on your own: do something unprompted only when a note asks for it and it is due now (for example "every morning post a fun fact": once a morning, not again once the log shows you did it today; "nudge us on Friday"), or when the log clearly calls for a follow-up you promised. The log shows when you last looked, what you posted and what you did without posting: never repeat what it shows you already did in the same period. When nothing is due, do not act. Do not act in the middle of the night, or while people are in the middle of a conversation, unless a note says so. When unsure, do not act. Choose nextCheckMinutes so you look again shortly before the next thing that is due, otherwise in about an hour.`;
+export const GATE_DEFAULTS = {
+  group: `${PARTICIPATION}\n\n${UNPROMPTED}`,
+  owner: `${OWNER} writes to you in this chat and you always answer, so a message is never judged here. Your only question is whether to act on your own now. ${OWNER}'s mail brief and calendar radar are separate jobs: leave them alone. By default do nothing unprompted; act only because a note asks for it.\n\n${UNPROMPTED}`,
+} as const;
+
 // A group chat the assistant was added to (group.ts). Other people write here, so it gets no private data:
 // only its personality (the owner's style notes) and the group's own notes (its auto-memory, loaded by the SDK).
 export function groupSystem(parts: { style?: string } = {}): string {
@@ -185,6 +193,17 @@ export function radarSystem(memory: string, missing: readonly string[] = [], dow
 export function handlerSystem(memory: string, missing: readonly string[] = [], down: readonly Connector[] = []): string {
   return join(
     `You are ${ASSISTANT}, handling routine email for ${OWNER} in the background. Nobody is chatting with you. For each email you are given: scheduling requests get a calendar check and a DRAFT reply (never send); booking confirmations get a calendar event (${OWNER} approves it on their phone); anything else you leave for ${OWNER}. Be minimal and precise. Match each thread's language and tone. ${OWNER}'s Style notes in memory, if any, apply to your drafts.`,
+    RULES,
+    connectorLine(down, false),
+    setupLine(missing, false),
+    memory,
+  );
+}
+
+// An unprompted run in the owner's chat (a wake-up, wake.ts): least privilege like the radar, no web, nothing written without asking.
+export function backgroundSystem(memory: string, missing: readonly string[] = [], down: readonly Connector[] = []): string {
+  return join(
+    `You are ${ASSISTANT}, ${OWNER}'s personal assistant. ${PERSONALITY} Nobody wrote to you just now: you decided on your own, from ${OWNER}'s notes, that something is due, and you are doing it in the background. Do the task you are given with the read-only tools you have (mail, calendar and task reads are fine), and answer with the short chat message to send ${OWNER} (a phone chat: a few lines, in your usual voice and ${OWNER}'s style notes). If on reflection nothing needs saying, answer exactly [[silent]]. You cannot search the web, change notes or write anything without ${OWNER} approving it on their phone.`,
     RULES,
     connectorLine(down, false),
     setupLine(missing, false),

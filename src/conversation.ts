@@ -8,7 +8,7 @@ import { FILE as OWNER_LOG, findMessage, type Kind } from "./messages.ts";
 import { NOTES_DIR } from "./notes.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
-import { splitVoice, VOICE_INVITE } from "./voicereply.ts";
+import { splitVoice, voiceOption } from "./voicereply.ts";
 import { MAX_SPOKEN_CHARS, type IncomingMessage, type IncomingReaction, type Quote } from "@ted-personal-assistant/signal";
 
 // The one pipeline every conversation goes through: the owner's private chat and each group. What differs
@@ -76,6 +76,8 @@ export interface Turn {
   hadQuote?: boolean; // the message was itself a reply: thread the answer
   announce: boolean; // somebody is waiting: a failure is explained to them
   reaction?: boolean; // the turn answers a reaction: no typing, no status icons, no apology
+  background?: boolean; // nobody wrote: a wake-up (wake.ts). Like a reaction, no typing, icons or apology; the answer is still compacted after
+  kind?: Kind; // how the reply is logged (default "chat"); the owner's wake-ups are "notice", which the chat is told about
 }
 
 export interface TurnResult {
@@ -153,7 +155,7 @@ export function createPipeline(deps: PipelineDeps) {
   }
 
   // The reply of a run: by voice (only if speech is set up), a reaction, words, or nothing ([[silent]]).
-  async function deliver(conv: Conversation, replied: string, t: Pick<Turn, "target" | "threadUnder" | "hadQuote" | "reaction"> & { started: number }): Promise<{ spoke: boolean; reacted: boolean }> {
+  async function deliver(conv: Conversation, replied: string, t: Pick<Turn, "target" | "threadUnder" | "hadQuote" | "reaction" | "kind"> & { started: number }): Promise<{ spoke: boolean; reacted: boolean }> {
     const chosen = splitVoice(replied);
     let spoken = false;
     if (chosen.voice && canSpeak() && chosen.voice.length <= MAX_SPOKEN_CHARS) spoken = await speak(conv, chosen.voice);
@@ -161,7 +163,7 @@ export function createPipeline(deps: PipelineDeps) {
     const { reaction, text } = splitReaction(spoken ? "" : chosen.text);
     const words = SILENT.test(text) ? "" : text;
     const quote = t.threadUnder && (conv.threadAlways || shouldThread(!!t.hadQuote, now() - t.started)) ? t.threadUnder : undefined;
-    if (words) await out.reply(words, { kind: "chat", quote, groupId: conv.groupId });
+    if (words) await out.reply(words, { kind: t.kind ?? "chat", quote, groupId: conv.groupId });
     if (reaction && t.target) void signal.react(reaction, t.target, conv.groupId);
     else if (!t.reaction) status(conv, "✅", t.target);
     return { spoke: spoken || !!words, reacted: !!reaction };
@@ -173,7 +175,7 @@ export function createPipeline(deps: PipelineDeps) {
   // enqueue(). It never throws: a failure becomes a notice (if someone is waiting) and a result.
   async function runTurn(conv: Conversation, turn: Turn): Promise<TurnResult> {
     const started = now();
-    const background = !!turn.reaction; // a reaction is no conversation: no typing, no icons
+    const background = !!turn.reaction || !!turn.background; // a reaction or a wake-up is no conversation: no typing, no icons
     if (!background) {
       status(conv, "👀", turn.target); // 👀 working, ✅ answered, ⚠️ failed, each replacing the last
       // In an own-account chat Signal shows "typing…" (not in Note to Self); refreshed until the reply is out.
@@ -185,10 +187,10 @@ export function createPipeline(deps: PipelineDeps) {
       console.log(`${conv.kind === "owner" ? "agent" : "group"} replied (${text.length} chars${costUsd === undefined ? "" : `, $${costUsd.toFixed(4)}`})`);
       const sent = await deliver(conv, text, { ...turn, started });
       if (conv.kind === "group") audit("group_reply", sent.spoke || sent.reacted ? "sent" : "silent", "group");
-      if (!background) await deps.compact?.(conv);
+      if (!turn.reaction) await deps.compact?.(conv);
       return { spoke: sent.spoke };
     } catch (e) {
-      console.error(background ? `agent error (reaction):` : `${conv.kind === "owner" ? "agent" : "group: run"} failed:`, (e as Error).message); // a reaction needs no apology
+      console.error(background ? `agent error (${turn.background ? "wake-up" : "reaction"}):` : `${conv.kind === "owner" ? "agent" : "group: run"} failed:`, (e as Error).message); // a reaction needs no apology
       if (conv.kind === "group") audit("group_reply", "failed", "group", { error: (e as Error).message.slice(0, 200) });
       let noticed = false;
       if (!background) status(conv, "⚠️", turn.target);
@@ -207,7 +209,8 @@ export function createPipeline(deps: PipelineDeps) {
 
   // The owner's message, as the model sees it.
   function ownerPrompt(m: IncomingMessage): string {
-    return withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard${canSpeak() ? `; ${VOICE_INVITE}` : ""}] ${m.text}` : m.text, m.quote);
+    const text = withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.text, m.quote);
+    return canSpeak() ? `${text}\n\n${voiceOption(true)}` : text;
   }
 
   // Voice message -> text, or false when it could not be understood (the sender was told, if they should be).
