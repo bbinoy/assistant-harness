@@ -13,6 +13,10 @@ export interface IncomingMessage {
   text: string;
   timestamp: number;
   direct: boolean; // a one-to-one conversation with the assistant: Note to Self (self mode) or the assistant's own chat (peer mode); never a group
+  fromUuid?: string; // the sender's account id, when Signal gives it
+  fromName?: string; // the sender's own profile name, when Signal gives it
+  group?: { id: string }; // set when the message was written in a group (own-account mode only)
+  addressedToMe?: boolean; // group messages: it @mentions the assistant or replies to one of its messages
   quote?: Quote; // set when the message is a reply to an earlier one
   audio?: AudioRef; // a voice message (no text); main.ts transcribes it
   voice?: boolean; // the text is a transcript of a voice message
@@ -58,6 +62,14 @@ export interface IncomingReaction {
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
 
+// Pure: a message's text with each mention (Signal puts a placeholder character there) written as @name.
+export function withMentions(text: string, mentions: unknown, fallback = "someone"): string {
+  const list = (Array.isArray(mentions) ? mentions : []).filter((m) => Number.isInteger(m?.start)).sort((a, b) => b.start - a.start);
+  let out = text;
+  for (const m of list) if (out[m.start] === "\uFFFC") out = `${out.slice(0, m.start)}@${String(m.name ?? fallback)}${out.slice(m.start + 1)}`;
+  return out;
+}
+
 export interface Channel {
   account: string; // the signal-cli account we run as
   peer?: string; // set: the assistant has its OWN account and talks to this person (peer mode). Unset: Note to Self (self mode)
@@ -88,6 +100,9 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
     if (data) direct = false; // a message from someone else
   }
   if (!body) return {};
+  // A group (own-account mode only; in Note to Self every group message is someone else's and ignored).
+  const group = ch.peer !== undefined && data?.groupInfo?.groupId ? { id: String(data.groupInfo.groupId) } : undefined;
+  if (data?.groupInfo && !group) return {};
 
   if (body.reaction) {
     const r = body.reaction;
@@ -104,8 +119,18 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
   }
   const audio = parseAudio(body.attachments);
   if (!body.message && !audio) return {};
+  const quote = parseQuote(body.quote);
+  const mentioned = (Array.isArray(body.mentions) ? body.mentions : []).some((m: any) => m?.uuid === ch.account || m?.number === ch.account);
   return {
-    message: { from, text: body.message ?? "", timestamp: body.timestamp ?? env.timestamp, direct, quote: parseQuote(body.quote), audio },
+    message: {
+      from,
+      text: withMentions(body.message ?? "", body.mentions),
+      timestamp: body.timestamp ?? env.timestamp,
+      direct,
+      quote,
+      audio,
+      ...(group ? { group, addressedToMe: mentioned || quote?.author === ch.account, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}),
+    },
   };
 }
 
@@ -140,6 +165,12 @@ export class SignalClient {
     this.peerAci = peer?.aci;
   }
 
+  // The groups this account is in: ids (what SIGNAL_GROUPS lists) and names.
+  async groups(): Promise<{ id: string; name: string }[]> {
+    const list = await this.call<any[]>("listGroups", {});
+    return (Array.isArray(list) ? list : []).filter((g) => g?.isMember !== false).map((g) => ({ id: String(g.id ?? ""), name: String(g.name ?? "") }));
+  }
+
   // Where our messages go: the recipient in peer mode, our own Note to Self otherwise.
   private to(): object {
     return this.peer ? { recipient: [this.peer] } : { noteToSelf: true };
@@ -161,10 +192,10 @@ export class SignalClient {
   }
 
   // "typing…" in the chat. Only meaningful in peer mode (Signal does not show it in Note to Self).
-  async typing(stop = false): Promise<void> {
+  async typing(stop = false, groupId?: string): Promise<void> {
     if (!this.peer) return;
     try {
-      await this.call("sendTyping", { recipient: [this.peer], ...(stop ? { stop: true } : {}) });
+      await this.call("sendTyping", { ...(groupId ? { groupId } : { recipient: [this.peer] }), ...(stop ? { stop: true } : {}) });
     } catch {
       /* best effort */
     }
@@ -273,9 +304,9 @@ export class SignalClient {
 
   // Sends a message: to our own Note to Self, or (peer mode) to the peer. Returns the sent
   // timestamp (used to ignore our own echo when it syncs back, and to match reactions).
-  async send(text: string, textStyle: string[] = [], quote?: Quote, opts: { attachments?: string[] } = {}): Promise<number> {
+  async send(text: string, textStyle: string[] = [], quote?: Quote, opts: { attachments?: string[]; groupId?: string } = {}): Promise<number> {
     const result = await this.call<{ timestamp: number }>("send", {
-      ...this.to(),
+      ...(opts.groupId ? { groupId: opts.groupId } : this.to()),
       ...(text ? { message: text } : {}),
       ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(textStyle.length ? { textStyle } : {}),

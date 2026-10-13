@@ -56,6 +56,7 @@ const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
   // The radar reads calendar and mail, and may only write a meeting-prep page in Notion; anything
   // else it tries asks the owner on the phone like the handler's.
   radar: new Set(["mcp__claude_ai_Notion__notion-create-pages", "mcp__claude_ai_Notion__notion-update-page"]),
+  group: new Set(), // group chats get no tools but web search (group.ts)
   dream: new Set(), // the dream has no tools at all: it answers with JSON and code applies it (dream.ts)
 };
 
@@ -116,6 +117,8 @@ const WEB_SEARCH = "WebSearch";
 const WEB_FETCH = "WebFetch";
 
 export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
+  // A group chat holds other people: no private data, no writes, no pages. Web search only.
+  if (source === "group") return tool === WEB_SEARCH ? "allow" : "deny";
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
   if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && (isNotePath(input.file_path) || (tool === "Read" && isReadableData(input.file_path))) ? "allow" : "deny";

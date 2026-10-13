@@ -10,6 +10,7 @@ import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createDreamer } from "./dream.ts";
+import { groupTurn } from "./group.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
@@ -48,6 +49,7 @@ const notify = async (text: string) => {
 // The linked device sees ALL of the owner's Signal traffic. Only their own Note to Self is
 // ever acted on; everything else is dropped here, before it can reach anything else.
 signal.onMessage((m) => {
+  if (m.group) return void inGroup(m).catch((e) => console.error("group error:", e.message));
   if (!acceptOwner(m, config.ownerNumber)) return void console.log(`ignored a message from ${mask(m.from)}`);
   if (out.isOwnEcho(m)) return; // one of our own replies coming back
   void signal.markRead(m.timestamp); // the owner sees it was read, as soon as we have it
@@ -74,6 +76,18 @@ async function hear(m: IncomingMessage) {
     return void (await out.replyPlain("I couldn't hear any words in that voice message."));
   }
   await route({ ...m, text: heard, audio: undefined, voice: true });
+}
+
+// A message in a group chat (src/group.ts): only in groups the owner listed, only when the assistant is
+// @mentioned or replied to, and with no access to anything private. Nothing from a group is kept.
+async function inGroup(m: IncomingMessage) {
+  const groupId = m.group!.id;
+  if (!settings.signalGroups.includes(groupId)) return; // not listed: ignored, and not even logged
+  const isOwner = m.from === config.ownerNumber || (!!config.ownerAci && m.fromUuid === config.ownerAci);
+  if (m.addressedToMe) void signal.typing(false, groupId);
+  const reply = await groupTurn({ groupId, text: m.text, isOwner, fromName: m.fromName, addressedToMe: !!m.addressedToMe });
+  if (m.addressedToMe) void signal.typing(true, groupId);
+  if (reply) await out.replyGroup(groupId, reply, { text: m.text.slice(0, 200), author: m.from || m.fromUuid || "", timestamp: m.timestamp });
 }
 
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal

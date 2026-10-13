@@ -1,4 +1,4 @@
-export { SignalClient, parseQuote, parseAudio, MAX_AUDIO_BYTES } from "./client.ts";
+export { SignalClient, parseQuote, parseAudio, withMentions, interpretEnvelope, MAX_AUDIO_BYTES } from "./client.ts";
 export type { Quote, IncomingMessage, IncomingReaction, AudioRef } from "./client.ts";
 export { ensureSignalDaemon } from "./daemon.ts";
 export { synthesize, ttsReady, MAX_SPOKEN_CHARS, type TtsConfig } from "./tts.ts";

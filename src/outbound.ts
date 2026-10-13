@@ -56,6 +56,15 @@ export function createOutbound(signal: SignalClient, record?: (kind: MessageKind
     return last;
   }
 
+  // A message in a group chat. Not logged anywhere: nothing from groups is kept (group.ts).
+  async function replyGroup(groupId: string, text: string, quote?: Quote): Promise<void> {
+    let q = quote;
+    for (const part of chunk(text)) {
+      await signal.send(part, [], q, { groupId });
+      q = undefined;
+    }
+  }
+
   // A voice message (an audio file). What was said is logged as text, so the log stays searchable.
   async function sendVoice(file: string, spoken: string): Promise<number> {
     const ts = await signal.send("", [], undefined, { attachments: [file] });
@@ -80,5 +89,5 @@ export function createOutbound(signal: SignalClient, record?: (kind: MessageKind
     }
   }
 
-  return { reply, replyPlain, sendVoice, sendBrief, sendBriefSummary, isOwnEcho };
+  return { reply, replyPlain, replyGroup, sendVoice, sendBrief, sendBriefSummary, isOwnEcho };
 }

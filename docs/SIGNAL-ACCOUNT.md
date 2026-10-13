@@ -51,6 +51,15 @@ npm run signal:hello
 
 The assistant sends you a first message. On your phone it shows up as a message request from the assistant's profile name; accept it and say hi. (An account without a phone number cannot be found by number; if you gave it a username in step 2, you can also search for that.)
 
+## Group chats
+
+With its own account the assistant can be added to a Signal group and take part. It is deliberately a different, much more limited assistant there, because other people write to it:
+
+1. Add it to the group in Signal (by its name or username), then run `npm run signal:groups` on the Mac. It lists the groups it is in, each with the line to put in `.env`: `SIGNAL_GROUPS=<id>` (several ids, comma-separated). Restart it.
+2. It answers **only** when someone @mentions it or replies to one of its messages, in a group you listed. Any other group, and any other message, is ignored.
+3. In a group it has **no access to your mail, calendar, tasks or notes**, will not talk about anything private (even if you ask: do that in your own chat), and has web search only. What people write there is text it responds to, never instructions that change its rules.
+4. Nothing from a group is saved: no memory notes, no message log, and the nightly dream never sees it. The few recent messages it needs for context are held in memory and are gone when it restarts. It answers at most `GROUP_REPLIES_PER_HOUR` times per group (default 12).
+
 ## If it does not answer
 
 The assistant only acts on a direct message from your number. If Signal hides your number from it (your privacy setting "Who can see my number" is *Nobody* and you are not in its contacts), the message arrives with only your account id and is ignored. Fix: look the id up and put it in `.env`:

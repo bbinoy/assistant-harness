@@ -14,7 +14,8 @@
     "install:launchd": "scripts/install-launchd.sh",
     "uninstall:launchd": "scripts/uninstall-launchd.sh",
     "triage-check": "node --env-file-if-exists=.env src/cli.ts triage-check",
-    "signal:hello": "node --env-file=.env scripts/signal-hello.ts"
+    "signal:hello": "node --env-file=.env scripts/signal-hello.ts",
+    "signal:groups": "node --env-file=.env scripts/signal-groups.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
