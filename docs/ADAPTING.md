@@ -85,6 +85,7 @@ Signal via `signal-cli`, linked as a **secondary device**, reading the owner's *
 ```ts
 interface Messenger {
   connect(): Promise<void>;
+  onClose(h: () => void): void; // the app exits when this fires (src/main.ts); launchd restarts it
   onMessage(h: (m: { from: string; text: string; timestamp: number; noteToSelf: boolean }) => void): void;
   onReaction(h: (r: { from: string; emoji: string; targetTimestamp: number; isRemove: boolean }) => void): void;
   sendNoteToSelf(text: string, textStyle?: string[]): Promise<number>; // returns the sent message's id/timestamp

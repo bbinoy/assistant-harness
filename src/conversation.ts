@@ -70,7 +70,7 @@ export const group = (groupId: string): Conversation =>
   });
 
 // A message with its picture, once prepared (the bytes are held for this turn only; src/image.ts).
-type Held = IncomingMessage & { picture?: Picture };
+type Held = IncomingMessage & { voice?: boolean; picture?: Picture }; // voice: the text is a transcript of a voice message (set by hear)
 
 export type Incoming = { type: "message"; m: IncomingMessage } | { type: "reaction"; r: IncomingReaction };
 
@@ -266,7 +266,7 @@ export function createPipeline(deps: PipelineDeps) {
   }
 
   // Voice message -> text, or false when it could not be understood (the sender was told, if they should be).
-  async function hear(conv: Conversation, m: IncomingMessage): Promise<IncomingMessage | false> {
+  async function hear(conv: Conversation, m: IncomingMessage): Promise<Held | false> {
     const target = { author: m.from, timestamp: m.timestamp };
     if (conv.kind === "owner") status(conv, "👂", target);
     try {

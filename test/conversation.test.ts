@@ -36,7 +36,7 @@ function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) =>
     react: async (emoji: string, target: any, groupId?: string) => void r.reacts.push({ emoji, target, groupId }),
     typing: async (stop = false, groupId?: string) => void r.typing.push({ stop, groupId }),
     markRead: async (t: number, from?: string) => void r.reads.push({ ts: t, from }),
-    send: async (text: string, styles: string[] = [], quote?: unknown, opts: { groupId?: string; attachments?: string[] } = {}) => (r.sent.push({ text, styles, quote, groupId: opts.groupId, attachments: opts.attachments }), ++ts),
+    send: async (text: string, opts: { style?: string[]; quote?: unknown; groupId?: string; attachments?: string[] } = {}) => (r.sent.push({ text, styles: opts.style ?? [], quote: opts.quote, groupId: opts.groupId, attachments: opts.attachments }), ++ts),
   };
   const record = (groupId: string | undefined, kind: string, _ts: number, text: string) => void r.records.push({ groupId, kind, text });
   const out = createOutbound(signal as any, (kind, t, text, groupId) => record(groupId, kind, t, text));

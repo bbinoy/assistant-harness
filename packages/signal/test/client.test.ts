@@ -1,6 +1,6 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { SignalClient } from "../src/client.ts";
+import { SignalClient, attachmentPath } from "../src/client.ts";
 import { FakeSignalDaemon, FakeRpcError, type FakeRequest } from "../src/testing.ts";
 
 type Req = FakeRequest;
@@ -20,7 +20,7 @@ afterEach(async () => void (await Promise.all(open.splice(0).map((d) => d.close(
 
 async function connected(peer?: typeof PEER, answer?: (r: Req) => unknown) {
   const d = await FakeSignalDaemon.start(answer ?? ((r) => (r.method === "send" ? { timestamp: 1234 } : {})));
-  const c = new SignalClient("127.0.0.1", d.port, ME, peer);
+  const c = new SignalClient({ host: "127.0.0.1", port: d.port, account: ME, peer });
   await c.connect();
   await until(() => d.connections > 0); // the server sees the connection a moment after the client does
   open.push(d);
@@ -79,7 +79,7 @@ test("client: send in Note to Self mode", async () => {
 
 test("client: send in peer mode, with style, quote and attachments", async () => {
   const { d, c, done } = await connected(PEER);
-  await c.send("hi", ["0:2:BOLD"], { text: "earlier", author: PEER.number, timestamp: 99 }, { attachments: ["/tmp/a.m4a"] });
+  await c.send("hi", { style: ["0:2:BOLD"], quote: { text: "earlier", author: PEER.number, timestamp: 99 }, attachments: ["/tmp/a.m4a"] });
   assert.deepEqual(d.requests[0]!.params, {
     recipient: [PEER.number],
     message: "hi",
@@ -94,7 +94,7 @@ test("client: send in peer mode, with style, quote and attachments", async () =>
 
 test("client: send to a group, attachment only", async () => {
   const { d, c, done } = await connected(PEER);
-  await c.send("", [], undefined, { groupId: "grp==", attachments: ["/tmp/a.png"] });
+  await c.send("", { groupId: "grp==", attachments: ["/tmp/a.png"] });
   assert.deepEqual(d.requests[0]!.params, { groupId: "grp==", attachments: ["/tmp/a.png"] });
   await done();
 });
@@ -172,7 +172,7 @@ test("client: warnings go to the injected logger (and nowhere by default)", asyn
   const d = await FakeSignalDaemon.start(() => new RpcError("nope"));
   open.push(d);
   const lines: string[] = [];
-  const c = new SignalClient("127.0.0.1", d.port, ME, PEER, { info: () => {}, error: () => {}, warn: (...a) => void lines.push(a.join(" ")) });
+  const c = new SignalClient({ host: "127.0.0.1", port: d.port, account: ME, peer: PEER, logger: { info: () => {}, error: () => {}, warn: (...a) => void lines.push(a.join(" ")) } });
   await c.connect();
   await until(() => d.connections > 0);
   await c.markRead(1);
@@ -219,6 +219,21 @@ test("client: a socket error after connecting is reported, not thrown", async ()
 });
 
 test("client: sending before connect() says so", async () => {
-  const c = new SignalClient("127.0.0.1", 1, ME);
+  const c = new SignalClient({ host: "127.0.0.1", port: 1, account: ME });
   await assert.rejects(c.send("x"), /not connected/);
+});
+
+test("client: a request that gets no answer times out after rpcTimeoutMs", async () => {
+  const d = await FakeSignalDaemon.start(() => undefined);
+  open.push(d);
+  const c = new SignalClient({ host: d.host, port: d.port, account: ME, rpcTimeoutMs: 50 });
+  await c.connect();
+  await assert.rejects(c.send("x"), /timed out after 0.05s/);
+  c.close();
+});
+
+test("client: attachmentPath joins a plain id to the folder and refuses anything else", () => {
+  assert.equal(attachmentPath({ id: "abc-DEF_1.m4a" }, "/data/att"), "/data/att/abc-DEF_1.m4a");
+  for (const id of ["../x", "a/b", ".hidden", "", "x".repeat(101)]) assert.throws(() => attachmentPath({ id }, "/data/att"), /plain attachment id/);
+  assert.match(attachmentPath({ id: "x" }), /signal-cli\/attachments\/x$/);
 });

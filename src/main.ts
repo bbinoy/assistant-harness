@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { createPipeline, group, owner, type Pipeline } from "./conversation.ts";
 import { ask, runProfile, setDraftReader, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
@@ -24,17 +23,17 @@ import { preparePicture } from "./image.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { openLog } from "./state.ts";
-import { ensureSignalDaemon, SignalClient, providerReady, synthesizeWith, transcribe, voiceReady, type IncomingMessage } from "@ted-personal-assistant/signal";
+import { attachmentPath, ensureSignalDaemon, SignalClient, providerReady, synthesizeWith, transcribe, voiceReady, type IncomingMessage } from "@ted-personal-assistant/signal";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 
-const signal = new SignalClient(
-  settings.signalHost,
-  settings.signalPort,
-  config.signalAccount,
-  config.signalAccount !== config.ownerNumber ? { number: config.ownerNumber, aci: config.ownerAci } : undefined,
-  console, // the app's console is the timestamped, redacting one from log.ts
-);
+const signal = new SignalClient({
+  host: settings.signalHost,
+  port: settings.signalPort,
+  account: config.signalAccount,
+  peer: config.signalAccount !== config.ownerNumber ? { number: config.ownerNumber, aci: config.ownerAci } : undefined,
+  logger: console, // the app's console is the timestamped, redacting one from log.ts
+});
 // What was said goes into that conversation's own log: the owner's chat, or the group's (made on first use).
 function record(groupId: string | undefined, kind: Kind, ts: number, text: string) {
   if (groupId) return void (groupDir(groupId, groupName(groupId)), recordGroup(groupId, kind, ts, text));
@@ -60,7 +59,7 @@ const notify = async (text: string) => {
 async function transcript(m: IncomingMessage): Promise<string> {
   let heard = "";
   try {
-    heard = await transcribe(join(settings.signalAttachmentsDir, m.audio!.id), settings.whisperModel);
+    heard = await transcribe(attachmentPath(m.audio!, settings.signalAttachmentsDir), settings.whisperModel);
   } catch (e) {
     const gaps = voiceReady(settings.whisperModel);
     console.error("voice: transcription failed:", (e as Error).message);
@@ -85,7 +84,7 @@ const pipeline: Pipeline = createPipeline({
   record,
   account: config.signalAccount,
   runOwner: (prompt, ownerMessage, pictures) => ask(prompt, approve, say, ownerMessage, pictures),
-  picture: (m) => preparePicture(join(settings.signalAttachmentsDir, m.image!.id)), // by file name inside signal-cli's folder; the id was checked
+  picture: (m) => preparePicture(attachmentPath(m.image!, settings.signalAttachmentsDir)), // a plain file name inside signal-cli's folder
   transcript,
   speech: {
     ready: () => settings.voiceReplies && signal.separateAccount && providerReady(settings.tts).ok,

@@ -9,7 +9,7 @@ if (config.signalAccount === config.ownerNumber) {
   console.error("SIGNAL_ACCOUNT is not set: the assistant talks in Note to Self, so there is nothing to start. See docs/SIGNAL-ACCOUNT.md.");
   process.exit(1);
 }
-const signal = new SignalClient(settings.signalHost, settings.signalPort, config.signalAccount, { number: config.ownerNumber, aci: config.ownerAci }, console);
+const signal = new SignalClient({ host: settings.signalHost, port: settings.signalPort, account: config.signalAccount, peer: { number: config.ownerNumber, aci: config.ownerAci }, logger: console });
 await signal.connect();
 await signal.send(`Hi, it's ${settings.assistant}. This is my own chat now, so you can talk to me here. Say hi back and I'll answer. 👋`);
 console.log("sent: look for a message request from the assistant on your phone, accept it and say hi");

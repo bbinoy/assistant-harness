@@ -50,7 +50,7 @@ export function createOutbound(signal: Pick<SignalClient, "send">, record?: (kin
     for (const part of chunk(text)) {
       const r = opts.plain ? { text: part, styles: [] } : renderMarkdown(part);
       if (!opts.groupId) remember(`x:${r.text}`);
-      last = await signal.send(r.text, toSignalStyles(r.styles), quote, opts.groupId ? { groupId: opts.groupId } : undefined);
+      last = await signal.send(r.text, { style: toSignalStyles(r.styles), quote, ...(opts.groupId ? { groupId: opts.groupId } : {}) });
       quote = undefined;
       if (!opts.groupId) remember(`t:${last}`);
       record?.(opts.kind ?? "other", last, r.text, opts.groupId);
@@ -60,7 +60,7 @@ export function createOutbound(signal: Pick<SignalClient, "send">, record?: (kin
 
   // A voice message (an audio file), to the owner's chat or a group. What was said is logged as text, so the log stays searchable.
   async function sendVoice(file: string, spoken: string, groupId?: string): Promise<number> {
-    const ts = await signal.send("", [], undefined, { attachments: [file], ...(groupId ? { groupId } : {}) });
+    const ts = await signal.send("", { attachments: [file], ...(groupId ? { groupId } : {}) });
     if (!groupId) remember(`t:${ts}`);
     record?.("chat", ts, `🔊 ${spoken}`, groupId);
     return ts;

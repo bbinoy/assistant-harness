@@ -55,10 +55,10 @@ if (send) {
     console.error("SIGNAL_ACCOUNT is not set (Note to Self): not sending. The files are in", outDir);
     process.exit(0);
   }
-  const signal = new SignalClient(settings.signalHost, settings.signalPort, config.signalAccount, { number: config.ownerNumber, aci: config.ownerAci }, console);
+  const signal = new SignalClient({ host: settings.signalHost, port: settings.signalPort, account: config.signalAccount, peer: { number: config.ownerNumber, aci: config.ownerAci }, logger: console });
   await signal.connect();
   for (const f of files) {
-    await signal.send(f.name, [], undefined, { attachments: [f.file] }); // no groupId: the owner's private chat
+    await signal.send(f.name, { attachments: [f.file] }); // no groupId: the owner's private chat
     console.log("sent", f.name);
   }
   process.exit(0);

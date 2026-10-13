@@ -6,7 +6,7 @@ import { createOutbound } from "../src/outbound.ts";
 function fake() {
   const sent: { text: string; styles: string[] }[] = [];
   let ts = 1000;
-  const signal = { send: async (text: string, styles: string[] = []) => (sent.push({ text, styles }), ++ts) } as any;
+  const signal = { send: async (text: string, opts: { style?: string[] } = {}) => (sent.push({ text, styles: opts.style ?? [] }), ++ts) } as any;
   return { signal, sent };
 }
 

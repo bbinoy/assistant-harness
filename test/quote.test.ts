@@ -30,7 +30,7 @@ test("quote: replies are threaded only for a reply-to-something or a slow answer
 
 test("quote: the quote goes on the first chunk only, and the echo of a threaded reply is still recognised", async () => {
   const calls: { text: string; quote: unknown }[] = [];
-  const signal = { send: async (text: string, _s: string[], quote?: unknown) => (calls.push({ text, quote }), 5000 + calls.length) } as any;
+  const signal = { send: async (text: string, opts: { quote?: unknown } = {}) => (calls.push({ text, quote: opts.quote }), 5000 + calls.length) } as any;
   const out = createOutbound(signal);
   const q = { text: "the question", author: "+1", timestamp: 42 };
   await out.reply(`${"para one. ".repeat(120)}\n\n${"para two. ".repeat(120)}`, { quote: q });

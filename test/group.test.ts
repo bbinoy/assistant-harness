@@ -107,7 +107,7 @@ const rig = (over: object = {}) => {
     react: async (e: string, t: { author: string; timestamp: number }) => void (reacted.push(e), reactTargets.push(t)),
     typing: async () => {},
     markRead: async () => {},
-    send: async (text: string, _s: string[], q?: unknown, o?: { attachments?: string[] }) => (sent.push({ text: o?.attachments ? `[voice]` : text, quoted: !!q }), 1),
+    send: async (text: string, o?: { quote?: unknown; attachments?: string[] }) => (sent.push({ text: o?.attachments ? `[voice]` : text, quoted: !!o?.quote }), 1),
   };
   const ledger: string[] = [];
   const record = (_g: string | undefined, k: string, _ts: number, text: string) => void (k === "wake" || k === "action" ? ledger.push(`${k} ${text}`) : recorded.push(text));

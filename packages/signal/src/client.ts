@@ -1,4 +1,6 @@
 import net from "node:net";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { silentLogger, type Logger } from "./logger.ts";
 
 // The Signal client: a JSON-RPC 2.0 connection to a running `signal-cli daemon` (one JSON object per line over
@@ -25,9 +27,8 @@ export interface IncomingMessage {
   group?: { id: string }; // set when the message was written in a group (own-account mode only)
   addressedToMe?: boolean; // group messages: it @mentions the assistant or replies to one of its messages
   quote?: Quote; // set when the message is a reply to an earlier one
-  audio?: AudioRef; // a voice message (no text); main.ts transcribes it
-  voice?: boolean; // the text is a transcript of a voice message
-  image?: ImageRef; // a picture (the text is its caption, possibly empty); main.ts prepares it
+  audio?: AudioRef; // a voice message (no text); resolve its file with attachmentPath
+  image?: ImageRef; // a picture (the text is its caption, possibly empty); resolve its file with attachmentPath
 }
 
 // A voice note or audio file signal-cli has downloaded: its id names the file in its attachments folder.
@@ -47,14 +48,30 @@ export interface ImageRef {
 export const MAX_IMAGE_BYTES = 20_000_000;
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"];
 
+// An attachment id becomes a file name, so only plain names pass (no path separators, nothing hidden).
+const safeId = (id: string) => /^[\w.-]{1,100}$/.test(id) && !id.startsWith(".");
+
+// signal-cli's folder of downloaded attachments (Linux and macOS default).
+export function defaultAttachmentsDir(): string {
+  return join(process.env.XDG_DATA_HOME || join(homedir(), ".local/share"), "signal-cli/attachments");
+}
+
+// The file signal-cli saved for an attachment: `dir` joined with the id, after checking the id is a plain file name.
+// Throws on anything else. The content type came from the sender and the bytes are not checked here; do not follow
+// symlinks out of `dir`.
+export function attachmentPath(ref: { id: string }, dir: string = defaultAttachmentsDir()): string {
+  if (!safeId(ref.id)) throw new Error("not a plain attachment id");
+  return join(dir, ref.id);
+}
+
 // Pure: the first usable picture of a message, with the same rules as parseAudio. Videos and other files are skipped;
-// whether the bytes really are a picture is checked when they are read (src/image.ts).
+// whether the bytes really are a picture is for the caller to check when it reads them.
 export function parseImage(attachments: unknown): ImageRef | undefined {
   if (!Array.isArray(attachments)) return undefined;
   for (const a of attachments) {
     const id = typeof a?.id === "string" ? a.id : "";
     const size = Number(a?.size ?? 0);
-    if (!IMAGE_TYPES.includes(String(a?.contentType ?? "").toLowerCase()) || !/^[\w.-]{1,100}$/.test(id) || id.startsWith(".")) continue;
+    if (!IMAGE_TYPES.includes(String(a?.contentType ?? "").toLowerCase()) || !safeId(id)) continue;
     if (size > 0 && size <= MAX_IMAGE_BYTES) return { id, size };
   }
   return undefined;
@@ -67,7 +84,7 @@ export function parseAudio(attachments: unknown): AudioRef | undefined {
   for (const a of attachments) {
     const id = typeof a?.id === "string" ? a.id : "";
     const size = Number(a?.size ?? 0);
-    if (!String(a?.contentType ?? "").startsWith("audio/") || !/^[\w.-]{1,100}$/.test(id) || id.startsWith(".")) continue;
+    if (!String(a?.contentType ?? "").startsWith("audio/") || !safeId(id)) continue;
     if (size > 0 && size <= MAX_AUDIO_BYTES) return { id, size };
   }
   return undefined;
@@ -176,6 +193,24 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
   };
 }
 
+export interface SignalClientOptions {
+  host: string; // where signal-cli's daemon listens
+  port: number;
+  account: string; // who signal-cli runs as. Without `peer`, that is the owner's own account (we are a linked device and talk in Note to Self)
+  peer?: { number: string; aci?: string }; // set: `account` is the assistant's OWN account and `peer` is the person it talks to
+  logger?: Logger; // default: silent
+  rpcTimeoutMs?: number; // how long a request may wait for its answer (default 30 s)
+  ownReactionMs?: number; // how long isOwnReaction remembers a reaction we sent (default 5 min)
+}
+
+// What send() can carry besides the text.
+export interface SendOptions {
+  style?: string[]; // signal-cli text styles like "0:5:BOLD" (start:length:STYLE)
+  quote?: Quote; // thread the message under an earlier one
+  attachments?: string[]; // absolute paths of files signal-cli can read
+  groupId?: string; // send to this group instead of the default conversation
+}
+
 // Minimal JSON-RPC 2.0 client over signal-cli's TCP socket.
 // Framing: one JSON object per line, in both directions.
 export class SignalClient {
@@ -200,17 +235,18 @@ export class SignalClient {
   private peer: string | undefined;
   private peerAci: string | undefined;
   private log: Logger;
+  private rpcTimeoutMs: number;
+  private ownReactionMs: number;
 
-  // `account`: who signal-cli runs as. Without `peer`, that is the owner's own account (we are a
-  // linked device and talk in Note to Self). With `peer`, it is the assistant's own account and
-  // `peer` is the person it talks to.
-  constructor(host: string, port: number, account: string, peer?: { number: string; aci?: string }, logger: Logger = silentLogger) {
-    this.log = logger;
-    this.host = host;
-    this.port = port;
-    this.account = account;
-    this.peer = peer?.number;
-    this.peerAci = peer?.aci;
+  constructor(opts: SignalClientOptions) {
+    this.log = opts.logger ?? silentLogger;
+    this.host = opts.host;
+    this.port = opts.port;
+    this.account = opts.account;
+    this.peer = opts.peer?.number;
+    this.peerAci = opts.peer?.aci;
+    this.rpcTimeoutMs = opts.rpcTimeoutMs ?? 30_000;
+    this.ownReactionMs = opts.ownReactionMs ?? 5 * 60_000;
   }
 
   // The groups this account is in, with who is in them (numbers and account ids).
@@ -353,8 +389,8 @@ export class SignalClient {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`signal ${method} timed out after 30s`));
-      }, 30_000);
+        reject(new Error(`signal ${method} timed out after ${this.rpcTimeoutMs / 1000}s`));
+      }, this.rpcTimeoutMs);
       this.pending.set(id, {
         resolve: (v) => (clearTimeout(timer), resolve(v)),
         reject: (e) => (clearTimeout(timer), reject(e)),
@@ -367,7 +403,7 @@ export class SignalClient {
   // message replaces the previous one, so this doubles as a status indicator.
   // Best-effort: a failed reaction is logged, never thrown. In a group, pass its id.
   async react(emoji: string, target: { author: string; timestamp: number }, groupId?: string): Promise<void> {
-    this.ownReactions.set(`${target.timestamp}:${emoji}`, Date.now() + 5 * 60_000);
+    this.ownReactions.set(`${target.timestamp}:${emoji}`, Date.now() + this.ownReactionMs);
     try {
       await this.call("sendReaction", {
         ...(groupId ? { groupId } : this.to()),
@@ -382,7 +418,8 @@ export class SignalClient {
 
   // Sends a message: to our own Note to Self, or (peer mode) to the peer. Returns the sent
   // timestamp (used to ignore our own echo when it syncs back, and to match reactions).
-  async send(text: string, textStyle: string[] = [], quote?: Quote, opts: { attachments?: string[]; groupId?: string } = {}): Promise<number> {
+  async send(text: string, opts: SendOptions = {}): Promise<number> {
+    const { style: textStyle = [], quote } = opts;
     const result = await this.call<{ timestamp: number }>("send", {
       ...(opts.groupId ? { groupId: opts.groupId } : this.to()),
       ...(text ? { message: text } : {}),
