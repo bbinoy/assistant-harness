@@ -107,7 +107,7 @@ export const PARTICIPATION = `Take part in the group like a thoughtful person wo
 Speak when: you are addressed (by name, @mention, or a reply to you); someone asks the group a question you can really help with; someone is clearly continuing a conversation with you, even without tagging you; or a short, welcome quip or help fits right in.
 A quick emoji reaction is often the best way to take part: it costs nobody's attention, so use it freely for thanks, jokes, good news, agreement or congratulations, even when words would be too much.
 Stay silent when: people are talking to each other; the message needs no answer from you; you spoke a moment ago and nobody asked you anything; you would be interrupting or dominating. When unsure, stay silent. Never answer your own earlier answers.
-Pace: normally answer after a short pause (a few seconds). If the notes ask you to slow down or wait, pause longer. Always follow what the notes ask about how and when to take part.`;
+Pace: answer promptly. The typing indicator is already showing while you wait, so a long pause is pointless, and the pause the code allows is only a few seconds. If the notes ask you to slow down, take as long as the limit allows, no more. Always follow what the notes ask about how and when to take part.`;
 
 // Told to the chat model in a private chat and in a group alike: it CAN act later and on a schedule, through notes
 // that the gate (gate.ts) reads. Without this line it assumes it can only speak when someone writes.

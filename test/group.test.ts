@@ -295,7 +295,8 @@ test("groups: unvouched groups get no logging and no answers; the verdict parser
   const r = rig({ vouch: async () => false });
   await r.on(mk({ groupId: gid() }));
   assert.deepEqual([r.sent.length, r.recorded.length], [0, 0]);
-  assert.deepEqual(parseGate({ act: true, delaySeconds: 500, nextCheckMinutes: 5 }), { act: true, task: "task", delaySeconds: 120, nextCheckMinutes: 15 });
+  assert.deepEqual(parseGate({ act: true, delaySeconds: 500, nextCheckMinutes: 5 }), { act: true, task: "task", delaySeconds: settings.gateMaxDelaySeconds, nextCheckMinutes: 15 });
+  assert.equal(settings.gateMaxDelaySeconds, 4); // the default: a pause is for being natural, not slow
   assert.equal(parseGate({ act: "yes" }).act, false);
   assert.equal(parseGate(undefined).act, false);
 });
