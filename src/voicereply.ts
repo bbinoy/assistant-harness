@@ -10,11 +10,17 @@ export function splitVoice(reply: string): { voice?: string; text: string } {
   return m ? { voice: reply.slice(m[0].length).trim(), text: reply.slice(m[0].length).trim() } : { text: reply };
 }
 
+// How the words for a voice message are written. A speech engine reads text literally, so the model writes for the ear:
+// this is left to the model on purpose (no code rewrites the text), and the character of the voice comes from the persona and notes.
+export const SPOKEN_STYLE =
+  "Write the spoken words for the ear, not the eye: short sentences, the way a person talks, with a natural pause (a comma or a full stop) wherever a speaker would breathe, and the warmth and energy of your usual style; spell out everything a person would say differently from how it is written (numbers, dates, times, money, symbols, abbreviations, names of letters, and any emoji or emphasis, which you say in words or leave out), for example \"ten thirty tomorrow morning\", never \"10:30 AM\", and no parentheses, since the voice cannot say them";
+
 // The voice option, added to every prompt that can produce a reply whenever speech is set up (private chat, group
 // messages addressed or not, wake-ups): the model chooses freely, whatever kind of message it answers. The notes
 // can overrule this default ("never use voice", "voice for pep talks").
 export const VOICE_INVITE =
-  "you may answer by voice by starting your reply with [[voice]] and then only the words to say aloud, plain and at most about three minutes spoken (no markdown, emoji, links or lists); good for warm, personal or spoken-style replies such as a pep talk or a joke; keep exact, long or detailed answers (times, figures, links, lists) in text. If the notes say how to use voice (or never to), follow them";
+  "you may answer by voice by starting your reply with [[voice]] and then only the words to say aloud, plain and at most about three minutes spoken (no markdown, emoji, links or lists); good for warm, personal or spoken-style replies such as a pep talk or a joke; keep exact, long or detailed answers (times, figures, links, lists) in text. If the notes say how to use voice (or never to), follow them. " +
+  SPOKEN_STYLE;
 // Added to the words when a reply the model chose to speak had to go out as text, since the model may have announced a voice message.
 export const VOICE_FAILED_NOTE = "(voice didn't work this time, sending text)";
 export const voiceOption = (canSpeak: boolean): string => (canSpeak ? `Voice: ${VOICE_INVITE}.` : "");
