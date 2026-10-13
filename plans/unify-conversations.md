@@ -45,6 +45,10 @@ record → run → parse `[[react]]`/`[[voice]]`/`[[silent]]` → speak/send/thr
 2b. Switch groups to the SDK's built-in memory (same as the owner's chat in `src/agent.ts`):
 - per-conversation `autoMemoryDirectory`; Read/Write/Edit allowed only inside that conversation's notes
   folder (path resolved, symlinks followed; generalise `isNotePath(path, dir)`).
+- FINDING from 2a (passed, `npm run check:isolation`, helper `isInside` in `src/contain.ts`): the SDK auto-allows
+  Write inside `autoMemoryDirectory` WITHOUT calling canUseTool, so the limits below cannot live in canUseTool
+  alone: enforce them in a PreToolUse hook (or check and repair on disk after the run). The SDK also normalises
+  `..` before canUseTool, so rely on `isInside` plus the on-disk checks.
 - note limits in ONE shared check used by both conversations: file name pattern by category, size
   (`MAX_NOTE_CHARS`; for Edit, apply the edit to the current file and check the result), note count
   (`settings.memoryMaxNotes`).
