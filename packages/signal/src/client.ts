@@ -223,11 +223,12 @@ export class SignalClient {
 
   // Tells the person we have read their message (the "seen" check under it). Own-account mode only:
   // in Note to Self there is nobody else to tell. `from` is the message's author (default: the peer);
-  // in a group the receipt goes to whoever wrote it, not to the group. Best effort.
+  // in a group the receipt goes to whoever wrote it, not to the group. Best effort. (sendReceipt takes one recipient
+  // string, not a list like send does.)
   async markRead(timestamp: number, from?: string): Promise<void> {
     if (!this.peer) return;
     try {
-      await this.call("sendReceipt", { recipient: [from || this.peer], targetTimestamp: [timestamp], type: "read" });
+      await this.call("sendReceipt", { recipient: from || this.peer, targetTimestamp: [timestamp], type: "read" });
     } catch (e) {
       console.error("read receipt failed:", (e as Error).message);
     }

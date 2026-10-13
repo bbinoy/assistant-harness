@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
 import { SignalClient } from "../src/client.ts";
@@ -58,11 +58,16 @@ const until = async (f: () => boolean) => {
   assert.ok(f(), "timed out waiting");
 };
 
+// Closed after every test, so a failing assertion cannot leave a server running and hang the runner.
+const open: { close: () => Promise<void> }[] = [];
+afterEach(async () => void (await Promise.all(open.splice(0).map((d) => d.close()))));
+
 async function connected(peer?: typeof PEER, answer?: (r: Req) => unknown) {
   const d = await fake(answer ?? ((r) => (r.method === "send" ? { timestamp: 1234 } : {})));
   const c = new SignalClient("127.0.0.1", d.port, ME, peer);
   await c.connect();
   await until(() => d.connections() > 0); // the server sees the connection a moment after the client does
+  open.push(d);
   return { d, c, done: () => d.close() };
 }
 
@@ -190,5 +195,19 @@ test("client: an incoming reaction reaches the reaction handler", async () => {
   c.onReaction((r) => got.push(r.emoji));
   d.push(receive({ sourceNumber: PEER.number, dataMessage: { timestamp: 7, reaction: { emoji: "👍", targetSentTimestamp: 5, targetAuthorNumber: ME } } }));
   await until(() => got.length === 1);
+  await done();
+});
+
+// signal-cli's sendReceipt takes ONE recipient string (unlike send/sendTyping/sendReaction, which take a list); a list
+// made it fail with "Invalid phone number '[<uuid>]'" for peers known only by account id.
+test("client: a read receipt names a single recipient string (peer, peer by account id, group author)", async () => {
+  const { d, c, done } = await connected(PEER);
+  await c.markRead(10);
+  await c.markRead(11, PEER.aci);
+  await c.markRead(12, "+10000000002");
+  assert.deepEqual(d.requests.map((r) => r.method), ["sendReceipt", "sendReceipt", "sendReceipt"]);
+  assert.deepEqual(d.requests.map((r) => r.params.recipient), [PEER.number, PEER.aci, "+10000000002"]);
+  assert.deepEqual(d.requests.map((r) => r.params.targetTimestamp), [[10], [11], [12]]);
+  assert.equal(d.requests[0]!.params.type, "read");
   await done();
 });
