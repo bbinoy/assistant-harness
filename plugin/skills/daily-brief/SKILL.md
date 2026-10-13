@@ -83,40 +83,47 @@ calendar parts if possible, and do NOT print `ROUTINE_COMPLETE`.
 
 ## Brief format
 
-The brief is delivered by email **and** split by section into separate Signal
-messages, so structure it for both:
+The brief is delivered as an **email**, in full. Signal only gets a short version, built
+by the harness from the first sections: the pep talk (if any) and Focus, plus a line saying
+the full brief is in the email. So those first two sections must stand on their own and read
+well on a phone. The full text is also kept, and the owner can ask the assistant for it in chat.
 
-- Start each section with a `## ` heading (emoji + name). One heading per
-  section, nothing else uses `#`.
+- Start each section with a `## ` heading (emoji + name). One heading per section,
+  nothing else uses `#`.
 - Inside sections use **bold**, `-` bullets and short lines only. No tables.
-- Keep each section short enough to read on a phone.
+- **Focus on today.** Tomorrow gets at most its first meeting and anything that needs doing
+  tonight. Later days are a count or one line, never a list.
 
 Sections, in this order (skip a section if empty, except Focus):
 
-1. `## 🎯 Focus` - the 1-3 things that matter today, hardest-hitting first, one
-   line each. A single must-do is line 1, in bold.
-2. `## 📥 Needs the owner` - action items across email + tasks + meetings, most
-   urgent first, tagged `(draft ready)` / `(prep -> link)`. Omit what is
-   already in Focus. Include the items the heartbeat already alerted him about
-   only if they are still open.
-3. `## 📅 Meetings` - `time - title - who - prep state`, today then tomorrow.
-4. `## ✅ Tasks` - overdue / due today / due this week, names and dates only.
-   One-line count for later ones.
-5. `## ⏳ Waiting on` - one line each; only if non-empty.
-6. `## 📡 Radar` - 3 to 5 concrete bullets from the newsletters skimmed,
-   focused on the topics and regions in the owner's memory (the brief notes in
-   the injected `owner_memory` block): an
-   announcement, launch, funding round, policy change, hire, or an event with
-   date + venue + register-by deadline. Format `- what happened - why it
-   matters to the owner (source)`. Never repeat a bullet from the previous brief.
-   If no topics are remembered, omit the Radar section. Omit it too if nothing
-   concrete turned up.
-7. `## 🧹 Housekeeping` - what changed since the last brief: how many emails
-   the heartbeat archived, and **every archived email that is not a plain newsletter
-   or cold outreach listed on its own line**: `sender - subject (why it was archived)`,
-   using the reason from the digest. The owner scans this list to catch a mistake, so
-   do not abbreviate it away. Newsletters and cold outreach are only counted (newsletter
-   names in one short line). Then tasks +/-, prep pages, calendar events, conflict flags.
+1. `## 💪 Pep talk` - **only if the owner's notes ask for one** (their `brief` notes in your
+   memory block), and then it comes FIRST, in the voice they chose, 2 to 3 lines tied to what
+   is actually on their plate today. Not generic, and lighter when the day is heavy.
+2. `## 🎯 Focus` - the 1-3 things that matter today, hardest-hitting first, one line each.
+   A single must-do is line 1, in bold.
+3. `## 📥 Needs you` - action items across email + tasks + meetings, most urgent first,
+   tagged `(draft ready)` / `(prep -> link)`. Omit what is already in Focus. Include items the
+   heartbeat already alerted them about only if they are still open.
+4. `## 📅 Today` - `time - title - who - prep state` for today. Then at most the first
+   meeting tomorrow and anything that needs prep tonight. Yesterday's meetings only for the
+   follow-up pass (notes to add).
+5. `## ✅ Tasks` - what is overdue (at most five, the oldest or highest priority, with how
+   many days) and what is due today, names only. Then ONE line for everything else ("6 more
+   this week, 8 later"). No lists for later days.
+6. `## ⏳ Waiting on` - one line each; only if non-empty.
+7. `## 📡 Radar` - 3 to 5 concrete bullets from the newsletters skimmed, focused on the topics
+   and regions in the owner's memory (the brief notes in the injected `owner_memory` block): an
+   announcement, launch, funding round, policy change, hire, or an event with date + venue +
+   register-by deadline. Format `- what happened - why it matters to the owner (source)`. Never
+   repeat a bullet from the previous brief. If no topics are remembered, omit the Radar
+   section. Omit it too if nothing concrete turned up.
+8. `## 🧹 Housekeeping` - ONE short paragraph of prose, no bullet list. Say how many emails
+   the heartbeat archived; count plain newsletters and cold outreach without naming them;
+   **name every other archived email inline** in a few words each (for example "the Notion
+   digest, a Digitec delivery notice, the SBB receipt and Phanos's accepted invite"), using the
+   reason from the digest. The owner reads this sentence to catch a mistake, so never skip a
+   name. In the same paragraph, say what you changed (tasks added or moved, prep pages, calendar
+   events, conflicts), or that you archived nothing yourself.
 
 Cut ruthlessly: if the owner does not act on it, it is one line or gone.
 

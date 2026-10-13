@@ -59,3 +59,16 @@ test("splitSections splits on headings and oversize text", () => {
   const long = ("word ".repeat(100) + "\n\n").repeat(6);
   assert.ok(splitSections(long, 1000).every((p) => p.length <= 1000));
 });
+
+test("brief on Signal: pep talk and focus only, then a pointer to the email", async () => {
+  const { signalSummary, BRIEF_FOOTER } = await import("../src/markdown.ts");
+  const brief = "## 💪 Pep talk\n\nBelieve, Ben.\n\n## 🎯 Focus\n\n- **Answer Quark**\n\n## 📥 Needs you\n\n- lots of detail\n\n## 🧹 Housekeeping\n\nArchived 3.";
+  const s = signalSummary(brief);
+  assert.match(s, /^## 💪 Pep talk\n\nBelieve, Ben\.\n\n## 🎯 Focus\n\n- \*\*Answer Quark\*\*\n\n📧 The full brief is in your email/);
+  assert.ok(s.endsWith(BRIEF_FOOTER));
+  assert.doesNotMatch(s, /lots of detail|Archived/);
+  // no pep talk: focus alone
+  assert.doesNotMatch(signalSummary("## 🎯 Focus\n\n- one\n\n## 📥 Needs you\n\n- x"), /Needs you/);
+  // headings missing: the start of the brief, bounded
+  assert.ok(signalSummary("x".repeat(3000)).length < 900);
+});

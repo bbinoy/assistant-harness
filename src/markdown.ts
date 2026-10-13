@@ -145,3 +145,19 @@ export function splitSections(markdown: string, limit = 1800): string[] {
   }
   return out;
 }
+
+// The short version of a brief for Signal: the pep talk (if there is one) and the Focus section,
+// which the brief skill puts first, plus a footer pointing at the email. The full brief stays in
+// the email. Falls back to the start of the brief if those headings are missing.
+export const BRIEF_FOOTER = "📧 The full brief is in your email. Say \"brief\" and I'll send it here.";
+const SIGNAL_FALLBACK_CHARS = 700;
+
+export function signalSummary(markdown: string, footer = BRIEF_FOOTER): string {
+  const sections = splitSections(markdown, Number.MAX_SAFE_INTEGER);
+  const head = (s: string) => s.split("\n", 1)[0] ?? "";
+  const pep = sections.find((s) => /^#{1,3}\s.*(pep|💪)/i.test(head(s)));
+  const focus = sections.find((s) => /^#{1,3}\s.*(focus|🎯)/i.test(head(s)));
+  const picked = [pep, focus].filter((s): s is string => !!s);
+  const body = picked.length ? picked.join("\n\n") : (sections[0] ?? markdown).slice(0, SIGNAL_FALLBACK_CHARS);
+  return `${body}\n\n${footer}`;
+}

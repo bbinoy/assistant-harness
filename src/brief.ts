@@ -134,7 +134,7 @@ async function runOnce(deps: BriefDeps, state: BriefState, now: Date, reason: st
     writeText(LAST_BRIEF, captured!);
     writeJson(STATE, { ...state, attemptDay: today, attempts: attempt, doneDay: today, lastBriefAt: new Date().toISOString() });
     await deps.sendBrief(captured!);
-    console.log(`brief: delivered to Signal (${captured!.length} chars)`);
+    console.log(`brief: delivered (${captured!.length} chars by email, a short version on Signal)`);
   } catch (e) {
     console.error("brief: failed:", (e as Error).message);
     audit("daily_brief", "failed", "brief", { attempt, error: (e as Error).message.slice(0, 200) });

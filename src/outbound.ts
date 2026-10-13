@@ -1,4 +1,4 @@
-import { renderMarkdown, splitSections, toSignalStyles } from "./markdown.ts";
+import { renderMarkdown, signalSummary, splitSections, toSignalStyles } from "./markdown.ts";
 import type { Quote, SignalClient } from "./signal.ts";
 
 const CHUNK_LIMIT = 1800; // keep each Signal message comfortably short
@@ -55,7 +55,13 @@ export function createOutbound(signal: SignalClient) {
 
   const replyPlain = (text: string) => reply(text, { plain: true });
 
-  // One message per section, in order, so a long brief reads as a thread of short messages.
+  // The whole brief, one message per section (not used for the daily brief any more: Signal gets
+  // the short summary above, the full text goes out by email).
+  // The brief itself goes out by email. Signal gets the short version (pep talk, focus, a pointer).
+  async function sendBriefSummary(markdown: string) {
+    await reply(signalSummary(markdown));
+  }
+
   async function sendBrief(markdown: string) {
     for (const section of splitSections(markdown, CHUNK_LIMIT)) {
       await reply(section);
@@ -63,5 +69,5 @@ export function createOutbound(signal: SignalClient) {
     }
   }
 
-  return { reply, replyPlain, sendBrief, isOwnEcho };
+  return { reply, replyPlain, sendBrief, sendBriefSummary, isOwnEcho };
 }

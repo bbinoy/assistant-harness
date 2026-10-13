@@ -8,7 +8,7 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
 ## What it does
 
 - 📥 **Organizes your inbox.** Every 15 minutes it checks for new mail. Newsletters, notifications and cold outreach are archived. Anything that needs *you* arrives as one short message on your phone. Routine requests (like "can we meet next week?") get a reply drafted from your actual calendar, shown on your phone, and sent with one 👍.
-- ☀️ **Sends a brief for the day in the morning.**
+- ☀️ **Sends a brief for the day in the morning**, in full by email and as a short pep talk plus focus on Signal.
   - 🖋️ **Prepares meetings.** For each meeting it pulls the context from your Notion notes and past threads, and drafts the meeting agenda and email answers. 
   - ✅ **Organises your tasks.** It reads your Notion task list, spots what is overdue or due soon, adds tasks from emails, removes tasks that are clearly completed via emails/meeting notes.
   - 📆 **Organises your calendar.** Creates calendar entries from emails and meetings, keeps an eye on conflicts and helps you to resolve them, and makes sure meetings are prepared.
@@ -23,26 +23,35 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
 
 *(All names are fictional, and the Federation has not been consulted.)*
 
-**Stardate 2026.286, 07:00.** The ship's Mac wakes and the heartbeat resumes after its night off. It finds 21 messages that arrived while you slept, archives the 19 that are clearly noise, and runs the daily brief. It lands on Signal as one message per section (and in your inbox):
+**Stardate 2026.286, 07:00.** The ship's Mac wakes and the heartbeat resumes after its night off. It finds 21 messages that arrived while you slept, archives the 19 that are clearly noise, and runs the daily brief. The full brief lands in your inbox. On Signal you get the short version, with the pep talk first:
 
+> **💪 Pep talk**
+> Captain, the red-alert bot is shouting again, but today is three things and you have done harder before breakfast. Answer Starfleet Command before 11:00 and the rest is easy.
+>
 > **🎯 Focus**
 > **Answer Starfleet Command about the nebula-survey budget before 11:00.** They have asked twice and the second message just says "Engage?".
-> - Holodeck maintenance moved to Thursday (again). Calendar updated, nothing to do.
+> - First contact briefing at 14:00, prep page is ready.
+> - Ring the starbase plumber. Again.
 >
+> 📧 The full brief is in your email. Say "brief" and I'll send it here.
+
+The email has the rest, kept to the day ahead:
+
 > **📥 Needs you**
 > - Quark, Quark's Bar & Grill: wants a yes or no on "the latinum pivot" (draft ready)
 > - Chief Engineer: the warp core "has opinions" about the new dilithium supplier, reply owed for 3 days (draft ready)
 > - Federation Tax Authority: form 7B-stroke-6, due Friday (task added)
 >
-> **📅 Meetings**
+> **📅 Today**
 > - 09:30 Senior staff meeting, Bridge (no prep needed)
 > - 14:00 First contact briefing, Vulcan Science Academy, "Is logic enough?" (prep -> link)
 > - 17:30 Holodeck pottery overlaps the Q3 Synergy Brunch with the Borg. Suggest moving the brunch to 11:00 (not changed)
+> - Tomorrow: 08:30 Engineering stand-up
 >
 > **✅ Tasks**
 > - ⚠️ overdue: renew Starfleet commission (4 days)
 > - due today: invoice the Ferengi Dental Cooperative
-> - 6 more later this week
+> - 6 more this week, 8 later
 >
 > **⏳ Waiting on**
 > - The starbase plumber: no reply in 6 days, 3rd follow-up. Want a nudge draft?
@@ -53,7 +62,7 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
 > - AI: a new model can now say "it depends" in 14 languages, Klingon included. Your lawyers are nervous (The Gradient Descent Gazette)
 >
 > **🧹 Housekeeping**
-> Archived 19 overnight: 11 newsletters, 6 notifications (mostly the red-alert bot being dramatic), 2 cold outreach (one very persistent Ferengi). +2 tasks, 1 prep page, 1 conflict flagged.
+> I archived 19 overnight: 13 newsletters and cold outreach (one very persistent Ferengi), plus the red-alert bot's weekly digest, a Replicator Depot delivery notice, the shuttle ticket receipt, Dr. Crusher's accepted calendar invite, and four more status pings from the bot. +2 tasks, 1 prep page, 1 conflict flagged, nothing archived by me.
 
 **10:42.** A new message arrives while you are in a meeting. It is urgent, so you get exactly one alert:
 

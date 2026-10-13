@@ -122,7 +122,7 @@ startHeartbeat({
   handle: handler.enqueue,
   briefDue: isBriefDue,
   onTick: () => {
-    void maybeRunBrief({ approve, sendBrief: out.sendBrief, notify });
+    void maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify });
     void radar();
   },
 });
