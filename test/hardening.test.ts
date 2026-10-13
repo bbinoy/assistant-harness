@@ -21,11 +21,10 @@ test("redact: phone numbers and credentials never reach a log", () => {
   assert.equal(redact("plain text, 12 items"), "plain text, 12 items");
 });
 
-test("handler report: only what it did is 'Handled'; the rest is 'left for you'", async () => {
+test("handler report: only what it did is announced; mail it left alone is silent", async () => {
   const { formatReport } = await import("../src/handler.ts");
-  assert.equal(formatReport("Armon: left for Ben (calendar update, nothing to do)", "Ben"), "👀 Left for you (1):\nArmon: left for Ben (calendar update, nothing to do)");
+  assert.equal(formatReport("Armon: left for Ben (calendar update, nothing to do)", "Ben"), ""); // nothing to say
   assert.equal(formatReport("Riker: drafted a reply offering Tue 15:00", "Ben"), "🤝 Handled 1:\nRiker: drafted a reply offering Tue 15:00");
-  const both = formatReport("Riker: drafted a reply\nQuark: left for Ben (needs a decision)", "Ben");
-  assert.match(both, /🤝 Handled 1:\nRiker[\s\S]*👀 Left for you \(1\):\nQuark/);
-  assert.equal(formatReport("", "Ben"), "🤝 Looked at it, nothing to report.");
+  assert.equal(formatReport("Riker: drafted a reply\nQuark: left for Ben (needs a decision)", "Ben"), "🤝 Handled 1:\nRiker: drafted a reply");
+  assert.equal(formatReport("", "Ben"), "");
 });

@@ -41,16 +41,14 @@ export function handlerPrompt(items: HandleItem[]): string {
 }
 
 // The handler ends with one line per email: "<sender>: <what I did>" or "<sender>: left for <owner>
-// (<why>)". Reported as "Handled" only for what it actually did; the rest is "left for you", so
-// a run that did nothing is never announced as "Handled 1".
+// (<why>)". Only what it actually did is reported. Mail it decided not to act on is not a
+// notification: it stays in the inbox and appears in the daily brief. Returns "" when there is
+// nothing to say.
 export function formatReport(text: string, owner: string): string {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  const left = lines.filter((l) => new RegExp(`left for ${owner}\\b`, "i").test(l));
-  const done = lines.filter((l) => !left.includes(l));
-  const parts: string[] = [];
-  if (done.length) parts.push(`🤝 Handled ${done.length}:\n${done.join("\n")}`);
-  if (left.length) parts.push(`👀 Left for you (${left.length}):\n${left.join("\n")}`);
-  return (parts.join("\n\n") || `🤝 Looked at it, nothing to report.`).slice(0, 1500);
+  const left = new RegExp(`left for ${owner}\\b`, "i");
+  const done = lines.filter((l) => !left.test(l));
+  return done.length ? `🤝 Handled ${done.length}:\n${done.join("\n")}`.slice(0, 1500) : "";
 }
 
 export function createHandler(deps: { approve: Approve; notify: (text: string) => Promise<void>; propose?: (draftIds: readonly number[]) => Promise<number> }) {
@@ -72,7 +70,8 @@ export function createHandler(deps: { approve: Approve; notify: (text: string) =
           const drafts = draftCollector();
           const { text, costUsd } = await runHandlerTurn(handlerPrompt(batch), deps.approve, drafts.onToolSuccess);
           audit("mail_handler", "done", "handler", { count: batch.length, costUsd });
-          await deps.notify(formatReport(text, OWNER));
+          const report = formatReport(text, OWNER);
+          if (report) await deps.notify(report);
           if (drafts.ids.length > 0) await deps.propose?.(drafts.ids); // show each draft: a 👍 sends it
         } catch (e) {
           console.error("handler failed:", (e as Error).message);
