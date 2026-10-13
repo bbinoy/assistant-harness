@@ -114,6 +114,8 @@ export function loadSettings(env: Env) {
     ttsSpeed: num(env, "TTS_SPEED", 0.95, 0.5, 2),
     // Group chats (own-account mode, src/group.ts): it takes part in any group the owner is in, speaking only
     // when @mentioned or replied to, at most this many times an hour per group.
+    groupParticipation: oneOf(env, "GROUP_PARTICIPATION", "auto", ["auto", "tagged"] as const), // auto: the assistant judges every message; tagged: only when @mentioned or replied to
+    groupDebounceSeconds: num(env, "GROUP_DEBOUNCE_SECONDS", 4, 0, 60), // wait for a burst of messages to end before judging
     groupRepliesPerHour: num(env, "GROUP_REPLIES_PER_HOUR", 12, 1, 200),
     signalAttachmentsDir: `${env.HOME ?? ""}/.local/share/signal-cli/attachments`,
 

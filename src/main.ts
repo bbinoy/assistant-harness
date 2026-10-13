@@ -1,18 +1,19 @@
+import { errorNotice } from "./errors.ts";
 import { rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { withQuoteContext, shouldThread } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_INVITE } from "./voicereply.ts";
-import { ask, setDraftReader, AuthError, RateLimitError, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
+import { ask, setDraftReader, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createDreamer } from "./dream.ts";
-import { groupName, groupTurn, ownerInGroup } from "./group.ts";
+import { createGroupBrain, groupName, ownerInGroup } from "./group.ts";
 import { createGroupDreamer } from "./groupdream.ts";
-import { groupDir, recentGroupLines, recordGroup } from "./groupstore.ts";
+import { groupDir, groupLogFile, recentGroupLines, recordGroup } from "./groupstore.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
@@ -80,29 +81,25 @@ async function hear(m: IncomingMessage) {
   await route({ ...m, text: heard, audio: undefined, voice: true });
 }
 
-// A message in a group chat (src/group.ts): in any group the owner is a member of. Everything said there goes into
-// that group's own history; the assistant answers only when @mentioned or replied to, with no access to
-// anything private.
+// Group chats (src/group.ts): in any group the owner is a member of. Everything said or reacted there goes
+// into that group's own history; the brain decides when the assistant speaks. No access to anything private.
 const isOwnerAccount = (who: { number?: string; uuid?: string }) => who.number === config.ownerNumber || (!!config.ownerAci && who.uuid === config.ownerAci);
-async function inGroup(m: IncomingMessage) {
-  const groupId = m.group!.id;
-  const isOwner = m.from === config.ownerNumber || (!!config.ownerAci && m.fromUuid === config.ownerAci);
-  const vouch = () => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount);
-  if (m.addressedToMe && (await vouch())) void signal.typing(false, groupId);
-  const answer = await groupTurn(
-    { groupId, text: m.text, timestamp: m.timestamp, isOwner, fromName: m.fromName, addressedToMe: !!m.addressedToMe },
-    {
-      vouch,
-      record: (kind, ts, text) => (groupDir(groupId, groupName(groupId)), recordGroup(groupId, kind, ts, text)),
-      recent: () => recentGroupLines(groupId),
-    },
-  );
-  if (m.addressedToMe) void signal.typing(true, groupId);
-  if (answer) {
-    const ts = await out.replyGroup(groupId, answer, { text: m.text.slice(0, 200), author: m.from || m.fromUuid || "", timestamp: m.timestamp });
-    recordGroup(groupId, "chat", ts, answer);
-  }
-}
+const groupBrain = createGroupBrain({
+  vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
+  record: (groupId, kind, ts, text) => (groupDir(groupId, groupName(groupId)), recordGroup(groupId, kind, ts, text)),
+  recent: recentGroupLines,
+  send: async (groupId, text, quote) => void recordGroup(groupId, "chat", await out.replyGroup(groupId, text, quote), text),
+  react: (_groupId, emoji, target) => void signal.react(emoji, target),
+  typing: (groupId, on) => void signal.typing(!on, groupId),
+});
+const fromOwner = (w: { from: string; fromUuid?: string }) => w.from === config.ownerNumber || (!!config.ownerAci && w.fromUuid === config.ownerAci);
+const inGroup = (m: IncomingMessage) =>
+  groupBrain({ groupId: m.group!.id, text: m.text, timestamp: m.timestamp, isOwner: fromOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author: m.from || m.fromUuid });
+const reactedInGroup = (r: IncomingReaction) => {
+  const groupId = r.group!.id;
+  const on = findMessage(r.targetTimestamp, groupLogFile(groupId))?.text ?? "an older message";
+  return groupBrain({ groupId, text: "", timestamp: Date.now(), isOwner: fromOwner(r), fromName: r.fromName, addressedToMe: false, reaction: { emoji: r.emoji, on } });
+};
 
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal
 // (propose.ts), and the approval of any send shows the draft read back from here (agent.ts).
@@ -112,6 +109,7 @@ setDraftReader(proposer.read);
 
 // A 👍 / 👎 on the pending "Approve?" message answers it.
 signal.onReaction((r) => {
+  if (r.group) return void (!r.isRemove && !signal.isOwnReaction(r) ? reactedInGroup(r).catch((e) => console.error("group error:", e.message)) : undefined);
   if (!acceptOwner(r, config.ownerNumber) || r.isRemove) return;
   if (signal.isOwnReaction(r)) return; // our own status icons come back as reactions
   const outcome = approvals.answerReaction(r.emoji, r.targetTimestamp);
@@ -213,13 +211,7 @@ async function chat(m: IncomingMessage) {
   } catch (e) {
     console.error("agent error:", (e as Error).message);
     status("⚠️", target);
-    await out.reply(
-      e instanceof AuthError
-        ? "My login expired. On the Mac, run `claude auth login`, then message me again."
-        : e instanceof RateLimitError
-          ? "I've hit my usage limit for now, so I can't think until it resets. Mail triage keeps running. Try me again a bit later."
-          : "Something broke on my end. Check the logs, I'm not telling you what it was.",
-    );
+    await out.reply(errorNotice(e));
   } finally {
     clearInterval(typing);
     void signal.typing(true);

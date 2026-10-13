@@ -1,3 +1,4 @@
+import { AuthError, failure, RateLimitError } from "./errors.ts";
 import { sendApprovalText, type DraftView } from "./proposals.ts";
 import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
 import { basename } from "node:path";
@@ -21,10 +22,7 @@ import { readJson, readText, writeJson } from "./state.ts";
 
 // Thrown when the credential is rejected, so the caller can tell the owner how to fix it
 // instead of showing a generic failure.
-export class AuthError extends Error {}
-
-// Thrown when the plan's usage limit is hit, so the owner is told that instead of "something broke".
-export class RateLimitError extends Error {}
+export { AuthError, RateLimitError };
 
 // Pulls id-like fields (id, conversationId, messageId...) out of tool input for the audit log.
 export function idsOf(input: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -287,9 +285,7 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
     if (message.subtype === "success" && !message.is_error) {
       return { text: message.result, costUsd: message.total_cost_usd - previousCost, structured: message.structured_output };
     }
-    if (lastError === "authentication_failed") throw new AuthError("authentication_failed");
-    if (lastError === "rate_limit") throw new RateLimitError("rate_limit");
-    throw new Error(`agent turn ended with ${message.subtype}${lastError ? ` (${lastError})` : ""}`);
+    throw failure(lastError, message.subtype);
   }
   throw new Error("agent stream ended without a result");
 }

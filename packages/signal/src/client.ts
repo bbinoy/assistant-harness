@@ -64,6 +64,9 @@ export interface IncomingReaction {
   isRemove: boolean;
   direct: boolean; // as IncomingMessage.direct
   targetAuthor?: string; // who wrote the message that was reacted to
+  group?: { id: string }; // set when the reaction was made in a group
+  fromUuid?: string;
+  fromName?: string;
 }
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
@@ -120,6 +123,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
         isRemove: Boolean(r.isRemove),
         direct,
         targetAuthor: r.targetAuthorNumber ?? r.targetAuthor ?? undefined,
+        ...(group ? { group, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}),
       },
     };
   }

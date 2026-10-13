@@ -1,11 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groupName, groupPrompt, groupTurn, mayReply, ownerInGroup, speaker } from "../src/group.ts";
-import { OWNER as OWNER_NAME } from "../src/settings.ts";
+import { groupName, createGroupBrain, groupPrompt, mayReply, parseVerdict, ownerInGroup, speaker } from "../src/group.ts";
 import { classify } from "../src/policy.ts";
 import { settings } from "../src/settings.ts";
+import { RateLimitError } from "../src/errors.ts";
 
-const BOT = "00000000-0000-4000-8000-000000000001"; // the assistant's account id
 const OWNER = "+10000000000";
 const GID = "Zm9vYmFyZm9vYmFyZm9vYmFy";
 
@@ -27,33 +26,117 @@ test("groups: both the context and the message are fenced as data", () => {
   assert.match(p, /<message>[\s\S]*@Ted help[\s\S]*<\/message>/);
 });
 
-const mk = (over: object = {}) => ({ groupId: GID, text: "@Ted hi", timestamp: 1, isOwner: false, addressedToMe: true, ...over });
-const deps = (over: object = {}) => ({ vouch: async () => true, record: () => {}, recent: () => [] as string[], run: async () => "Howdy!", ...over });
+const mk = (over: object = {}) => ({ groupId: GID, text: "@Ted hi", timestamp: 1, isOwner: false, addressedToMe: true, author: "+15555550105", ...over });
+type Sent = { text: string; quoted: boolean };
+const rig = (over: object = {}) => {
+  const sent: Sent[] = [];
+  const reacted: string[] = [];
+  const recorded: string[] = [];
+  const waits: number[] = [];
+  const brain = {
+    vouch: async () => true,
+    record: (_g: string, _k: string, _ts: number, text: string) => void recorded.push(text),
+    recent: () => [] as string[],
+    send: async (_g: string, text: string, q?: unknown) => void sent.push({ text, quoted: !!q }),
+    react: (_g: string, e: string) => void reacted.push(e),
+    run: async () => "Howdy!",
+    gate: async () => ({ respond: true, delaySeconds: 0 }),
+    wait: async (ms: number) => void waits.push(ms),
+    ...over,
+  };
+  return { on: createGroupBrain(brain), sent, reacted, recorded, waits };
+};
+let ids = 0;
+const gid = () => `grp-${++ids}-0123456789abcdef`; // fresh state (reply cap, error notices) per test
 
-test("groups: only where the owner is a member, only when addressed, and a cap per hour", async () => {
-  assert.equal(await groupTurn(mk(), deps({ vouch: async () => false })), undefined); // the owner is not in this group
-  assert.equal(await groupTurn(mk({ addressedToMe: false }), deps()), undefined); // not addressed
-  assert.equal(await groupTurn(mk(), deps()), "Howdy!");
+test("groups: a message addressed to the assistant is answered without asking the gate, threaded under it", async () => {
+  const r = rig({ gate: async () => assert.fail("gate must not run") });
+  await r.on(mk({ groupId: gid() }));
+  assert.deepEqual(r.sent, [{ text: "Howdy!", quoted: true }]);
+});
+
+test("groups: every message is judged; the gate decides, and a delay is waited out", async () => {
+  const g = gid();
+  const no = rig({ gate: async () => ({ respond: false, delaySeconds: 0 }), run: async () => assert.fail("no run") });
+  await no.on(mk({ groupId: g, addressedToMe: false, text: "so who is bringing the ball?" }));
+  assert.equal(no.sent.length, 0);
+  assert.equal(no.recorded.length, 1); // still remembered
+  const yes = rig({ gate: async () => ({ respond: true, delaySeconds: 30 }) });
+  await yes.on(mk({ groupId: gid(), addressedToMe: false }));
+  assert.deepEqual(yes.sent, [{ text: "Howdy!", quoted: false }]);
+  assert.ok(yes.waits.includes(30_000));
+  const quiet = rig({ run: async () => "[[silent]]" });
+  await quiet.on(mk({ groupId: gid(), addressedToMe: false }));
+  assert.equal(quiet.sent.length, 0);
+});
+
+test("groups: a newer message supersedes the evaluation of the older one", async () => {
+  const g = gid();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let first = true;
+  const r = rig({ wait: async () => { if (first) { first = false; await gate; } } });
+  const a = r.on(mk({ groupId: g, addressedToMe: false, timestamp: 1 }));
+  await r.on(mk({ groupId: g, addressedToMe: false, timestamp: 2 }));
+  release();
+  await a;
+  assert.equal(r.sent.length, 1); // one answer for the burst
+});
+
+test("groups: tagged-only mode answers only when addressed", async () => {
+  const was = settings.groupParticipation;
+  (settings as { groupParticipation: string }).groupParticipation = "tagged";
+  try {
+    const r = rig({ gate: async () => assert.fail("no gate") });
+    await r.on(mk({ groupId: gid(), addressedToMe: false }));
+    assert.equal(r.sent.length, 0);
+    await r.on(mk({ groupId: gid() }));
+    assert.equal(r.sent.length, 1);
+  } finally {
+    (settings as { groupParticipation: string }).groupParticipation = was;
+  }
+});
+
+test("groups: a failure while someone waits is explained (not repeated); an unaddressed failure stays silent", async () => {
+  const g = gid();
+  const boom = async () => { throw new RateLimitError("limit"); };
+  const r = rig({ run: boom });
+  await r.on(mk({ groupId: g }));
+  await r.on(mk({ groupId: g, timestamp: 2 }));
+  assert.equal(r.sent.length, 1);
+  assert.match(r.sent[0]!.text, /usage limit/);
+  const q = rig({ run: boom });
+  await q.on(mk({ groupId: gid(), addressedToMe: false }));
+  assert.equal(q.sent.length, 0);
+  const broken = rig({ gate: async () => { throw new Error("x"); } });
+  await broken.on(mk({ groupId: gid(), addressedToMe: false }));
+  assert.equal(broken.sent.length, 0);
+});
+
+test("groups: reactions are understood and can be made", async () => {
+  const r = rig({ gate: async () => ({ respond: false, delaySeconds: 0 }) });
+  await r.on(mk({ groupId: gid(), addressedToMe: false, fromName: "Eve", text: "", reaction: { emoji: "👍", on: "Ted: Net Gains FC" } }));
+  assert.equal(r.recorded[0], "Eve (a member) reacted 👍 to: Ted: Net Gains FC");
+  const m = rig({ run: async () => "[[react: 😂]]" });
+  await m.on(mk({ groupId: gid() }));
+  assert.deepEqual(m.reacted, ["😂"]);
+  assert.equal(m.sent.length, 0);
+});
+
+test("groups: unvouched groups get no logging and no answers; the verdict parser fails closed", async () => {
+  const r = rig({ vouch: async () => false });
+  await r.on(mk({ groupId: gid() }));
+  assert.deepEqual([r.sent.length, r.recorded.length], [0, 0]);
+  assert.deepEqual(parseVerdict({ respond: true, delaySeconds: 500 }), { respond: true, delaySeconds: 120 });
+  assert.deepEqual(parseVerdict({ respond: "yes" }), { respond: false, delaySeconds: 0 });
+  assert.deepEqual(parseVerdict(undefined), { respond: false, delaySeconds: 0 });
+});
+
+test("groups: at most N replies per hour", () => {
   const t = Date.now();
   for (let i = 0; i < settings.groupRepliesPerHour; i++) mayReply("another-group-id-1234567890", t);
   assert.equal(mayReply("another-group-id-1234567890", t), false);
   assert.equal(mayReply("another-group-id-1234567890", t + 3600_001), true);
-});
-
-test("groups: everything said in a vouched group is recorded, addressed or not; nothing from a group that is not vouched", async () => {
-  const seen: string[] = [];
-  const record = (_k: string, _ts: number, text: string) => void seen.push(text);
-  await groupTurn(mk({ text: "just chatting, not to Ted", addressedToMe: false, fromName: "Eve" }), deps({ record }));
-  await groupTurn(mk({ text: "@Ted what's a good team name?", fromName: "Eve" }), deps({ record, run: async () => "Net Gains FC" }));
-  await groupTurn(mk({ text: "owner here", isOwner: true, addressedToMe: false }), deps({ record }));
-  await groupTurn(mk({ text: "from a group I am not in" }), deps({ record, vouch: async () => false }));
-  assert.deepEqual(seen, ["Eve (a member): just chatting, not to Ted", "Eve (a member): @Ted what's a good team name?", "Ben (the owner): owner here"].map((x) => x.replace("Ben", OWNER_NAME)));
-});
-
-test("groups: the run is told the recent history from before the message", async () => {
-  let prompt = "";
-  await groupTurn(mk({ fromName: "Eve" }), deps({ recent: () => ["[09:00] Zed (a member): earlier line"], run: async (p: string) => ((prompt = p), "ok") }));
-  assert.match(prompt, /earlier line/);
 });
 
 test("groups: membership comes from the member list, is remembered, and fails closed", async () => {
