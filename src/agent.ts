@@ -22,6 +22,7 @@ import { splitReaction } from "./reaction.ts";
 import { OWNER, settings } from "./settings.ts";
 import { planSession, type ChatSession } from "./session.ts";
 import { readJson, readText, writeJson } from "./state.ts";
+import { SpareSlot } from "./warmslot.ts";
 
 // Thrown when the credential is rejected, so the caller can tell the owner how to fix it
 // instead of showing a generic failure.
@@ -354,8 +355,7 @@ export async function runAgent(prompt: string, approve: Approve, opts: RunOption
 
 // A group turn: the group's own resumed session, memory (its notes folder) and tools. `build` makes the prompt
 // once it is known whether the session resumes: a resumed one is told only what it has not seen (group.ts).
-// No warm process: unlike the owner's chat a group is bursty and many, and a warm Claude Code process per
-// group would cost memory for nothing. (The owner's chat keeps one, below.)
+// Groups are bursty and many, so there is no warm process per group: one is kept for the group that spoke last (below).
 export const groupRunOptions = (conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, systemPrompt: string): RunOptions => ({
   source: PROFILES.group.source,
   systemPrompt,
@@ -366,47 +366,56 @@ export const groupRunOptions = (conv: Pick<Conversation, "notesDir" | "sessionFi
   maxBudgetUsd: PROFILES.group.maxBudgetUsd,
 });
 
-export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void): Promise<AgentReply> {
+export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}): Promise<AgentReply> {
   const r = chatResume(true, conv.sessionFile, "group");
   const { prompt, seenAt, pictures } = build(r.resume ? r.seenAt : undefined);
   const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
-  return consume(query({ prompt: userInput(prompt, pictures), options: buildOptions(async () => ({ approved: false }), o, r.resume) }), o, r.previousCost);
+  // The group's own warm process, if it is the one kept and nothing it was built from has changed (same group, session, prompt, notes index).
+  const warm = conv.groupId ? await groupSpare.take(conv.groupId, spareKey(conv.groupId, o, r))?.catch((e: Error) => console.error("group: warm process unavailable, starting normally:", e.message)) : undefined;
+  if (warm) return consume(warm.query(userInput(prompt, pictures)), o, r.previousCost);
+  return consume((io.query ?? query)({ prompt: userInput(prompt, pictures), options: buildOptions(DENY_ALL, o, r.resume) }), o, r.previousCost);
 }
 
-// --- a warm process for the next chat message ---
-// Only for the owner's chat: at most one warm process exists, and groups never have one.
-// Starting Claude Code (process, config, skills, connectors) takes ~3s before the model is
-// even asked. After each reply we start the next chat process in the background, so the
-// next message only waits for the model. It is used only if nothing it was built from has
-// changed (session, prompt, memory index), and only while fresh; otherwise a normal start.
+// --- warm processes for the next message ---
+// Starting Claude Code (process, config, skills, connectors) takes ~3s before the model is even asked. After a reply the
+// next process is started in the background, so the next message only waits for the model. It is used only if nothing it
+// was built from has changed (session, prompt, memory index), and only while fresh; otherwise a normal start.
+// At most two exist (a SpareSlot holds one each): the owner's chat, and the group that spoke last. A group's is built from
+// that group's own options only (its notes folder, session, memory server, no connectors) and is handed to nobody else.
 const SPARE_MAX_AGE_MS = 30 * 60_000;
-let spare: { key: string; at: number; warm: Promise<WarmQuery> } | undefined;
+const spare = new SpareSlot<WarmQuery>({ maxAgeMs: SPARE_MAX_AGE_MS });
+const groupSpare = new SpareSlot<WarmQuery>({ maxAgeMs: SPARE_MAX_AGE_MS, idleMs: () => settings.groupWarmIdleMinutes * 60_000 });
+const DENY_ALL: Approve = async () => ({ approved: false }); // a group run never asks the owner for anything
 
-const memoryIndex = () => {
+const memoryIndex = (dir: string) => {
   try {
-    return readFileSync(`${NOTES_DIR}/MEMORY.md`, "utf8");
+    return readFileSync(`${dir}/MEMORY.md`, "utf8");
   } catch {
     return "";
   }
 };
-const chatKey = (o: RunOptions, r: Resume) => JSON.stringify([r.resume ?? "", o.systemPrompt, memoryIndex()]);
-
-function discardSpare() {
-  const s = spare;
-  spare = undefined;
-  s?.warm.then((w) => w.close()).catch(() => {});
-}
+const spareKey = (id: string, o: RunOptions, r: Resume) => JSON.stringify([id, r.resume ?? "", o.systemPrompt, o.memory?.dir ?? "", memoryIndex(o.memory?.dir ?? NOTES_DIR)]);
 
 export function prepareChat(approve: Approve, notify: (text: string) => Promise<void>): void {
-  discardSpare();
   const o = chatOptions(notify);
   const r = chatResume(false);
   const warm = startup({ options: buildOptions(approve, o, r.resume) });
-  warm.catch((e) => {
-    console.error("chat warm-up failed:", (e as Error).message);
-    if (spare?.warm === warm) spare = undefined;
-  });
-  spare = { key: chatKey(o, r), at: Date.now(), warm };
+  warm.catch((e) => console.error("chat warm-up failed:", (e as Error).message));
+  spare.put("owner", spareKey("owner", o, r), warm); // replaces (and closes) the previous one
+}
+
+// Keep ONE warm process for the group that spoke last, replacing another group's. Called when a message arrives for a
+// group that may be answered (not if it already holds a fresh one), and after each of its turns (`force`: the session moved on).
+// Nothing happens with GROUP_WARM=off.
+export function prepareGroupChat(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: () => string, opts: { force?: boolean; start?: typeof startup } = {}): void {
+  const id = conv.groupId;
+  if (!settings.groupWarm || !id) return;
+  if (!opts.force && groupSpare.has(id)) return void groupSpare.touch(id); // active group, already warm: keep it so
+  const o = groupRunOptions(conv, groupSystem({ style: style() }));
+  const r = chatResume(false, conv.sessionFile, "group");
+  const warm = (opts.start ?? startup)({ options: buildOptions(DENY_ALL, o, r.resume) });
+  warm.catch((e) => console.error("group warm-up failed:", (e as Error).message));
+  groupSpare.put(id, spareKey(id, o, r), warm);
 }
 
 const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
@@ -423,16 +432,10 @@ export async function ask(prompt: string, approve: Approve, notify: (text: strin
   chatOwnerMessage = ownerMessage ?? prompt;
   const o = { ...chatOptions(notify), onFirstOutput: hooks?.firstOutput };
   const r = chatResume(true);
-  const s = spare;
-  spare = undefined; // a warm process serves one query
-  if (s && s.key === chatKey(o, r) && Date.now() - s.at < SPARE_MAX_AGE_MS) {
-    // Fall back only if the warm process never came up. Once the turn has started, an error
-    // is the turn's error: running it again could repeat what it already did.
-    const warm = await s.warm.catch((e: Error) => console.error("chat: warm process unavailable, starting normally:", e.message));
-    if (warm) return consume(warm.query(userInput(prompt, pictures)), o, r.previousCost);
-  } else {
-    s?.warm.then((w) => w.close()).catch(() => {});
-  }
+  // A warm process serves one query; one that no longer fits is closed. Fall back only if it never came up: once the turn
+  // has started, an error is the turn's error, and running it again could repeat what it already did.
+  const warm = await spare.take("owner", spareKey("owner", o, r))?.catch((e: Error) => console.error("chat: warm process unavailable, starting normally:", e.message));
+  if (warm) return consume(warm.query(userInput(prompt, pictures)), o, r.previousCost);
   return consume(query({ prompt: userInput(prompt, pictures), options: buildOptions(approve, o, r.resume) }), o, r.previousCost);
 }
 

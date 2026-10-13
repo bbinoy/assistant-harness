@@ -1,7 +1,7 @@
 import { clockLine } from "./brief.ts";
 import { budgetSpent } from "./budget.ts";
 import { fence } from "./fence.ts";
-import { runGroupTurn } from "./agent.ts";
+import { prepareGroupChat, runGroupTurn } from "./agent.ts";
 import { askGate, recordWake, styleLines, type Gate } from "./gate.ts";
 import { groupContext } from "./groupstore.ts";
 import { isPaused } from "./pause.ts";
@@ -110,6 +110,9 @@ export interface Brain {
   context?: typeof groupContext; // what the run is shown (default: the group's log)
   run?: Runner;
   gate?: Gate;
+  // Keeps a warm model process ready for this group (agent.ts prepareGroupChat). Default: the real one, unless a test supplies its
+  // own runner (a warm process only pairs with the real one).
+  warm?: (conv: Conversation, afterTurn: boolean) => void;
 }
 
 // The group brain: feed it every message (conversation.ts has checked the group, sent the read receipt and
@@ -123,7 +126,8 @@ export const STICKY_MS = 30 * 60_000;
 export function createGroupBrain(brain: Brain) {
   const { pipeline } = brain;
   type Asked = { line: string; quote: Quote; incoming?: Quote; voice: boolean; picture?: Picture; at: number };
-  const state = new Map<string, { addressed?: Asked; lastSpoke?: number }>();
+  const state = new Map<string, { addressed?: Asked; lastSpoke?: number; running?: boolean }>();
+  const warm = brain.warm ?? (brain.run ? undefined : (conv: Conversation, afterTurn: boolean) => prepareGroupChat(conv, () => styleLines(new Date()), { force: afterTurn }));
 
   return async function onMessage(m: GroupMessage, now = new Date()): Promise<void> {
     const conv = group(m.groupId);
@@ -134,6 +138,9 @@ export function createGroupBrain(brain: Brain) {
     if (!direct && settings.groupParticipation === "tagged") return;
     const st = state.get(m.groupId) ?? {};
     state.set(m.groupId, st);
+    // A group worth answering just got a message: make sure its warm process is the kept one. Not while its own turn runs
+    // (the session is about to change; the end of that turn prepares it), nor when nothing will be answered.
+    if (!st.running && !isPaused(now) && !budgetSpent()) warm?.(conv, false);
     if (direct) st.addressed = { line, quote: { text: m.text.slice(0, 200), author: m.author ?? "", timestamp: m.timestamp }, incoming: m.quote, voice: !!m.voice, picture: m.picture, at: now.getTime() }; // sticky until answered, or until it is too old to answer (STICKY_MS)
     // Still waiting for an answer to a direct address? (It lapses after STICKY_MS: answering hours later would be odd.)
     const pending = () => {
@@ -195,14 +202,18 @@ export function createGroupBrain(brain: Brain) {
           return { prompt: groupPrompt(now, lines, addressed, !!since, hint, pipeline.canSpeak(), pictures.length), seenAt, pictures };
         };
         // Like a private chat, it may answer with an emoji reaction (on the message it is answering), with or without words.
-        const res = await pipeline.runTurn(conv, {
-          run: async (hooks) => ({ text: await (brain.run ?? realRunner)(build, { conv, now, firstOutput: hooks.firstOutput }) }),
-          timing: batch.timing,
-          // The reaction and status icons go on the message that addressed us, not on a later one that was answered with it.
-          target: asked?.quote.author ? { author: asked.quote.author, timestamp: asked.quote.timestamp } : last.author ? { author: last.author, timestamp: last.timestamp } : undefined,
-          threadUnder: asked?.quote,
-          announce: !!asked,
-        });
+        st.running = true;
+        const res = await pipeline
+          .runTurn(conv, {
+            run: async (hooks) => ({ text: await (brain.run ?? realRunner)(build, { conv, now, firstOutput: hooks.firstOutput }) }),
+            timing: batch.timing,
+            // The reaction and status icons go on the message that addressed us, not on a later one that was answered with it.
+            target: asked?.quote.author ? { author: asked.quote.author, timestamp: asked.quote.timestamp } : last.author ? { author: last.author, timestamp: last.timestamp } : undefined,
+            threadUnder: asked?.quote,
+            announce: !!asked,
+          })
+          .finally(() => (st.running = false));
+        warm?.(conv, true); // the session moved on: the next turn of this group (or the one that spoke last) starts warm
         if (!res.error) st.addressed = undefined;
         if (res.noticed) st.addressed = undefined;
         if (res.spoke) st.lastSpoke = Date.now();
