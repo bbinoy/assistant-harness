@@ -87,8 +87,9 @@ const pipeline: Pipeline = createPipeline({
   vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
   isOwner: fromOwner,
   admitGroup: (_conv, m) => groupBrain(m),
-  compact: async (conv) => void (conv.kind === "owner" && (await compactChatIfNeeded())), // after the reply is out; the next message waits for it
-  afterTurn: (conv) => void (conv.kind === "owner" && prepareChat(approve, say)), // warm up the process for the next message
+  compact: (conv) => compactChatIfNeeded(conv.sessionFile, conv.source), // every conversation, after the reply is out; the next message waits for it
+  // Warm process: one, for the owner's chat. Groups have none (bursty, many; a cold start per group turn is the price).
+  afterTurn: (conv) => void (conv.kind === "owner" && prepareChat(approve, say)),
 });
 const groupBrain = createGroupBrain({ pipeline, recent: recentGroupLines });
 

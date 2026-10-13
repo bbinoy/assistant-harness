@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
+import { isInside } from "./contain.ts";
 import { fence } from "./fence.ts";
 import { localDay } from "./pause.ts";
 import { settings } from "./settings.ts";
@@ -29,11 +30,11 @@ export function ensureNotesDir(): void {
   mkdirSync(NOTES_DIR, { recursive: true, mode: 0o700 });
 }
 
-// True only for a path inside the notes folder (".." resolved away first).
-export const isNotePath = (path: unknown): path is string =>
-  typeof path === "string" && path !== "" && resolve(path).startsWith(NOTES_DIR + sep);
+// True only for a path inside a notes folder (the owner's by default; a group passes its own): ".." resolved
+// and symlinks followed first (contain.ts). This is the one gate on what the file tools may write.
+export const isNotePath = (path: unknown, dir: string = NOTES_DIR): path is string => isInside(path, dir);
 
-export const isIndex = (path: string) => resolve(path) === join(NOTES_DIR, "MEMORY.md");
+export const isIndex = (path: string, dir: string = NOTES_DIR) => resolve(path) === join(dir, "MEMORY.md");
 
 export interface Note {
   file: string;

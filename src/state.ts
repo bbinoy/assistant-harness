@@ -1,5 +1,6 @@
 import { appendFileSync, chmodSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { isInside } from "./contain.ts";
 import { settings } from "./settings.ts";
 
 // Everything the agent keeps lives in small files under the data root, in three owner-only
@@ -16,7 +17,10 @@ import { settings } from "./settings.ts";
 // A typo or a ".." must fail loudly, not write outside the three folders.
 const REL = /^(state|logs|memory)\/(?!\.)[\w.-]+$/;
 
+// A group keeps its session pointer in its own folder (memory/groups/<key>/session.json): an absolute path is
+// accepted when it is strictly inside the data root (".." and symlinks resolved), nowhere else.
 export function dataPath(rel: string): string {
+  if (isAbsolute(rel) && isInside(rel, settings.dataDir)) return rel;
   if (!REL.test(rel)) throw new Error(`state: "${rel}" is not a path like "state/seen.json"`);
   return join(settings.dataDir, rel);
 }

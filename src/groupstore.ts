@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { noteContent, type Scope } from "./dream.ts";
+import type { Scope } from "./dream.ts";
 import { compactIfNeeded, messagesSince, recordMessage, type Kind, type Sent } from "./messages.ts";
 import { matchLines } from "./logsearch.ts";
-import { forgetNote, MAX_NOTE_CHARS, parseNote, readNotes, type Note } from "./notes.ts";
+import { MAX_NOTE_CHARS, readNotes, type Note } from "./notes.ts";
 import { settings } from "./settings.ts";
 import { readText } from "./state.ts";
 import { summarizeWithHaiku } from "./summarize.ts";
@@ -15,6 +15,7 @@ import { summarizeWithHaiku } from "./summarize.ts";
 //   memory/groups/<key>/notes/    the group's notes, one fact per file
 //   memory/groups/<key>/backup/   snapshots of those notes made by the group's dream
 //   memory/groups/<key>/meta.json the group's id and name
+//   memory/groups/<key>/session.json the group's resumed SDK session (like state/session.json for the owner)
 //   logs/group-<key>.jsonl        everything written in the group and the assistant's replies, size-bounded
 // The owner's chat can read all of it (read-only); nothing flows the other way.
 
@@ -40,7 +41,7 @@ export function groupDir(groupId: string, name?: string): string {
 
 export const groupScope = (groupId: string): Scope => {
   const dir = groupDir(groupId);
-  return { notesDir: join(dir, "notes"), backupsDir: join(dir, "backup"), categories: GROUP_CATEGORIES, index: false, maxNotes: settings.memoryMaxNotes };
+  return { notesDir: join(dir, "notes"), backupsDir: join(dir, "backup"), categories: GROUP_CATEGORIES, index: true, maxNotes: settings.memoryMaxNotes };
 };
 
 export interface KnownGroup {
@@ -72,13 +73,21 @@ export function recordGroup(groupId: string, kind: Kind, ts: number, text: strin
 
 export const groupHistorySince = (groupId: string, sinceIso?: string): Sent[] => messagesSince(sinceIso, groupLogFile(groupId));
 
-// The last few lines of context before a new message, oldest first.
-export function recentGroupLines(groupId: string, n = 25): string[] {
-  return groupHistorySince(groupId)
-    .filter((m) => m.kind === "member" || m.kind === "chat")
-    .slice(-n)
-    .map((m) => `[${new Date(m.at).toTimeString().slice(0, 5)}] ${m.kind === "chat" ? `${settings.assistant}: ` : ""}${m.text.replace(/\n+/g, " / ").slice(0, 600)}`);
+const MAX_UNSEEN = 60;
+const lineOf = (m: Sent) => `[${new Date(m.at).toTimeString().slice(0, 5)}] ${m.kind === "chat" ? `${settings.assistant}: ` : ""}${m.text.replace(/\n+/g, " / ").slice(0, 600)}`;
+
+// The lines a run should be shown, oldest first. A fresh session gets the last n lines. A resumed one already
+// holds everything up to `since` (and the assistant's own replies), so it gets only what members wrote after
+// that: the cheaper way for messages nobody answered to reach the model, prepended to the next turn instead of
+// a model call each. seenAt is the newest line in the log now, stored with the session once the run is made.
+export function groupContext(groupId: string, since?: string, n = 25): { lines: string[]; seenAt?: string } {
+  const all = groupHistorySince(groupId).filter((m) => m.kind === "member" || m.kind === "chat");
+  const picked = since ? all.filter((m) => m.kind === "member" && m.at > since).slice(-MAX_UNSEEN) : all.slice(-n);
+  return { lines: picked.map(lineOf), seenAt: all.at(-1)?.at ?? since };
 }
+
+// The last few lines of context before a new message, oldest first.
+export const recentGroupLines = (groupId: string, n = 25): string[] => groupContext(groupId, undefined, n).lines;
 
 // Search the group's whole log (the oldest part is one summary line). Words must all appear.
 export function searchGroupHistory(groupId: string, args: { query?: string; sinceHours?: number; limit?: number }): string {
@@ -90,27 +99,12 @@ export function searchGroupHistory(groupId: string, args: { query?: string; sinc
 
 // ---- notes ----
 
-const NOTE_FILE = new RegExp(`^(${GROUP_CATEGORIES.join("|")})-[a-z0-9][a-z0-9-]{0,50}\\.md$`);
+// The group's notes are the SDK's auto-memory, written with the file tools inside this folder (policy.ts).
+// There is no write-time check on them: containment is the only gate. What is read back is bounded where it
+// is read (groupNotesBlock, the dream).
+export const groupNotesDir = (groupId: string): string => join(GROUPS_DIR, groupKey(groupId), "notes");
 
 export const groupNotes = (groupId: string, now = new Date()): Note[] => readNotes(now, join(groupDir(groupId), "notes"));
-
-// A member asked the assistant to remember something. The same limits as the owner's notes: a valid
-// file name, a note no longer than MAX_NOTE_CHARS, at most MEMORY_MAX_NOTES notes.
-export function saveGroupNote(groupId: string, n: { file: string; description: string; text: string; expires?: string }, now = new Date()): { ok: true; replaced: boolean } | { ok: false; error: string } {
-  const text = n.text.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "").trim();
-  const description = n.description.replace(/\s+/g, " ").trim().slice(0, 160);
-  if (!NOTE_FILE.test(n.file)) return { ok: false, error: `name the file <category>-<short-slug>.md, with a category of ${GROUP_CATEGORIES.join(", ")} (lower case, dashes)` };
-  if (!text || !description) return { ok: false, error: "give a description and the text to remember" };
-  if (text.length > MAX_NOTE_CHARS) return { ok: false, error: `keep a note under ${MAX_NOTE_CHARS} characters; split it or shorten it` };
-  if (n.expires !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(n.expires)) return { ok: false, error: "expires must be a date, YYYY-MM-DD" };
-  const dir = join(groupDir(groupId), "notes");
-  const replaced = existsSync(join(dir, n.file));
-  if (!replaced && readdirSync(dir).filter((f) => f.endsWith(".md")).length >= settings.memoryMaxNotes) return { ok: false, error: "memory for this group is full: forget something first" };
-  writeFileSync(join(dir, n.file), noteContent(n.file, description, text, n.expires, now), { mode: 0o600 });
-  return { ok: true, replaced };
-}
-
-export const forgetGroupNote = (groupId: string, file: string) => forgetNote(file, join(groupDir(groupId), "notes"));
 
 // Pure: the group's notes as fenced data for the group's prompt.
 export function groupNotesBlock(notes: readonly Note[]): string {
@@ -118,4 +112,3 @@ export function groupNotesBlock(notes: readonly Note[]): string {
   return lines.length ? lines.join("\n") : "";
 }
 
-export { parseNote };

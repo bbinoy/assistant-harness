@@ -4,6 +4,7 @@ import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
 import { basename } from "node:path";
 import { isJudgeable, judgeAction, mayAutoApprove, type Verdict } from "./autojudge.ts";
 import { readFileSync } from "node:fs";
+import type { Conversation } from "./conversation.ts";
 import { query, startup, type CanUseTool, type HookCallbackMatcher, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { Decision } from "./approvals.ts";
 import { audit, type Source } from "./audit.ts";
@@ -12,7 +13,7 @@ import { describeCall } from "./format.ts";
 import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
 import { isIndex, isNotePath, LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, parseNote, readNotes } from "./notes.ts";
 import { createMemoryServer } from "./memory-tools.ts";
-import { briefSystem, chatSystem, handlerSystem, radarSystem } from "./persona.ts";
+import { briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem } from "./persona.ts";
 import { classify, hiddenTools, isReadTool } from "./policy.ts";
 import { recentNotices } from "./messages.ts";
 import { splitReaction } from "./reaction.ts";
@@ -44,9 +45,10 @@ export type Approve = (
   signal: AbortSignal,
 ) => Promise<Decision>;
 
-// The chat conversation (Note to Self) persists across restarts, with the hygiene rules in
-// session.ts (fresh after idle, compacted when large). total_cost_usd is cumulative across a
-// resumed session, so we keep the running total and report each turn's delta.
+// Every conversation (the owner's chat, each group) persists across restarts, with the hygiene rules in
+// session.ts (fresh after idle, compacted when large). total_cost_usd is cumulative across a resumed
+// session, so we keep the running total and report each turn's delta. The owner's session pointer is
+// state/session.json; a group's is session.json in its own folder (conversation.ts).
 const SESSION_FILE = "state/session.json";
 
 // Note changes made during the current chat turn. They are announced ONCE, as one short
@@ -85,8 +87,11 @@ export const setAutoApprovedNotice = (fn: (text: string) => Promise<void>) => vo
 export interface RunOptions {
   source: Source; // audit tag: who is acting
   systemPrompt: string;
-  resumeChatSession: boolean; // chat: continue + save the conversation; brief: fresh every run
-  memoryNotify?: (text: string) => Promise<void>; // chat only: turns on the SDK's auto-memory (notes in memory/notes/) and announces every change
+  sessionFile?: string; // chat and groups: continue + save the conversation here; brief and the rest: fresh every run
+  // Turns on the SDK's auto-memory: notes in `dir`, the only place the file tools may write (policy.ts).
+  // `notify` announces every change on the phone: the owner's chat only; a group's reply says what was saved.
+  memory?: { dir: string; groupId?: string; notify?: (text: string) => Promise<void> };
+  seenAt?: string; // groups: stored with the session, see ChatSession.seenAt
   maxTurns: number;
   maxBudgetUsd: number; // hard per-run spend cap
   outputFormat?: Options["outputFormat"]; // constrained JSON output
@@ -108,20 +113,21 @@ const OFFERED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "
 interface Resume {
   resume?: string; // session to continue (chat only)
   previousCost: number; // total_cost_usd is cumulative across a resumed session
+  seenAt?: string;
 }
 
-// Chat continues its saved session unless session.ts says to start fresh.
-function chatResume(announce: boolean): Resume {
-  const saved = readJson<ChatSession>(SESSION_FILE, { costUsd: 0 });
+// A conversation continues its saved session unless session.ts says to start fresh.
+function chatResume(announce: boolean, file: string = SESSION_FILE, source: Source = "chat"): Resume {
+  const saved = readJson<ChatSession>(file, { costUsd: 0 });
   // A fresh session starts its cost total at zero, so the previous total must not be subtracted.
   if (planSession(saved, new Date(), chatPlanOpts()) === "fresh") {
     if (announce && saved.sessionId) {
-      console.log(`chat: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
-      audit("chat_session", "idle-reset", "chat");
+      console.log(`${source}: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
+      audit("chat_session", "idle-reset", source);
     }
     return { previousCost: 0 };
   }
-  return { resume: saved.sessionId, previousCost: saved.costUsd };
+  return { resume: saved.sessionId, previousCost: saved.costUsd, seenAt: saved.seenAt };
 }
 
 const SEND_DRAFT = "mcp__mailbird__send_message_now";
@@ -129,10 +135,10 @@ let draftReader: ((messageId: number) => Promise<DraftView | undefined>) | undef
 // Set by main.ts: reads a draft back from Mailbird, for the approval of a send.
 export const setDraftReader = (fn: typeof draftReader) => void (draftReader = fn);
 
-function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
+export function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
   // Permissions as code: policy.ts decides allow / ask / deny; "ask" goes to the owner's phone.
   const canUseTool: CanUseTool = async (tool, input, { signal }) => {
-    const verdict = classify(tool, input, opts.source);
+    const verdict = classify(tool, input, opts.source, opts.memory?.dir);
     if (verdict === "allow") {
       // Reads log tool + decision only. Writes also log the ids they touch (ids, never
       // content), so "what did it archive?" can always be answered from the audit log.
@@ -187,7 +193,7 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
   // After a successful tool call: announce a note change on the phone (chat), and report the
   // call to whoever asked (the brief captures what it sent).
   const afterTool = async (tool: string, input: Record<string, unknown>, response?: unknown) => {
-    if (opts.memoryNotify && (tool === "Write" || tool === "Edit") && isNotePath(input.file_path) && !isIndex(input.file_path)) {
+    if (opts.memory?.notify && (tool === "Write" || tool === "Edit") && isNotePath(input.file_path) && !isIndex(input.file_path)) {
       const file = basename(input.file_path);
       const written = String((tool === "Write" ? input.content : input.new_string) ?? "");
       const body = parseNote(file, written)?.text ?? written.trim();
@@ -213,6 +219,8 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
     ],
   };
 
+  // A group run: no connectors, no user settings, no skills; its memory server is the only MCP server.
+  const isolated = opts.source === "group";
   return {
     model: settings.model,
     outputFormat: opts.outputFormat,
@@ -227,25 +235,26 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
     // instructions live (with a custom prompt the model says "noted" and saves nothing);
     // our persona and rules are appended. The unattended runs keep a custom prompt and
     // get their notes injected as data (notes.ts).
-    systemPrompt: opts.memoryNotify
+    systemPrompt: opts.memory
       ? { type: "preset", preset: "claude_code", append: opts.systemPrompt, snapshot: false }
       : { type: "custom", prompt: opts.systemPrompt, snapshot: false },
-    settings: opts.memoryNotify ? { autoMemoryEnabled: true, autoMemoryDirectory: NOTES_DIR } : { autoMemoryEnabled: false },
-    mcpServers: opts.memoryNotify ? { memory: createMemoryServer((line) => memoryChanges.push(line)) } : undefined,
+    settings: opts.memory ? { autoMemoryEnabled: true, autoMemoryDirectory: opts.memory.dir } : { autoMemoryEnabled: false },
+    mcpServers: opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? (line) => memoryChanges.push(line) : () => {} }) } : undefined,
+    strictMcpConfig: isolated || undefined, // nothing private is even loaded
     resume,
     // Built-ins: Skill, and for chat Read / Write / Edit (confined to the notes folder by
     // policy.ts) and WebSearch / WebFetch (search freely, open a page only after approval). No Bash. Everything else the agent can do is an MCP tool (Mailbird,
     // Notion, Calendar...), gated by canUseTool.
-    tools: opts.memoryNotify ? ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"] : ["Skill"],
+    tools: isolated ? ["Read", "Write", "Edit", "WebSearch"] : opts.memory ? ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"] : ["Skill"],
     // "user" loads user-scope MCP servers (Mailbird) and CLAUDE.md; the skills offered are
     // limited to the bundled ones below.
     // Not "project": there is no project here.
-    settingSources: ["user"],
+    settingSources: isolated ? [] : ["user"],
     // The bundled skills, loaded from the repo; only these are offered to the model (the owner's
     // other skills would cost context on every call and are none of its business).
-    plugins: [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
-    skills: OFFERED_SKILLS,
-    disallowedTools: hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
+    plugins: isolated ? undefined : [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
+    skills: isolated ? undefined : OFFERED_SKILLS,
+    disallowedTools: isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
     canUseTool,
     hooks,
     maxTurns: opts.maxTurns,
@@ -259,7 +268,7 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
   let lastError: string | undefined;
   let lastContext: number | undefined; // the last model call of the main loop shows how big the context is
   for await (const message of stream) {
-    if (message.type === "system" && message.subtype === "init") {
+    if (message.type === "system" && message.subtype === "init" && opts.source !== "group") { // a group run has no connectors: its tool list says nothing about them
       recordToolsSeen(message.tools);
       recordConnectors(message.tools, message.mcp_servers);
     }
@@ -268,18 +277,18 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
       if (!message.parent_tool_use_id) lastContext = contextTokens(message.message.usage);
     }
     if (message.type !== "result") continue;
-    if (opts.memoryNotify && memoryChanges.length) {
+    if (opts.memory?.notify && memoryChanges.length) {
       const lines = memoryChanges.splice(0);
       // The assistant's own reply says what it saved or forgot, and that is the one message. Only if
       // it answered with no words (a bare reaction, or nothing) is a short notice sent instead, so a
       // change never goes unmentioned.
       if (needsMemoryNotice(message.subtype === "success" ? message.result : "")) {
-        void opts.memoryNotify(`🧠 Memory\n${lines.join("\n")}\nWrong? Tell me to undo it.`).catch(() => {});
+        void opts.memory.notify(`🧠 Memory\n${lines.join("\n")}\nWrong? Tell me to undo it.`).catch(() => {});
       }
     }
-    if (opts.resumeChatSession) {
-      const next: ChatSession = { sessionId: message.session_id, costUsd: message.total_cost_usd, lastTurnAt: new Date().toISOString(), lastContextTokens: lastContext };
-      writeJson(SESSION_FILE, next);
+    if (opts.sessionFile) {
+      const next: ChatSession = { sessionId: message.session_id, costUsd: message.total_cost_usd, lastTurnAt: new Date().toISOString(), lastContextTokens: lastContext, ...(opts.seenAt ? { seenAt: opts.seenAt } : {}) };
+      writeJson(opts.sessionFile, next);
     }
     recordCost(message.total_cost_usd - previousCost); // failures cost money too
     if (message.subtype === "success" && !message.is_error) {
@@ -291,11 +300,32 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
 }
 
 export async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Promise<AgentReply> {
-  const { resume, previousCost } = opts.resumeChatSession ? chatResume(true) : { resume: undefined, previousCost: 0 };
+  const { resume, previousCost } = opts.sessionFile ? chatResume(true, opts.sessionFile) : { resume: undefined, previousCost: 0 };
   return consume(query({ prompt, options: buildOptions(approve, opts, resume) }), opts, previousCost);
 }
 
+// A group turn: the group's own resumed session, memory (its notes folder) and tools. `build` makes the prompt
+// once it is known whether the session resumes: a resumed one is told only what it has not seen (group.ts).
+// No warm process: unlike the owner's chat a group is bursty and many, and a warm Claude Code process per
+// group would cost memory for nothing. (The owner's chat keeps one, below.)
+export const groupRunOptions = (conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, systemPrompt: string): RunOptions => ({
+  source: "group",
+  systemPrompt,
+  sessionFile: conv.sessionFile,
+  memory: { dir: conv.notesDir, groupId: conv.groupId },
+  maxTurns: 8,
+  maxBudgetUsd: 0.5,
+});
+
+export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: string, build: (since?: string) => { prompt: string; seenAt?: string }): Promise<AgentReply> {
+  const r = chatResume(true, conv.sessionFile, "group");
+  const { prompt, seenAt } = build(r.resume ? r.seenAt : undefined);
+  const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt };
+  return consume(query({ prompt, options: buildOptions(async () => ({ approved: false }), o, r.resume) }), o, r.previousCost);
+}
+
 // --- a warm process for the next chat message ---
+// Only for the owner's chat: at most one warm process exists, and groups never have one.
 // Starting Claude Code (process, config, skills, connectors) takes ~3s before the model is
 // even asked. After each reply we start the next chat process in the background, so the
 // next message only waits for the model. It is used only if nothing it was built from has
@@ -333,8 +363,8 @@ export function prepareChat(approve: Approve, notify: (text: string) => Promise<
 const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
   source: "chat",
   systemPrompt: chatSystem(readText(LAST_BRIEF), new Date(), missingSetup(readNotes(), down()), down(), recentNotices()),
-  resumeChatSession: true,
-  memoryNotify: notify,
+  sessionFile: SESSION_FILE,
+  memory: { dir: NOTES_DIR, notify },
   maxTurns: 40,
   maxBudgetUsd: 2.0, // a cold prompt cache alone can cost most of a dollar
 });
@@ -366,7 +396,6 @@ export function runBriefTurn(
   return runAgent(prompt, approve, {
     source: "brief",
     systemPrompt: briefSystem(memoryFor(["triage", "people", "scheduling", "context", "brief", "style", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
-    resumeChatSession: false,
     maxTurns: 120,
     maxBudgetUsd: 5.0,
     onToolSuccess,
@@ -378,7 +407,6 @@ export function runRadarTurn(prompt: string, approve: Approve, outputFormat: Opt
   return runAgent(prompt, approve, {
     source: "radar",
     systemPrompt: radarSystem(memoryFor(["people", "scheduling", "context", "style", "brief", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
-    resumeChatSession: false,
     maxTurns: 30,
     maxBudgetUsd: 1.0,
     outputFormat,
@@ -390,21 +418,20 @@ export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?:
   return runAgent(prompt, approve, {
     source: "handler",
     systemPrompt: handlerSystem(memoryFor(["people", "scheduling", "context", "style", "setup", "voice"]), missingSetup(readNotes(), down()), down()),
-    resumeChatSession: false,
     maxTurns: 40,
     maxBudgetUsd: 2.0,
     onToolSuccess,
   });
 }
 
-// After a chat turn has been answered: if its context grew past CHAT_COMPACT_TOKENS, compact the
-// session in place by sending the SDK's own /compact command on the resumed session. Called
-// from the serial chat queue, so the next message waits. Never throws: chat must not break.
-export async function compactChatIfNeeded(): Promise<void> {
+// After a turn has been answered (any conversation, `file` is its session): if its context grew past
+// CHAT_COMPACT_TOKENS, compact the session in place by sending the SDK's own /compact command on the resumed
+// session. Called from the conversation's serial queue, so the next message waits. Never throws.
+export async function compactChatIfNeeded(file: string = SESSION_FILE, source: Source = "chat"): Promise<void> {
   try {
-    const saved = readJson<ChatSession>(SESSION_FILE, { costUsd: 0 });
+    const saved = readJson<ChatSession>(file, { costUsd: 0 });
     if (planSession(saved, new Date(), chatPlanOpts()) !== "resume then compact") return;
-    console.log(`chat: context is ${saved.lastContextTokens} tokens, compacting`);
+    console.log(`${source}: context is ${saved.lastContextTokens} tokens, compacting`);
     let boundary: { pre_tokens: number; post_tokens?: number } | undefined;
     for await (const message of query({
       prompt: "/compact",
@@ -423,15 +450,15 @@ export async function compactChatIfNeeded(): Promise<void> {
       recordCost(message.total_cost_usd - saved.costUsd);
       if (!boundary) throw new Error(`/compact produced no compact_boundary (${message.subtype})`);
       const { compactFailedAt: _cleared, ...rest } = saved;
-      writeJson(SESSION_FILE, { ...rest, sessionId: message.session_id, costUsd: message.total_cost_usd, lastContextTokens: boundary.post_tokens });
-      console.log(`chat: compacted ${boundary.pre_tokens} -> ${boundary.post_tokens ?? "?"} tokens`);
-      audit("chat_session", "compacted", "chat");
+      writeJson(file, { ...rest, sessionId: message.session_id, costUsd: message.total_cost_usd, lastContextTokens: boundary.post_tokens });
+      console.log(`${source}: compacted ${boundary.pre_tokens} -> ${boundary.post_tokens ?? "?"} tokens`);
+      audit("chat_session", "compacted", source);
       return;
     }
     throw new Error("compaction stream ended without a result");
   } catch (e) {
-    console.error("chat: compaction failed:", (e as Error).message);
-    audit("chat_session", "compact-failed", "chat");
-    writeJson(SESSION_FILE, { ...readJson<ChatSession>(SESSION_FILE, { costUsd: 0 }), compactFailedAt: new Date().toISOString() });
+    console.error(`${source}: compaction failed:`, (e as Error).message);
+    audit("chat_session", "compact-failed", source);
+    writeJson(file, { ...readJson<ChatSession>(file, { costUsd: 0 }), compactFailedAt: new Date().toISOString() });
   }
 }

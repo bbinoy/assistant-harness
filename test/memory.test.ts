@@ -65,6 +65,8 @@ test("notes: only paths inside the notes folder count", () => {
   assert.ok(!isNotePath(`${NOTES_DIR}-evil/x.md`));
   assert.ok(!isNotePath(undefined) && !isNotePath(""));
   assert.ok(isIndex(join(NOTES_DIR, "MEMORY.md")) && !isIndex(join(NOTES_DIR, "style-x.md")));
+  assert.ok(isNotePath(join(NOTES_DIR, "any name at all.txt")), "containment is the only gate: no name pattern");
+  assert.ok(isNotePath("/a/group/notes/x.md", "/a/group/notes") && !isNotePath(join(NOTES_DIR, "x.md"), "/a/group/notes")); // the same check, another folder
 });
 
 test("notes: forget removes the file and its index line, and nothing else", () => {

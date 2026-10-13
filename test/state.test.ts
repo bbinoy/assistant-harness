@@ -49,6 +49,11 @@ test("state: all three folders are 700 and their files 600; paths outside them a
   for (const d of [settings.stateDir, settings.logsDir, settings.memoryDir]) assert.equal(statSync(d).mode & 0o777, 0o700, d);
   assert.equal(statSync(dataPath("memory/t.md")).mode & 0o777, 0o600);
   assert.equal(readText("logs/t.log"), "xy\n");
+  // a group's session pointer lives in its own folder: an absolute path is fine inside the data root, never outside
+  writeJson(join(settings.memoryDir, "groups", "k", "session.json"), { a: 1 });
+  assert.deepEqual(readJson(join(settings.memoryDir, "groups", "k", "session.json"), {}), { a: 1 });
+  assert.throws(() => dataPath(join(settings.dataDir, "..", "elsewhere.json")), /not a path/);
+  assert.throws(() => dataPath("/etc/passwd"), /not a path/);
   for (const bad of ["seen.json", "other/x.json", "state/../x", "state/.hidden", "state/a/b"]) assert.throws(() => dataPath(bad), /not a path/, bad);
 });
 

@@ -1,4 +1,4 @@
-// The chat conversation (Note to Self) persists across restarts, but not forever:
+// A conversation (the owner's chat, or a group) persists across restarts, but not forever:
 //   - after a long idle gap it starts fresh (continuity comes from memory/notes/ and
 //     memory/last-brief.md, which the chat loads every turn), and
 //   - after a turn whose context grew large it is compacted early, because the SDK only
@@ -11,6 +11,7 @@ export interface ChatSession {
   lastTurnAt?: string; // ISO time the last chat turn finished
   lastContextTokens?: number; // context size of that turn (input + cached input of its last model call)
   compactFailedAt?: string; // ISO time of the last failed compaction: back off instead of retrying every turn
+  seenAt?: string; // groups: the newest log line the session has been shown (group lines nobody answered are prepended after it)
 }
 
 const COMPACT_BACKOFF_MS = 3600_000;

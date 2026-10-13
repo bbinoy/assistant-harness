@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { audit } from "./audit.ts";
 import { errorNotice, groupErrorNotice } from "./errors.ts";
-import { GROUPS_DIR, groupKey, groupLogFile } from "./groupstore.ts";
+import { GROUPS_DIR, groupKey, groupLogFile, groupNotesDir } from "./groupstore.ts";
 import type { GroupMessage } from "./group.ts";
 import { FILE as OWNER_LOG, findMessage, type Kind } from "./messages.ts";
 import { NOTES_DIR } from "./notes.ts";
@@ -24,7 +24,8 @@ export interface Conversation {
   readonly groupId?: string; // the Signal target; unset: the owner's chat
   readonly source: "chat" | "group"; // policy source (src/policy.ts)
   readonly logFile: string; // this conversation's message log
-  readonly notesDir: string; // this conversation's notes
+  readonly notesDir: string; // this conversation's notes (the SDK auto-memory folder; the only place its file tools may write)
+  readonly sessionFile: string; // the resumed SDK session (session.ts): idle reset and compaction work on it
   readonly gate: boolean; // is the participation gate in front of it
   readonly approvals: boolean; // can an approval be asked and answered here (the owner only)
   readonly threadAlways: boolean; // an answer to someone who addressed us is always threaded under it
@@ -38,6 +39,7 @@ const OWNER_CONVERSATION: Conversation = Object.freeze({
   source: "chat",
   logFile: OWNER_LOG,
   notesDir: NOTES_DIR,
+  sessionFile: "state/session.json",
   gate: false,
   approvals: true,
   threadAlways: false,
@@ -55,7 +57,8 @@ export const group = (groupId: string): Conversation =>
     groupId,
     source: "group",
     logFile: groupLogFile(groupId),
-    notesDir: join(GROUPS_DIR, groupKey(groupId), "notes"),
+    notesDir: groupNotesDir(groupId),
+    sessionFile: join(GROUPS_DIR, groupKey(groupId), "session.json"),
     gate: true,
     approvals: false,
     threadAlways: true, // a group scrolls: say whom you answer
@@ -102,8 +105,8 @@ export interface PipelineDeps {
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group?
   isOwner: (who: { from: string; fromUuid?: string }) => boolean;
   admitGroup: (conv: Conversation, m: GroupMessage) => Promise<void>; // the participation gate (group.ts)
-  compact?: (conv: Conversation) => Promise<void>; // after an answer is out; the next message waits for it
-  afterTurn?: (conv: Conversation) => void; // e.g. warm up the process for the next message
+  compact?: (conv: Conversation) => Promise<void>; // after an answer is out; the next message waits for it. Every conversation
+  afterTurn?: (conv: Conversation) => void; // after any turn, success or not (the owner: warm up the process for the next message)
   now?: () => number;
 }
 

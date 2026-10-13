@@ -1,6 +1,7 @@
 import type { Source } from "./audit.ts";
 import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
+import { isInside } from "./contain.ts";
 import { isNotePath } from "./notes.ts";
 import { settings } from "./settings.ts";
 
@@ -56,7 +57,7 @@ const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
   // The radar reads calendar and mail, and may only write a meeting-prep page in Notion; anything
   // else it tries asks the owner on the phone like the handler's.
   radar: new Set(["mcp__claude_ai_Notion__notion-create-pages", "mcp__claude_ai_Notion__notion-update-page"]),
-  group: new Set(), // group chats get no tools but web search (group.ts)
+  group: new Set(), // group chats get web search and their own notes only (classify)
   dream: new Set(), // the dream has no tools at all: it answers with JSON and code applies it (dream.ts)
 };
 
@@ -82,7 +83,6 @@ export function isReadableData(path: unknown, dirs: readonly string[] = [setting
 }
 
 const FORGET_NOTE = "mcp__memory__forget_note";
-const GROUP_TOOLS = new Set(["mcp__group__remember_note", "mcp__group__forget_note", "mcp__group__search_history"]);
 const SEARCH_LOGS = "mcp__memory__search_logs";
 const UNDO_DREAM = "mcp__memory__undo_dream";
 
@@ -117,10 +117,15 @@ export function hiddenTools(
 const WEB_SEARCH = "WebSearch";
 const WEB_FETCH = "WebFetch";
 
-export function classify(tool: string, input: Record<string, unknown>, source: Source): Verdict {
-  // A group chat holds other people: no private data, no pages. Web search and the tools for that one
-  // group's own notes and history (group.ts), nothing else.
-  if (source === "group") return tool === WEB_SEARCH || GROUP_TOOLS.has(tool) ? "allow" : "deny";
+// groupNotesDir: for a group run, THE one folder its file tools may touch (its own notes). Without it a group
+// gets no file access at all.
+export function classify(tool: string, input: Record<string, unknown>, source: Source, groupNotesDir?: string): Verdict {
+  // A group chat holds other people: no private data, no pages. Web search, the file tools inside that one
+  // group's own notes folder, and the memory tools (scoped to that group by the server, memory-tools.ts).
+  if (source === "group") {
+    if (NOTE_FILE_TOOLS.has(tool)) return groupNotesDir && isInside(input.file_path, groupNotesDir) ? "allow" : "deny";
+    return tool === WEB_SEARCH || tool === FORGET_NOTE || tool === SEARCH_LOGS || tool === UNDO_DREAM ? "allow" : "deny";
+  }
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
   if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && (isNotePath(input.file_path) || (tool === "Read" && isReadableData(input.file_path))) ? "allow" : "deny";
