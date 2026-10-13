@@ -56,13 +56,15 @@ export function createOutbound(signal: SignalClient, record?: (kind: MessageKind
     return last;
   }
 
-  // A message in a group chat. Not logged anywhere: nothing from groups is kept (group.ts).
-  async function replyGroup(groupId: string, text: string, quote?: Quote): Promise<void> {
+  // A message in a group chat. The caller logs the exchange (main.ts); returns the timestamp of the last part.
+  async function replyGroup(groupId: string, text: string, quote?: Quote): Promise<number> {
     let q = quote;
+    let last = 0;
     for (const part of chunk(text)) {
-      await signal.send(part, [], q, { groupId });
+      last = await signal.send(part, [], q, { groupId });
       q = undefined;
     }
+    return last;
   }
 
   // A voice message (an audio file). What was said is logged as text, so the log stays searchable.

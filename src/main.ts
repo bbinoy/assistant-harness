@@ -10,7 +10,7 @@ import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createDreamer } from "./dream.ts";
-import { groupTurn, ownerInGroup } from "./group.ts";
+import { groupName, groupTurn, ownerInGroup } from "./group.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
@@ -20,7 +20,7 @@ import { Mailbird } from "./mailbird.ts";
 import { createProposer } from "./propose.ts";
 import { createRadar } from "./radar.ts";
 import { createOutbound } from "./outbound.ts";
-import { settings } from "./settings.ts";
+import { ASSISTANT, settings } from "./settings.ts";
 import { openLog } from "./state.ts";
 import { ensureSignalDaemon, MAX_SPOKEN_CHARS, SignalClient, synthesize, transcribe, ttsReady, voiceReady, type IncomingMessage, type IncomingReaction } from "@ted-personal-assistant/signal";
 
@@ -86,9 +86,15 @@ async function inGroup(m: IncomingMessage) {
   const isOwner = m.from === config.ownerNumber || (!!config.ownerAci && m.fromUuid === config.ownerAci);
   const vouch = () => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount);
   if (m.addressedToMe && (await vouch())) void signal.typing(false, groupId);
-  const reply = await groupTurn({ groupId, text: m.text, isOwner, fromName: m.fromName, addressedToMe: !!m.addressedToMe }, vouch);
+  // Only the exchange with the assistant is logged (so the owner can ask about it in private), never the chatter.
+  const tag = () => `[group "${groupName(groupId)}"]`;
+  const record = (l: { who: string; text: string; isOwner: boolean }) => recordMessage(l.isOwner ? "owner" : "group", m.timestamp, `${tag()} ${l.who}: ${l.text}`);
+  const reply = await groupTurn({ groupId, text: m.text, isOwner, fromName: m.fromName, addressedToMe: !!m.addressedToMe }, vouch, undefined, new Date(), record);
   if (m.addressedToMe) void signal.typing(true, groupId);
-  if (reply) await out.replyGroup(groupId, reply, { text: m.text.slice(0, 200), author: m.from || m.fromUuid || "", timestamp: m.timestamp });
+  if (reply) {
+    const ts = await out.replyGroup(groupId, reply, { text: m.text.slice(0, 200), author: m.from || m.fromUuid || "", timestamp: m.timestamp });
+    recordMessage("group", ts, `${tag()} ${ASSISTANT}: ${reply}`);
+  }
 }
 
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal

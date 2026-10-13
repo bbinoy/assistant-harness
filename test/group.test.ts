@@ -61,6 +61,17 @@ test("groups: only where the owner is a member, only when addressed, and a cap p
   assert.equal(mayReply("another-group-id-1234567890", t + 3600_001), true);
 });
 
+test("groups: only the exchange with the assistant is recorded, once the group is vouched for", async () => {
+  const seen: string[] = [];
+  const rec = (l: { who: string; text: string; isOwner: boolean }) => void seen.push(`${l.isOwner ? "owner" : "other"}:${l.text}`);
+  const mk = (over: object) => ({ groupId: GID, text: "@Ted hi", isOwner: false, addressedToMe: true, ...over });
+  await groupTurn(mk({ text: "just chatting, not to Ted", addressedToMe: false }), async () => true, async () => "x", new Date(), rec);
+  await groupTurn(mk({ text: "@Ted from a group I am not in" }), async () => false, async () => "x", new Date(), rec);
+  await groupTurn(mk({ text: "@Ted what's a good team name?" }), async () => true, async () => "Net Gains FC", new Date(), rec);
+  await groupTurn(mk({ text: "@Ted and one from the owner", isOwner: true }), async () => true, async () => "Sure", new Date(), rec);
+  assert.deepEqual(seen, ["other:@Ted what's a good team name?", "owner:@Ted and one from the owner"]);
+});
+
 test("groups: membership comes from the member list, is remembered, and fails closed", async () => {
   const isOwner = (w: { number?: string; uuid?: string }) => w.number === OWNER;
   let calls = 0;

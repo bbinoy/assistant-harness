@@ -202,6 +202,7 @@ export function conversationLines(messages: readonly Sent[]): { lines: string[];
   for (const m of messages) {
     if (m.kind === "owner") { lines.push(`[${hhmm(m.at)}] ${OWNER}: ${m.text.replace(/\n+/g, " / ")}`); owner.push(m.text); }
     else if (m.kind === "reaction") { lines.push(`[${hhmm(m.at)}] ${OWNER} reacted ${m.text.replace(/\n+/g, " / ")}`); } // shows what was reacted to, which may quote mail: never evidence
+    else if (m.kind === "group") lines.push(`[${hhmm(m.at)}] group chat (context only): ${m.text.slice(0, 300).replace(/\n+/g, " / ")}`);
     else if (m.kind === "chat") lines.push(`[${hhmm(m.at)}] assistant (context only): ${m.text.slice(0, 300).replace(/\n+/g, " / ")}`);
   }
   return { lines, ownerText: owner.join("\n") };

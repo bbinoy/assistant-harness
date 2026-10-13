@@ -126,7 +126,7 @@ src/radar.ts         the proactive radar: periodic calendar and mail look-around
 src/radar-rules.ts   when the radar is due, which of its messages may be sent (pure, tested)
 src/messages.ts      the log of every message the assistant sent (with Signal timestamps): reaction lookup, "what I told you" context, size-bounded with a model-written summary of the oldest
 src/summarize.ts     the small model that writes that summary
-src/group.ts         group chats: a tool-less, private-data-less participant that speaks only when addressed (pure parts tested)
+src/group.ts         group chats: a tool-less, private-data-less participant that speaks only when addressed; only exchanges with it are logged (pure parts tested)
 src/voicereply.ts    the [[voice]] marker: the model chooses to answer by voice (the speech engine is packages/signal/src/tts.ts)
 src/dream.ts         the nightly dream: proposals as JSON, what code applies, snapshots and undo (pure core, tested)
 src/connectors.ts    which connectors (Notion, Calendar, mail) the last run could see

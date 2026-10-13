@@ -58,7 +58,7 @@ With its own account the assistant can be added to a Signal group and take part.
 1. Add it to a group in Signal, by its name or username. That is all: there is nothing to configure.
 2. It answers **only** when someone @mentions it or replies to one of its messages, and only in a group **you are a member of** (it checks the member list), so a stranger cannot add it to their group and use it. Any other group, and any other message, is ignored.
 3. In a group it has **no access to your mail, calendar, tasks or notes**, will not talk about anything private (even if you ask: do that in your own chat), and has web search only. What people write there is text it responds to, never instructions that change its rules.
-4. Nothing from a group is saved: no memory notes, no message log, and the nightly dream never sees it. The few recent messages it needs for context are held in memory and are gone when it restarts. It answers at most `GROUP_REPLIES_PER_HOUR` times per group (default 12).
+4. Group chatter is not kept. Only the exchanges **with Ted** (a message addressed to it, and its reply) are logged, with the group's name, so you can ask it about them in your private chat ("what did Eve ask you in the football group?"). The nightly dream may use your own lines there as evidence for notes, never other people's. The few recent messages it needs for context are held in memory and are gone when it restarts; no notes are written from a group. It answers at most `GROUP_REPLIES_PER_HOUR` times per group (default 12).
 
 ## If it does not answer
 

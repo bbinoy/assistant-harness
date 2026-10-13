@@ -16,8 +16,10 @@ const MAX_TEXT = 4000;
 const KEEP_AFTER_COMPACTION = 0.7; // compact down to this share of the limit, so it does not run on every message
 
 // What was said: the assistant's own messages (chat, notice, approval, draft, brief, other), the OWNER's messages
-// (owner, including voice transcripts) and the owner's reactions (reaction: "👎 on: <the message>").
-export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction";
+// (owner, including voice transcripts) and the owner's reactions (reaction: "👎 on: <the message>"), and what was
+// said between group members and the assistant when it was addressed in a group (group; the owner's own lines there are
+// kind owner, prefixed with the group's name). Group chatter that did not involve the assistant is never logged.
+export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction" | "group";
 
 export interface Sent {
   ts: number; // Signal timestamp of the message
