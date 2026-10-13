@@ -8,6 +8,7 @@ import { createOutbound } from "../src/outbound.ts";
 import { AuthError, RateLimitError } from "../src/errors.ts";
 import { SLOW_REPLY_MS } from "../src/quote.ts";
 import type { IncomingMessage, IncomingReaction } from "@ted-personal-assistant/signal";
+import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal";
 
 // The shared conversation pipeline against a fake Signal client. The first block pins the owner's private chat
 // exactly as it behaved when it lived in main.ts; the second shows groups get the same machinery.
@@ -156,7 +157,7 @@ test("private chat: voice falls back to text when speech is off, too long, or fa
   await off.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 10 } }));
   assert.doesNotMatch(off.r.prompts[0]!, /answer by voice/);
   assert.deepEqual(off.r.sent.map((s) => s.text), ["Hello there"]);
-  const long = rig({ ready: true, run: async () => `[[voice]] ${"word ".repeat(200)}` });
+  const long = rig({ ready: true, run: async () => `[[voice]] ${"word ".repeat(MAX_SPOKEN_CHARS / 5 + 10)}` });
   await long.pipeline.handleIncoming(owner(), msg());
   assert.equal(long.r.spoken.length, 0);
   assert.equal(long.r.sent.length, 1);
