@@ -52,9 +52,9 @@ Agent memory is usually described in layers. Here is where each one lives:
 
 Some approvals are redundant: you tell the assistant "put pottery in my calendar tomorrow at 15:00" and it then asks you to approve exactly that. `src/autojudge.ts` is a small Haiku second opinion for such cases. Code decides what may even be judged (`isJudgeable`): a calendar event with no attendees. A new event may come from any source; changing an existing event only in chat, because the existing event may have guests who would be emailed. Nothing that sends, forwards, shares or involves other people is ever judged. The model only answers `auto` or `ask` as constrained JSON, and anything else is `ask`; in chat it also sees your own message and says `ask` when the call differs from what you asked. Modes (`AUTO_APPROVE`): `off`; `shadow` (it judges and logs while you still decide; `npm run report` compares its verdicts with your answers); `chat` (may skip the question in chat); `broad` (the default: also for new events from background runs). Every auto-approval is announced on your phone and logged.
 
-## Reply drafts, sent with a 👍
+## Reply drafts
 
-When the background handler drafts an in-thread reply (a scheduling answer, say), the draft is shown on Signal ("✉️ Reply ready", To, Subject, the new text) and a 👍 on that message sends it (`src/propose.ts`, `src/proposals.ts`). No model is involved in sending: the draft's id is taken from the Mailbird tool result, its recipients and text are read back from Mailbird, and the owner's reaction is the send. Immediately before sending it is read again; if the recipients, a Cc, or any of the text (including the quoted part) changed since it was shown, nothing is sent and the current draft is shown again. A 👎 leaves the draft in the mailbox. To change something, reply to the message (the quoted text reaches the chat) and say what.
+When the background handler drafts an in-thread reply (a scheduling answer, say), the draft is shown on Signal ("✉️ Reply ready (draft #id)", To, Subject, the new text; `src/propose.ts`, `src/proposals.ts`). You answer by replying to that message: "send", or what to change (the quoted text reaches the chat, which finds the draft by its id). Sending is a normal approval: `send_message_now` always asks, and the approval prompt is not built from the model's arguments but from the draft read back from Mailbird at that moment (`src/agent.ts`): recipients, Cc, subject and the new text, with the quoted original announced. If the draft cannot be read back, the send is refused rather than approved blind. So what you approve is what is sent, whichever draft the model picked, and the same holds for any send you ask for in chat.
 
 ## The proactive radar
 
@@ -114,8 +114,8 @@ src/settings.ts      every tunable, validated at startup (pure loader, tested)
 src/state.ts         atomic, synchronous access to state/, logs/ and memory/ (tested)
 src/audit.ts         append-only audit log and its reader
 src/autojudge.ts     a small model's second opinion on a few approvals (floor in code; shadow mode by default)
-src/propose.ts       shows the handler's reply drafts on Signal, sends one on 👍 (no model in the send)
-src/proposals.ts     the draft-proposal rules: id from the tool result, "sent exactly as shown" check (pure, tested)
+src/propose.ts       shows the handler's reply drafts on Signal and reads a draft back from Mailbird
+src/proposals.ts     the draft rules: id from the tool result, Signal text and send-approval text from the draft as Mailbird holds it (pure, tested)
 src/radar.ts         the proactive radar: periodic calendar and mail look-around, sends only what matters
 src/radar-rules.ts   when the radar is due, which of its messages may be sent (pure, tested)
 src/pings.ts         what the assistant sent on its own, for chat context and de-duplication

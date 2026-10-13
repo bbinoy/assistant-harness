@@ -1,3 +1,4 @@
+import { sendApprovalText, type DraftView } from "./proposals.ts";
 import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
 import { basename } from "node:path";
 import { isJudgeable, judgeAction, mayAutoApprove, type Verdict } from "./autojudge.ts";
@@ -125,6 +126,11 @@ function chatResume(announce: boolean): Resume {
   return { resume: saved.sessionId, previousCost: saved.costUsd };
 }
 
+const SEND_DRAFT = "mcp__mailbird__send_message_now";
+let draftReader: ((messageId: number) => Promise<DraftView | undefined>) | undefined;
+// Set by main.ts: reads a draft back from Mailbird, for the approval of a send.
+export const setDraftReader = (fn: typeof draftReader) => void (draftReader = fn);
+
 function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
   // Permissions as code: policy.ts decides allow / ask / deny; "ask" goes to the owner's phone.
   const canUseTool: CanUseTool = async (tool, input, { signal }) => {
@@ -141,7 +147,18 @@ function buildOptions(approve: Approve, opts: RunOptions, resume: string | undef
     }
     // A small model's second opinion, only for what code puts on the floor (autojudge.ts). In shadow
     // mode it only logs; the owner is asked either way.
-    const description = describeCall(tool, input);
+    let description = describeCall(tool, input);
+    if (tool === SEND_DRAFT) {
+      // Show what Mailbird holds right now, not what the model says it is sending. If that cannot
+      // be read, the owner would be approving blind, so the send does not happen.
+      const id = Number((input as { messageId?: unknown }).messageId);
+      const view = draftReader && Number.isFinite(id) ? await draftReader(id).catch(() => undefined) : undefined;
+      if (!view || view.to.length === 0) {
+        audit(tool, "deny-unreadable-draft", opts.source);
+        return { behavior: "deny", message: "That draft could not be read back from Mailbird, so it cannot be shown for approval and was not sent." };
+      }
+      description = sendApprovalText(view);
+    }
     let judged: Verdict | undefined;
     if (settings.autoApprove !== "off" && isJudgeable(tool, input, opts.source)) {
       judged = await judgeAction({ source: opts.source, description, ownerMessage: opts.source === "chat" ? chatOwnerMessage : undefined });

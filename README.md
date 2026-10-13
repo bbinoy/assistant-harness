@@ -7,7 +7,7 @@ Built on the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overvie
 
 ## What it does
 
-- 📥 **Organizes your inbox.** Every 15 minutes it checks for new mail. Newsletters, notifications and cold outreach are archived. Anything that needs *you* arrives as one short message on your phone. Routine requests (like "can we meet next week?") get a reply drafted from your actual calendar, shown on your phone, and sent with one 👍.
+- 📥 **Organizes your inbox.** Every 15 minutes it checks for new mail. Newsletters, notifications and cold outreach are archived. Anything that needs *you* arrives as one short message on your phone. Routine requests (like "can we meet next week?") get a reply drafted from your actual calendar, shown on your phone, and sent when you reply "send" and approve.
 - ☀️ **Sends a brief for the day in the morning**, in full by email and as a short pep talk plus focus on Signal.
   - 🖋️ **Prepares meetings.** For each meeting it pulls the context from your Notion notes and past threads, and drafts the meeting agenda and email answers. 
   - ✅ **Organises your tasks.** It reads your Notion task list, spots what is overdue or due soon, adds tasks from emails, removes tasks that are clearly completed via emails/meeting notes.

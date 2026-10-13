@@ -1,7 +1,7 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { withQuoteContext, shouldThread } from "./quote.ts";
 import { splitReaction } from "./reaction.ts";
-import { ask, AuthError, RateLimitError, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
+import { ask, setDraftReader, AuthError, RateLimitError, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
@@ -66,17 +66,17 @@ async function hear(m: IncomingMessage) {
   await route({ ...m, text: heard, audio: undefined, voice: true });
 }
 
-// The owner's Mailbird connection for proposals: a reply the handler drafted is shown on Signal and
-// sent with a 👍 (propose.ts). No model is involved in sending.
+// The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal
+// (propose.ts), and the approval of any send shows the draft read back from here (agent.ts).
 setAutoApprovedNotice(say);
-const proposer = createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t), say });
+const proposer = createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t) });
+setDraftReader(proposer.read);
 
-// A 👍 / 👎 on the pending "Approve?" message answers it; on a shown reply draft, 👍 sends it.
+// A 👍 / 👎 on the pending "Approve?" message answers it.
 signal.onReaction((r) => {
   if (!acceptOwner(r, config.ownerNumber) || r.isRemove) return;
   const outcome = approvals.answerReaction(r.emoji, r.targetTimestamp);
-  if (outcome !== "ignored") return void console.log(`approval ${outcome} (by reaction)`);
-  void proposer.onReaction(r.emoji, r.targetTimestamp).catch((e) => console.error("proposal reaction error:", e.message));
+  if (outcome !== "ignored") console.log(`approval ${outcome} (by reaction)`);
 });
 
 // Chat turns run one at a time, in order: two at once would share one session.

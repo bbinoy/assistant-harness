@@ -1,25 +1,11 @@
-import { createHash } from "node:crypto";
-import { readJson, writeJson } from "./state.ts";
-
-// A reply the background handler drafted, shown to the owner on Signal, sent with one 👍.
+// A reply the background handler drafted is shown to the owner on Signal. The owner answers by
+// replying to that message ("send", or what to change); the chat agent then finds the draft and
+// calls send_message_now, and the APPROVAL for that call shows the draft read back from Mailbird
+// at that moment (agent.ts), so what the owner approves is what is sent, whatever the model said.
 //
 // The draft text is written by a model from an untrusted email, so nothing here trusts the
-// model's words: the draft's id is taken from the Mailbird tool RESULT, its recipients and text
-// are read back from Mailbird, and what the owner sees is exactly what a 👍 sends. If the draft
-// changed since it was shown (an edit, a different recipient), nothing is sent and the owner is
-// shown the current text again.
-
-const FILE = "state/proposals.json";
-const MAX_AGE_MS = 24 * 3600_000;
-
-export interface Proposal {
-  ts: number; // timestamp of the Signal message that shows the draft: a 👍 on it sends
-  draftMessageId: number;
-  to: string[];
-  subject: string;
-  bodyHash: string;
-  at: string;
-}
+// model's words: the draft's id is taken from the Mailbird tool RESULT, and recipients and text
+// are read back from Mailbird.
 
 export interface DraftView {
   to: string[];
@@ -27,8 +13,6 @@ export interface DraftView {
   subject: string;
   body: string;
 }
-
-export const hashBody = (body: string) => createHash("sha256").update(body.replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);
 
 // Pure: the draft's messageId from a Mailbird tool result (JSON text, or an MCP content array).
 export function extractMessageId(response: unknown): number | undefined {
@@ -55,36 +39,21 @@ export function authoredPart(body: string): { text: string; hasQuote: boolean } 
   return i < 0 ? { text: body.trim(), hasQuote: false } : { text: body.slice(0, i).trim(), hasQuote: true };
 }
 
-// Pure: the Signal text. Shows who it goes to and the whole reply (cut and announced if long).
-export function proposalText(d: DraftView): string {
+function cutBody(d: DraftView): string {
   const { text: body, hasQuote } = authoredPart(d.body);
   const cut = body.length > MAX_SHOWN ? `${body.slice(0, MAX_SHOWN)}… (+${body.length - MAX_SHOWN} more characters not shown)` : body;
-  const shown = hasQuote ? `${cut}\n\n(the quoted original follows below it in the email)` : cut;
-  const cc = d.cc.length ? `\nCc: ${d.cc.join(", ")}` : "";
-  return `✉️ Reply ready\nTo: ${d.to.join(", ")}${cc}\nSubject: ${d.subject}\n\n${shown}\n\n👍 on this message sends it. To change something, reply to this message and say what.`;
+  return hasQuote ? `${cut}\n\n(the quoted original follows below it in the email)` : cut;
 }
 
-// Pure: may the draft be sent now? Same recipients, same text as shown.
-export function stillAsShown(p: Proposal, d: DraftView | undefined): { ok: true } | { ok: false; why: string } {
-  if (!d) return { ok: false, why: "the draft is gone" };
-  if (d.cc.length > 0) return { ok: false, why: "it now has Cc recipients" };
-  if (d.to.join(",") !== [...p.to].join(",")) return { ok: false, why: "its recipients changed" };
-  if (hashBody(d.body) !== p.bodyHash) return { ok: false, why: "its text changed since I showed it" };
-  return { ok: true };
+const header = (d: DraftView) => `To: ${d.to.join(", ")}${d.cc.length ? `\nCc: ${d.cc.join(", ")}` : ""}\nSubject: ${d.subject}`;
+
+// Pure: the Signal text. Shows who it goes to and the whole reply (cut and announced if long).
+// The draft id is in it so the chat agent can find the draft when the owner replies to this message.
+export function proposalText(d: DraftView, id: number): string {
+  return `✉️ Reply ready (draft #${id})\n${header(d)}\n\n${cutBody(d)}\n\nReply to this message with “send” to send it, or say what to change.`;
 }
 
-const load = (now = Date.now()) => readJson<Proposal[]>(FILE, []).filter((p) => now - Date.parse(p.at) < MAX_AGE_MS);
-
-export function addProposal(p: Proposal): void {
-  writeJson(FILE, [...load(), p]);
+// Pure: the approval prompt for sending a draft, from the draft as Mailbird holds it right now.
+export function sendApprovalText(d: DraftView): string {
+  return `✉️ Send email now\n${header(d)}\n\n${cutBody(d)}`;
 }
-
-// Removes and returns the proposal a Signal message timestamp belongs to.
-export function takeProposal(ts: number): Proposal | undefined {
-  const all = load();
-  const p = all.find((x) => x.ts === ts);
-  if (p) writeJson(FILE, all.filter((x) => x !== p));
-  return p;
-}
-
-export const hasProposal = (ts: number) => load().some((p) => p.ts === ts);
