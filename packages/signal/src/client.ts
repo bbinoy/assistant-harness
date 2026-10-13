@@ -273,10 +273,11 @@ export class SignalClient {
 
   // Sends a message: to our own Note to Self, or (peer mode) to the peer. Returns the sent
   // timestamp (used to ignore our own echo when it syncs back, and to match reactions).
-  async send(text: string, textStyle: string[] = [], quote?: Quote): Promise<number> {
+  async send(text: string, textStyle: string[] = [], quote?: Quote, opts: { attachments?: string[] } = {}): Promise<number> {
     const result = await this.call<{ timestamp: number }>("send", {
       ...this.to(),
-      message: text,
+      ...(text ? { message: text } : {}),
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(textStyle.length ? { textStyle } : {}),
       ...(quote ? { quoteTimestamp: quote.timestamp, quoteAuthor: quote.author, quoteMessage: quote.text } : {}),
     });

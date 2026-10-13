@@ -106,6 +106,11 @@ export function loadSettings(env: Env) {
 
     // Voice notes are transcribed on this Mac with whisper.cpp (src/transcribe.ts); nothing leaves it.
     whisperModel: env.WHISPER_MODEL || `${env.HOME ?? ""}/.cache/ted-personal-assistant/ggml-small.bin`,
+    // Spoken replies to voice messages (src/voicereply.ts): local text to speech with Kokoro (scripts/setup-tts.sh).
+    voiceReplies: oneOf(env, "VOICE_REPLIES", "on", ["on", "off"] as const) === "on",
+    ttsDir: env.TTS_DIR || `${env.HOME ?? ""}/.cache/ted-personal-assistant/kokoro`,
+    ttsVoice: env.TTS_VOICE || "am_onyx",
+    ttsSpeed: num(env, "TTS_SPEED", 0.95, 0.5, 2),
     signalAttachmentsDir: `${env.HOME ?? ""}/.local/share/signal-cli/attachments`,
 
     launchdLabel: env.LAUNCHD_LABEL || `com.${env.USER ?? "user"}.ted-personal-assistant`,

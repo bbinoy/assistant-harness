@@ -56,6 +56,14 @@ export function createOutbound(signal: SignalClient, record?: (kind: MessageKind
     return last;
   }
 
+  // A voice message (an audio file). What was said is logged as text, so the log stays searchable.
+  async function sendVoice(file: string, spoken: string): Promise<number> {
+    const ts = await signal.send("", [], undefined, { attachments: [file] });
+    remember(`t:${ts}`);
+    record?.("chat", ts, `🔊 ${spoken}`);
+    return ts;
+  }
+
   const replyPlain = (text: string, kind?: MessageKind) => reply(text, { plain: true, kind });
 
   // The whole brief, one message per section (not used for the daily brief any more: Signal gets
@@ -72,5 +80,5 @@ export function createOutbound(signal: SignalClient, record?: (kind: MessageKind
     }
   }
 
-  return { reply, replyPlain, sendBrief, sendBriefSummary, isOwnEcho };
+  return { reply, replyPlain, sendVoice, sendBrief, sendBriefSummary, isOwnEcho };
 }

@@ -1,4 +1,4 @@
-import { voiceReady } from "@ted-personal-assistant/signal";
+import { ttsReady, voiceReady } from "@ted-personal-assistant/signal";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -168,6 +168,9 @@ async function doctor() {
 
   const voice = voiceReady(settings.whisperModel);
   line(voice.ok ? true : "warn", "voice messages", voice.ok ? "transcribed locally with whisper.cpp" : `not available, missing: ${voice.missing.join("; ")}`);
+
+  const tts = ttsReady(settings.ttsDir);
+  line(tts.ok || !settings.voiceReplies ? true : "warn", "spoken replies", !settings.voiceReplies ? "off (VOICE_REPLIES=off)" : tts.ok ? `local, voice ${settings.ttsVoice}${process.env.SIGNAL_ACCOUNT ? "" : " (needs the assistant's own Signal account)"}` : `not set up, missing: ${tts.missing.join(", ")} (run scripts/setup-tts.sh)`);
 
   const dream = readJson<{ lastRunAt?: string }>("state/dream.json", {});
   line(true, "nightly dream", settings.dream ? `once a day before the brief; last run ${dream.lastRunAt ? local(dream.lastRunAt) : "not yet"}` : "off (DREAM=off)");

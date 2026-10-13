@@ -74,7 +74,7 @@ The email has the rest, kept to the day ahead:
 > 🤝 Handled 1:
 > Roy Kent: drafted a reply offering Tue 15:00 or Wed 10:30, both free (he'd like it "quick and without any bloody small talk")
 
-**Any time.** Just talk to Ted, in text or in a voice note (transcribed on your Mac, nothing leaves it). While it works you see "typing…", and sometimes it answers with just an emoji on your message. (In Note to Self, which has no typing indicator, small icons show the state instead: 👀 working, ✅ done, ⚠️ broke.)
+**Any time.** Just talk to Ted, in text or in a voice note (transcribed on your Mac, nothing leaves it), and it can answer a voice note with a voice message of its own, in a voice you pick, also generated locally. While it works you see "typing…", and sometimes it answers with just an emoji on your message. (In Note to Self, which has no typing indicator, small icons show the state instead: 👀 working, ✅ done, ⚠️ broke.)
 
 > **You:** what's on my plate today?
 > **Ted:** Three things, and not one of them is a lion! 🦁

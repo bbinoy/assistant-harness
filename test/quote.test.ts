@@ -39,3 +39,11 @@ test("quote: the quote goes on the first chunk only, and the echo of a threaded 
   assert.equal(calls[1]!.quote, undefined);
   assert.equal(out.isOwnEcho({ text: calls[0]!.text, timestamp: 1 }), true);
 });
+
+test("voice replies: only a leading [[voice]] marks a spoken reply", async () => {
+  const { splitVoice } = await import("../src/voicereply.ts");
+  assert.deepEqual(splitVoice("[[voice]] Hey Ben, all set."), { voice: "Hey Ben, all set.", text: "Hey Ben, all set." });
+  assert.deepEqual(splitVoice("  [[VOICE]]\nYes."), { voice: "Yes.", text: "Yes." });
+  assert.deepEqual(splitVoice("Sure. [[voice]] not at the start"), { text: "Sure. [[voice]] not at the start" });
+  assert.deepEqual(splitVoice("plain reply"), { text: "plain reply" });
+});

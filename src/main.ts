@@ -1,7 +1,9 @@
-import { join } from "node:path";
+import { rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { withQuoteContext, shouldThread } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
+import { splitVoice, VOICE_INVITE } from "./voicereply.ts";
 import { ask, setDraftReader, AuthError, RateLimitError, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
@@ -19,7 +21,7 @@ import { createRadar } from "./radar.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { openLog } from "./state.ts";
-import { ensureSignalDaemon, SignalClient, transcribe, voiceReady, type IncomingMessage, type IncomingReaction } from "@ted-personal-assistant/signal";
+import { ensureSignalDaemon, MAX_SPOKEN_CHARS, SignalClient, synthesize, transcribe, ttsReady, voiceReady, type IncomingMessage, type IncomingReaction } from "@ted-personal-assistant/signal";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 
@@ -136,6 +138,25 @@ async function reacted(r: IncomingReaction) {
   }
 }
 
+// Spoken replies need the assistant's own chat (in Note to Self our own voice message would echo back
+// as if the owner had sent it) and the local speech setup.
+const canSpeak = () => settings.voiceReplies && signal.separateAccount && ttsReady(settings.ttsDir).ok;
+
+// Speaks and sends. False on any failure: the caller then sends the words as text.
+async function speakReply(words: string): Promise<boolean> {
+  let file: string | undefined;
+  try {
+    file = await synthesize(words, { dir: settings.ttsDir, voice: settings.ttsVoice, speed: settings.ttsSpeed });
+    await out.sendVoice(file, words);
+    return true;
+  } catch (e) {
+    console.error("voice reply failed, sending text:", (e as Error).message);
+    return false;
+  } finally {
+    if (file) rmSync(dirname(file), { recursive: true, force: true });
+  }
+}
+
 async function chat(m: IncomingMessage) {
   console.log(`owner message (${m.text.length} chars)`);
   const target = { author: m.from, timestamp: m.timestamp };
@@ -147,9 +168,15 @@ async function chat(m: IncomingMessage) {
   try {
     if (m.quote) console.log(`owner is replying to an earlier message (${m.quote.text.length} chars)`);
     const started = Date.now();
-    const { text, costUsd } = await ask(withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.text, m.quote), approve, say, m.text);
-    console.log(`agent replied (${text.length} chars, $${costUsd.toFixed(4)})`);
-    // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
+    const speak = canSpeak();
+    const { text: replied, costUsd } = await ask(withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard${speak ? `; ${VOICE_INVITE}` : ""}] ${m.text}` : m.text, m.quote), approve, say, m.text);
+    console.log(`agent replied (${replied.length} chars, $${costUsd.toFixed(4)})`);
+    // The model may answer by voice (only to a voice message, and only if speech is set up), ...
+    const chosen = splitVoice(replied);
+    let spoken = false;
+    if (chosen.voice && speak && chosen.voice.length <= MAX_SPOKEN_CHARS) spoken = await speakReply(chosen.voice);
+    const text = spoken ? "" : chosen.text;
+    // ... or react instead of (or before) answering; its emoji then replaces the ✅ status.
     const { reaction, text: words } = splitReaction(text);
     if (words) await out.reply(words, { kind: "chat", quote: shouldThread(!!m.quote, Date.now() - started) ? { text: m.text.slice(0, 200), author: m.from, timestamp: m.timestamp } : undefined });
     if (reaction) void signal.react(reaction, target); // the model's own choice, in either mode
