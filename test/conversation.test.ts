@@ -25,7 +25,7 @@ interface Rig {
   spoken: string[];
 }
 
-function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: string; transcript?: (m: IncomingMessage) => Promise<string>; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; admitGroup?: any } = {}) {
+function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: string; transcript?: (m: IncomingMessage) => Promise<string>; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; admitGroup?: any; settleMs?: number; settleMaxMs?: number } = {}) {
   const r: Rig = { sent: [], reacts: [], typing: [], reads: [], records: [], prompts: [], spoken: [] };
   let ts = 5000;
   const signal = {
@@ -55,6 +55,8 @@ function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) =>
     admitGroup: over.admitGroup ?? (async () => {}),
     now: over.now,
     wait: over.wait ?? (async () => {}),
+    settleMs: over.settleMs === undefined ? undefined : () => over.settleMs!,
+    settleMaxMs: over.settleMaxMs === undefined ? undefined : () => over.settleMaxMs!,
   });
   return { r, pipeline };
 }
@@ -160,7 +162,9 @@ test("private chat: voice falls back to text when speech is off, too long, or fa
   assert.equal(long.r.sent.length, 1);
   const broken = rig({ ready: true, synth: async () => { throw new Error("no tts"); }, run: async () => "[[voice]] Hello there" });
   await broken.pipeline.handleIncoming(owner(), msg());
-  assert.deepEqual(broken.r.sent.map((s) => s.text), ["Hello there"]);
+  assert.deepEqual(broken.r.sent.map((s) => s.text), ["Hello there\n\n(voice didn't work this time, sending text)"]); // a failed speech says so: the model may have announced a voice message
+  assert.deepEqual(off.r.sent.map((s) => s.text), ["Hello there"]); // no speech set up: no such note
+  assert.deepEqual(long.r.sent.map((s) => s.text.includes("voice didn't work")), [false]);
 });
 
 test("private chat: a voice message that cannot be understood is explained, and a spoken yes is never an approval", async () => {
@@ -294,6 +298,45 @@ test("groups: a burst is one run through the shared burst; messages during a run
   finish();
   await Promise.all([...all, ...later]);
   assert.deepEqual(runs, [3, 2]);
+});
+
+test("bursts: continuous chatter cannot restart the pause forever; after the maximum the burst is answered and later messages make the next turn", async () => {
+  let clock = 0;
+  const waits: { ms: number; release: () => void }[] = [];
+  const { pipeline } = rig({ now: () => clock, settleMs: 2000, settleMaxMs: 10_000, wait: (ms) => new Promise<void>((release) => waits.push({ ms, release })) });
+  const conv = owner();
+  const runs: number[][] = [];
+  const send = (n: number) => pipeline.burst(conv, n, (b) => b.run(async (items) => void runs.push(items)));
+  const all: Promise<void>[] = [];
+  for (let i = 1; i <= 6; i++) { // a message every 1.9 s: never quiet for the full 2 s pause
+    all.push(send(i));
+    clock += 1900;
+  }
+  assert.deepEqual(waits.map((w) => w.ms), [2000, 2000, 2000, 2000, 2000, 500]); // the pause restarts each time (shrinking near the cap)...
+  all.push(send(7)); // 11.4 s since the first message: the cap leaves no wait at all
+  assert.equal(waits[6]!.ms, 0);
+  waits[6]!.release();
+  await tick();
+  assert.deepEqual(runs, [[1, 2, 3, 4, 5, 6, 7]]); // ...but the cap forces the run: it takes everything so far
+  for (const w of waits) w.release();
+  clock += 100;
+  const next = send(8); // a new burst starts its own clock
+  assert.equal(waits[7]!.ms, 2000);
+  waits[7]!.release();
+  await Promise.all([...all, next]);
+  assert.deepEqual(runs, [[1, 2, 3, 4, 5, 6, 7], [8]]);
+});
+
+test("bursts: the pause is shortened to what is left of the maximum", async () => {
+  let clock = 0;
+  const waits: number[] = [];
+  const { pipeline } = rig({ now: () => clock, settleMs: 2000, settleMaxMs: 10_000, wait: async (ms) => void waits.push(ms) });
+  const conv = owner();
+  void pipeline.burst(conv, 1, async () => {});
+  clock = 9000;
+  void pipeline.burst(conv, 2, async () => {});
+  await tick();
+  assert.deepEqual(waits, [2000, 1000]);
 });
 
 test("private chat: the owner's reaction is feedback the model judges; it may react back or say something, never apologises", async () => {

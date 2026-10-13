@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Scope } from "./dream.ts";
 import { compactIfNeeded, messagesSince, recordMessage, type Kind, type Sent } from "./messages.ts";
 import { matchLines } from "./logsearch.ts";
-import { MAX_NOTE_CHARS, readNotes, type Note } from "./notes.ts";
+import { MAX_NOTE_CHARS, type Note } from "./notes.ts";
 import { settings } from "./settings.ts";
 import { readText } from "./state.ts";
 import { summarizeWithHaiku } from "./summarize.ts";
@@ -87,7 +87,6 @@ export function groupContext(groupId: string, since?: string, n = 25): { lines: 
 }
 
 // The last few lines of context before a new message, oldest first.
-export const recentGroupLines = (groupId: string, n = 25): string[] => groupContext(groupId, undefined, n).lines;
 
 // Search the group's whole log (the oldest part is one summary line). Words must all appear.
 export function searchGroupHistory(groupId: string, args: { query?: string; sinceHours?: number; limit?: number }): string {
@@ -104,7 +103,6 @@ export function searchGroupHistory(groupId: string, args: { query?: string; sinc
 // is read (groupNotesBlock, the dream).
 export const groupNotesDir = (groupId: string): string => join(GROUPS_DIR, groupKey(groupId), "notes");
 
-export const groupNotes = (groupId: string, now = new Date()): Note[] => readNotes(now, join(groupDir(groupId), "notes"));
 
 // Pure: the group's notes as fenced data for the group's prompt.
 export function groupNotesBlock(notes: readonly Note[]): string {

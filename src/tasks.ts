@@ -25,8 +25,6 @@ export interface Task {
   retries?: number; // brief: extra attempts after an incomplete one, same day
 }
 
-export const isPreset = (t: Pick<Task, "name">) => t.name === "brief" || t.name === "radar";
-
 // Pure. The gate's output as a task, or nothing. Fails closed: a preset is only for the owner's chat (and only when the gate
 // scheduler is on, and the radar when it is enabled); a group that asks for one, or an unknown name, gets the plain task if
 // the gate wrote instructions, else nothing.
@@ -48,7 +46,15 @@ export const BRIEF_RETRY_GAP_MINUTES = 10;
 const briefCap = () => settings.briefMaxAttempts;
 
 // Is today's brief still to come (not delivered, attempts left, past the start hour)? The radar and the mail alerts wait for it.
-export const briefPending = (st: LookState, now: Date): boolean => !st.briefDone && st.briefAttempts < briefCap() && now.getHours() >= settings.briefStartHour;
+// Only for a bounded window: before the backstop hour (which runs the brief whatever the notes say), or, with the backstop off
+// (hour 24), for BRIEF_PENDING_GRACE_HOURS after the start hour. After that nothing is waiting for a brief, so an urgent mail
+// is alerted and the radar may run, unless an attempt has already started (then it is pending until it is done or given up).
+export const BRIEF_PENDING_GRACE_HOURS = 3;
+export const briefPending = (st: LookState, now: Date): boolean => {
+  if (st.briefDone || st.briefAttempts >= briefCap() || now.getHours() < settings.briefStartHour) return false;
+  const until = settings.briefBackstopHour < 24 ? settings.briefBackstopHour : settings.briefStartHour + BRIEF_PENDING_GRACE_HOURS;
+  return now.getHours() < until || st.briefAttempts > 0;
+};
 
 // The deterministic part of the brief's schedule, whatever the gate says: a failed or incomplete attempt is retried (up to the
 // cap, after a short gap), and a day with no brief at all gets one at the backstop hour.

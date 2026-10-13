@@ -7,7 +7,7 @@ import { group, owner, type Conversation } from "../src/conversation.ts";
 import { clampCheck, gatePrompt, gateSystem, logTail, lookDue, lookState, parseGate, tailLine, wakeText } from "../src/gate.ts";
 import { compactIfNeeded, findMessage, messagesSince, noticeLines, recordMessage, type Kind, type Sent } from "../src/messages.ts";
 import { groupConversation } from "../src/dream.ts";
-import { groupContext, groupLogFile, recentGroupLines } from "../src/groupstore.ts";
+import { groupContext, groupLogFile } from "../src/groupstore.ts";
 import { classify } from "../src/policy.ts";
 import { settings } from "../src/settings.ts";
 import { dataPath } from "../src/state.ts";
@@ -70,7 +70,7 @@ test("ledger: the presets' lines give attempts, done, last radar, keys and posts
     entry("action", 1, "[brief] attempt 1 started"), entry("action", 2, "[brief] attempt 1 → incomplete"), entry("action", 3, "[brief] attempt 2 started"),
     entry("action", 4, '[radar] ran: 1 message(s) sent, 5 event(s) read, next meeting at 14:30. keys: ["prep:abc"]'), entry("notice", 5, "Prep for 14:30"),
   ], T0);
-  assert.deepEqual([st.briefAttempts, st.briefDone, st.postsToday], [2, false, 1]);
+  assert.deepEqual([st.briefAttempts, st.briefDone, st.radarPostsToday], [2, false, 1]);
   assert.equal(st.lastBriefAttemptAt, at(3));
   assert.equal(st.lastRadarAt, at(4));
   assert.ok(st.radarKeys["prep:abc"]);
@@ -109,7 +109,7 @@ test("ledger kinds never reach anything that reads the log as conversation", asy
   recordMessage("wake", 2, JSON.stringify({ next: at(30), looked: at(0) }), new Date(T0.getTime() + 1000), gf);
   recordMessage("action", 3, "did a thing", new Date(T0.getTime() + 2000), gf);
   assert.equal(groupContext(g.groupId!).lines.length, 1);
-  assert.equal(recentGroupLines(g.groupId!).length, 1);
+  assert.equal(groupContext(g.groupId!, undefined, 25).lines.length, 1);
   assert.equal(groupContext(g.groupId!, at(-10)).lines.length, 1);
   // notices are a separate filter, and compaction does not summarize ledger lines
   assert.deepEqual(noticeLines(messagesSince(undefined, file), T0), []);
@@ -122,7 +122,7 @@ test("ledger kinds never reach anything that reads the log as conversation", asy
 // ---- wake-ups ----
 
 interface Calls { ownerRuns: string[]; groupRuns: string[]; sent: string[]; gates: string[]; profiles: string[]; recorded: [string, string][]; turns: any[] }
-function rig(over: { gate?: (conv: Conversation) => unknown; spent?: boolean; paused?: boolean; ownerAnswer?: string; groupAnswer?: string; vouch?: boolean; groups?: string[]; now?: Date } = {}) {
+function rig(over: { gate?: (conv: Conversation) => unknown; spent?: boolean; paused?: boolean; ownerAnswer?: string; groupAnswer?: string; vouch?: boolean; groups?: string[]; now?: Date; separate?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "wake-"));
   mkdirSync(join(dir, "o-notes"));
   const ownerConv: Conversation = { ...owner(), logFile: `logs/gate-wake-owner-${Math.random().toString(36).slice(2)}.jsonl`, notesDir: join(dir, "o-notes") };
@@ -149,6 +149,7 @@ function rig(over: { gate?: (conv: Conversation) => unknown; spent?: boolean; pa
   };
   const wakeups = createWakeups({
     pipeline: pipeline as any,
+    separateAccount: over.separate ?? true,
     vouch: async () => over.vouch ?? true,
     runProfile: async (profile, prompt) => (c.profiles.push(profile), c.ownerRuns.push(prompt), { text: over.ownerAnswer ?? "Morning! Fun fact: biscuits." }),
     runGroup: async (build, ctx) => (c.groupRuns.push(`${ctx.conv.source}:${build().prompt}`), over.groupAnswer ?? "Group fun fact!"),
@@ -200,13 +201,49 @@ test("wake: a group's wake-up runs the GROUP runner and never the owner's run", 
   assert.equal(classify("mcp__mailbird__get_message", {}, "group"), "deny");
 });
 
+test("wake: on Note to Self (no separate account) groups are never woken, whatever the gate says", async () => {
+  const { c, wakeups } = rig({ groups: [`${G}-nts`], separate: false });
+  await wakeups.tick(T0);
+  assert.deepEqual(c.groupRuns, []);
+  assert.deepEqual(c.gates, ["owner"]); // only the owner's own look
+  const own = rig({ groups: [`${G}-own`], separate: true }); // another group: the shared one has a look recorded already
+  await own.wakeups.tick(T0);
+  assert.equal(own.c.groupRuns.length, 1);
+});
+
+test("wake: the owner's background run does not hold the chat queue; only its delivery is queued", async () => {
+  let release!: () => void;
+  const slow = new Promise<void>((r) => (release = r));
+  const ownerConv: Conversation = { ...owner(), logFile: `logs/gate-wake-owner-${Math.random().toString(36).slice(2)}.jsonl` };
+  const queued: string[] = []; // the queue records when a job is entered: the run (waiting for an approval) must not be inside it
+  let running = false;
+  const w = createWakeups({
+    pipeline: { canSpeak: () => false, enqueue: async (_c: any, j: any) => (queued.push("queued"), j()), record: () => {}, runTurn: async (_c: any, t: any) => { const r = await t.run(); queued.push(`delivered ${r.text}`); return { spoke: true }; } } as any,
+    separateAccount: true,
+    vouch: async () => true,
+    runProfile: async () => { running = true; await slow; return { text: "late" }; },
+    gate: async () => parseGate({ act: true, instructions: "do it", nextCheckMinutes: 20 }),
+    groups: () => [],
+    notesChangedAt: () => 0,
+    now: () => T0,
+    guards: { paused: () => false, budgetSpent: () => false },
+  });
+  const look = w.look(ownerConv, T0);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(running, true);
+  assert.deepEqual(queued, []); // still waiting for the (approval-asking) run, and the queue was never entered
+  release();
+  assert.equal(await look, "posted");
+  assert.deepEqual(queued, ["queued", "delivered late"]);
+});
+
 test("wake: [[silent]] posts nothing but is an action; a failing run is logged, silent and counted", async () => {
   const quiet = rig({ ownerAnswer: "[[silent]]" });
   assert.equal(await quiet.wakeups.look(quiet.ownerConv, T0), "silent");
   assert.deepEqual(quiet.c.sent, []);
   assert.match(quiet.c.recorded[1]![1], /stayed silent/);
   const broken = rig();
-  const w = createWakeups({ pipeline: { ...({} as any), canSpeak: () => false, enqueue: (_c: any, j: any) => j(), record: (_c: any, k: string, _t: number, text: string) => broken.c.recorded.push([k, text]), runTurn: async (_c: any, t: any) => { try { await t.run(); return { spoke: false }; } catch (e) { return { spoke: false, error: e }; } } }, vouch: async () => true, runProfile: async () => { throw new Error("boom"); }, gate: async () => parseGate({ act: true, instructions: "do it", nextCheckMinutes: 20 }), groups: () => [], notesChangedAt: () => 0, now: () => T0 });
+  const w = createWakeups({ pipeline: { ...({} as any), canSpeak: () => false, enqueue: (_c: any, j: any) => j(), record: (_c: any, k: string, _t: number, text: string) => broken.c.recorded.push([k, text]), runTurn: async (_c: any, t: any) => { try { await t.run(); return { spoke: false }; } catch (e) { return { spoke: false, error: e }; } } }, separateAccount: true, vouch: async () => true, runProfile: async () => { throw new Error("boom"); }, gate: async () => parseGate({ act: true, instructions: "do it", nextCheckMinutes: 20 }), groups: () => [], notesChangedAt: () => 0, now: () => T0 });
   assert.equal(await w.look(owner(), T0), "failed");
   assert.match(broken.c.recorded.find(([k]) => k === "action")![1], /failed/);
   assert.equal(broken.c.sent.length, 0);

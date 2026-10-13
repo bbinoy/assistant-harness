@@ -41,6 +41,9 @@ function record(groupId: string | undefined, kind: Kind, ts: number, text: strin
 }
 const out = createOutbound(signal, (kind, ts, text, groupId) => record(groupId, kind, ts, text));
 const approve: Approve = (description, call, abort) => approvals.request((t) => out.replyPlain(t, "approval"), description, call, abort);
+// Unattended runs (wake-ups, the brief, the radar, the mail handler) ask the same way, but only an explicit yes / no or a reply
+// to the question answers it: whatever else the owner types meanwhile is a chat message (approvals.ts).
+const approveBackground: Approve = (description, call, abort) => approvals.request((t) => out.replyPlain(t, "approval"), description, call, abort, { background: true });
 // `say` is a plain message to the owner. `notify` is what the assistant sends on its own (mail
 // alerts, handled mail, setup problems) and is also remembered, so the chat knows what a reply
 // like "yes, do that" refers to (messages.ts). Memory announcements and chat answers use `say`.
@@ -89,7 +92,7 @@ const pipeline: Pipeline = createPipeline({
   vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
   isOwner: fromOwner,
   admitGroup: (_conv, m) => groupBrain(m),
-  compact: (conv) => compactChatIfNeeded(conv.sessionFile, conv.source), // every conversation, after the reply is out; the next message waits for it
+  compact: (conv) => compactChatIfNeeded(conv.sessionFile, conv.source, conv.notesDir), // every conversation, after the reply is out; the next message waits for it
   // Warm process: one, for the owner's chat. Groups have none (bursty, many; a cold start per group turn is the price).
   afterTurn: (conv) => void (conv.kind === "owner" && prepareChat(approve, say)),
 });
@@ -128,7 +131,7 @@ prepareChat(approve, say);
 // quiet hour is still quick. Local work only, no model call.
 setInterval(() => prepareChat(approve, say), 25 * 60_000).unref();
 
-const handler = createHandler({ approve, notify, propose: proposer.show });
+const handler = createHandler({ approve: approveBackground, notify, propose: proposer.show });
 handler.resume();
 
 const dreamer = createDreamer();
@@ -141,11 +144,12 @@ const dream = () => dreamer.run().then(() => groupDreamer.run()).catch(() => {})
 // for the brief; SCHEDULER=legacy keeps the old fixed schedulers (src/brief.ts, src/radar.ts).
 const wakeups = createWakeups({
   pipeline,
+  separateAccount: signal.separateAccount,
   vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
-  runProfile: (profile, prompt, extra) => runProfile(profile, prompt, approve, extra),
+  runProfile: (profile, prompt, extra) => runProfile(profile, prompt, approveBackground, extra),
   presets: { sendBrief: out.sendBriefSummary, notify: say, beforeBrief: dream },
 });
-const radar = createRadar({ approve, notify: say, briefDue: isBriefDue });
+const radar = createRadar({ approve: approveBackground, notify: say, briefDue: isBriefDue });
 const legacy = settings.scheduler === "legacy";
 const briefDue = () => (legacy ? isBriefDue() : wakeups.briefPending());
 
@@ -160,7 +164,7 @@ startHeartbeat({
       wake: () => wakeups.tick(),
       // the gate scheduler: the brief and the radar are started by the wake-ups' look at the owner's chat
       ...(legacy && {
-        brief: () => (isBriefDue() ? dream() : Promise.resolve()).then(() => maybeRunBrief({ approve, sendBrief: out.sendBriefSummary, notify })),
+        brief: () => (isBriefDue() ? dream() : Promise.resolve()).then(() => maybeRunBrief({ approve: approveBackground, sendBrief: out.sendBriefSummary, notify })),
         radar: () => radar(),
       }),
     });

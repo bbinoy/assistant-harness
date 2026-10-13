@@ -9,7 +9,7 @@ import { gateSystem, parseGate } from "../src/gate.ts";
 import { recordMessage, type Kind } from "../src/messages.ts";
 import { RADAR_SCHEMA } from "../src/radar-rules.ts";
 import { settings } from "../src/settings.ts";
-import { buildTask, isPreset } from "../src/tasks.ts";
+import { briefPending, buildTask } from "../src/tasks.ts";
 import { ledgerEntries } from "../src/messages.ts";
 import { lookState } from "../src/gate.ts";
 import { dataPath } from "../src/state.ts";
@@ -42,6 +42,7 @@ function rig(o: { gate?: (conv: Conversation) => unknown; brief?: "ok" | "incomp
   };
   const w = createWakeups({
     pipeline: pipeline as any,
+    separateAccount: true,
     vouch: async () => true,
     runProfile: async (profile, prompt, extra) => {
       r.profiles.push(profile);
@@ -90,7 +91,7 @@ test("profiles: named in code; brief, radar and background are owner runs with t
 
 test("tasks: the gate names a task; presets are owner-only and fail closed", () => {
   const brief = buildTask("owner", { task: "brief" }, { scheduler: "gate" })!;
-  assert.deepEqual([brief.name, brief.profile, brief.after, brief.retries, isPreset(brief)], ["brief", "brief", "brief", settings.briefMaxAttempts - 1, true]);
+  assert.deepEqual([brief.name, brief.profile, brief.after, brief.retries], ["brief", "brief", "brief", settings.briefMaxAttempts - 1]);
   assert.match(brief.instructions, /daily-brief/);
   const radar = buildTask("owner", { task: "radar" }, { scheduler: "gate", radar: true })!;
   assert.deepEqual([radar.profile, radar.after], ["radar", "radar"]);
@@ -232,6 +233,7 @@ test("presets are detached background jobs: the look returns at once, one run pe
   let finish!: () => void;
   const open = new Promise<void>((res) => (finish = res));
   const w = createWakeups({
+    separateAccount: true,
     pipeline: { canSpeak: () => false, enqueue: (_c: any, j: any) => j(), record: (c: Conversation, k: Kind, ts: number, text: string) => recordMessage(k, ts, text, T0, conv.logFile), runTurn: async () => ({ spoke: false }) } as any,
     vouch: async () => true,
     runProfile: async (profile) => { r.profiles.push(profile); await open; return { text: "", structured: { eventsSeen: 2, messages: [] } }; },
@@ -281,4 +283,21 @@ test("a free-form task of the owner runs the background profile and posts the an
   const { r, w, conv } = rig({ gate: () => ({ act: true, task: "task", instructions: "Remind me to call Eve", nextCheckMinutes: 30 }) });
   assert.equal(await w.look(conv, T0), "posted");
   assert.deepEqual(r.profiles, ["background"]);
+});
+
+test("briefPending: only a bounded window, so urgent mail is not swallowed all day when no brief runs", async () => {
+  const st = (over: Partial<ReturnType<typeof lookState>> = {}) => ({ ...lookState([], T0), ...over });
+  const at = (h: number) => new Date(2026, 9, 14, h, 30);
+  await withSettings({ briefStartHour: 7, briefBackstopHour: 9, briefMaxAttempts: 3 }, async () => {
+    assert.equal(briefPending(st(), at(6)), false); // before the start hour
+    assert.equal(briefPending(st(), at(8)), true); // waiting for the brief
+    assert.equal(briefPending(st(), at(10)), false); // past the backstop with no attempt: nothing is coming (a note said no brief; the backstop ran it or is guarded)
+    assert.equal(briefPending(st({ briefAttempts: 1 }), at(10)), true); // an attempt is under way or will be retried
+    assert.equal(briefPending(st({ briefAttempts: 3 }), at(10)), false); // given up
+    assert.equal(briefPending(st({ briefDone: true }), at(8)), false);
+  });
+  await withSettings({ briefStartHour: 7, briefBackstopHour: 24, briefMaxAttempts: 3 }, async () => {
+    assert.equal(briefPending(st(), at(8)), true);
+    assert.equal(briefPending(st(), at(14)), false); // backstop off: not pending all day
+  });
 });

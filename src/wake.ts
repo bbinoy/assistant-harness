@@ -32,6 +32,7 @@ import { OWNER, settings } from "./settings.ts";
 // per day), and a failed run is logged and silent. A gate that fails or says something odd means do nothing.
 
 export interface WakeDeps {
+  separateAccount: boolean; // the assistant has its own Signal account (signal.separateAccount). Groups are woken only then: on Note to Self every message would go out as the owner
   pipeline: Pick<Pipeline, "enqueue" | "runTurn" | "record" | "canSpeak">;
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group? (a group we cannot vouch for is never woken)
   runProfile: (profile: OwnerProfile, prompt: string, extra?: { onToolSuccess?: (tool: string, input: unknown) => void }) => Promise<{ text: string; costUsd?: number; structured?: unknown }>; // the owner's runs by profile (agent.ts runProfile)
@@ -67,18 +68,28 @@ export function createWakeups(deps: WakeDeps) {
   const changed = deps.notesChangedAt ?? notesChangedAt;
 
   async function act(conv: Conversation, instructions: string, now: Date): Promise<"posted" | "silent" | "failed"> {
-    return pipeline.enqueue(conv, async () => {
-      let run: () => Promise<{ text: string; costUsd?: number }>;
-      if (conv.kind === "owner") {
-        run = () => deps.runProfile("background", ownerWakePrompt(now, instructions, logTail(conv, 20), pipeline.canSpeak()));
-      } else {
-        const build: PromptBuilder = (since) => {
-          const { lines, seenAt } = (deps.context ?? groupContext)(conv.groupId!, since);
-          return { prompt: groupWakePrompt(now, lines, instructions, !!since, pipeline.canSpeak()), seenAt };
+    if (conv.kind === "owner") {
+      // The owner's run happens OUTSIDE the chat queue: it may ask for an approval and wait up to five minutes for it, and the
+      // owner's chat must not wait with it. Only the delivery of the answer takes its place in the queue.
+      let done: { text: string; costUsd?: number } | undefined;
+      let failure: unknown;
+      await deps.runProfile("background", ownerWakePrompt(now, instructions, logTail(conv, 20), pipeline.canSpeak())).then((r) => void (done = r), (e) => void (failure = e));
+      return pipeline.enqueue(conv, async () => {
+        const run = async () => {
+          if (done) return done;
+          throw failure;
         };
-        run = async () => ({ text: await (deps.runGroup ?? realRunner)(build, { conv, now }) });
-      }
-      const res = await pipeline.runTurn(conv, { run, background: true, announce: false, kind: conv.kind === "owner" ? "notice" : "chat" });
+        const res = await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "notice" });
+        return res.error ? "failed" : res.spoke ? "posted" : "silent";
+      });
+    }
+    return pipeline.enqueue(conv, async () => {
+      const build: PromptBuilder = (since) => {
+        const { lines, seenAt } = (deps.context ?? groupContext)(conv.groupId!, since);
+        return { prompt: groupWakePrompt(now, lines, instructions, !!since, pipeline.canSpeak()), seenAt };
+      };
+      const run = async () => ({ text: await (deps.runGroup ?? realRunner)(build, { conv, now }) });
+      const res = await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "chat" });
       return res.error ? "failed" : res.spoke ? "posted" : "silent";
     });
   }
@@ -190,7 +201,7 @@ export function createWakeups(deps: WakeDeps) {
   async function tick(now = clock()): Promise<void> {
     if (paused(now) || spent()) return;
     const convs: Conversation[] = [owner()];
-    if (settings.wakeups) {
+    if (settings.wakeups && deps.separateAccount) {
       const ids = (deps.groups ?? (() => listGroups().map((g) => g.id)))();
       const vouched = await Promise.all(ids.map((id) => deps.vouch(id).catch(() => false))); // in parallel; a lookup is cached for minutes
       ids.forEach((id, i) => vouched[i] && convs.push(group(id)));
