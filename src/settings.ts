@@ -111,9 +111,8 @@ export function loadSettings(env: Env) {
     ttsDir: env.TTS_DIR || `${env.HOME ?? ""}/.cache/ted-personal-assistant/kokoro`,
     ttsVoice: env.TTS_VOICE || "am_onyx",
     ttsSpeed: num(env, "TTS_SPEED", 0.95, 0.5, 2),
-    // Group chats the assistant takes part in (own-account mode): group ids from `npm run signal:groups`.
-    // Empty: it ignores every group. Even in these it speaks only when @mentioned or replied to (src/group.ts).
-    signalGroups: list(env, "SIGNAL_GROUPS", [], /^[A-Za-z0-9+/=_-]{16,80}$/, "a group id from `npm run signal:groups`"),
+    // Group chats (own-account mode, src/group.ts): it takes part in any group the owner is in, speaking only
+    // when @mentioned or replied to, at most this many times an hour per group.
     groupRepliesPerHour: num(env, "GROUP_REPLIES_PER_HOUR", 12, 1, 200),
     signalAttachmentsDir: `${env.HOME ?? ""}/.local/share/signal-cli/attachments`,
 

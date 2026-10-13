@@ -9,8 +9,8 @@ import { isPaused } from "./pause.ts";
 import { OWNER, settings } from "./settings.ts";
 
 // Group chats. In its own Signal account the assistant can be added to a group. There it is a friendly
-// participant and nothing more: it replies only when @mentioned or replied to, in a group the owner
-// listed (SIGNAL_GROUPS), and the run it gets has NO private data and no tools but web search (policy.ts,
+// participant and nothing more: it replies only when @mentioned or replied to, in a group the OWNER IS A
+// MEMBER OF (so a stranger cannot add it to a group and use it), and the run it gets has NO private data and no tools but web search (policy.ts,
 // source "group"). Other people's messages are data it responds to, never instructions. Nothing from a
 // group is saved: no notes, no message log, no dream; the recent messages it needs for context are kept
 // in memory only and are gone when the agent restarts.
@@ -24,12 +24,15 @@ export interface GroupLine {
   text: string;
 }
 
-const buffers = new Map<string, GroupLine[]>();
+const buffers = new Map<string, GroupLine[]>(); // by group; memory only, the oldest groups are dropped past MAX_GROUPS
+const MAX_GROUPS = 50;
 
 export function remember(groupId: string, line: GroupLine): void {
   const b = buffers.get(groupId) ?? [];
   b.push({ ...line, text: line.text.slice(0, MAX_TEXT) });
+  buffers.delete(groupId);
   buffers.set(groupId, b.slice(-KEEP));
+  for (const old of [...buffers.keys()].slice(0, Math.max(0, buffers.size - MAX_GROUPS))) buffers.delete(old);
 }
 
 // Pure: who is speaking, as the model should see it. The owner is named; others are labelled by their
@@ -87,6 +90,22 @@ const realRunner: Runner = async (prompt) => {
   throw new Error("no result");
 };
 
+// Is the owner in this group? Looked up from signal-cli's member list, remembered for a few minutes.
+// Anything that goes wrong means no: a group we cannot vouch for gets no answers.
+const memberCache = new Map<string, { at: number; ok: boolean }>();
+export async function ownerInGroup(groupId: string, lookup: () => Promise<{ id: string; members: { number?: string; uuid?: string }[] }[]>, isOwner: (who: { number?: string; uuid?: string }) => boolean, now = Date.now()): Promise<boolean> {
+  const hit = memberCache.get(groupId);
+  if (hit && now - hit.at < 5 * 60_000) return hit.ok;
+  let ok = false;
+  try {
+    ok = (await lookup()).find((g) => g.id === groupId)?.members.some(isOwner) ?? false;
+  } catch {
+    return false; // not cached: try again next time
+  }
+  memberCache.set(groupId, { at: now, ok });
+  return ok;
+}
+
 export interface GroupMessage {
   groupId: string;
   text: string;
@@ -96,13 +115,12 @@ export interface GroupMessage {
 }
 
 // Handles one message in a group. Returns the reply to send, or undefined to stay silent.
-export async function groupTurn(m: GroupMessage, run: Runner = realRunner, now = new Date()): Promise<string | undefined> {
-  if (!settings.signalGroups.includes(m.groupId)) return undefined;
+export async function groupTurn(m: GroupMessage, vouch: () => Promise<boolean>, run: Runner = realRunner, now = new Date()): Promise<string | undefined> {
   const line: GroupLine = { at: now.getTime(), who: speaker(m), text: m.text };
   const recent = buffers.get(m.groupId) ?? [];
   remember(m.groupId, line);
   if (!m.addressedToMe || !m.text.trim()) return undefined;
-  if (isPaused(now) || overBudget().over) return undefined;
+  if (isPaused(now) || overBudget().over || !(await vouch())) return undefined;
   if (!mayReply(m.groupId, now.getTime())) {
     audit("group_reply", "rate-limited", "group");
     return undefined;

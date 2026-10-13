@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groupPrompt, groupTurn, mayReply, speaker } from "../src/group.ts";
+import { groupPrompt, groupTurn, mayReply, ownerInGroup, speaker } from "../src/group.ts";
 import { classify } from "../src/policy.ts";
 import { settings } from "../src/settings.ts";
 import { interpretEnvelope, withMentions } from "@ted-personal-assistant/signal";
@@ -49,15 +49,27 @@ test("groups: both the context and the message are fenced as data", () => {
   assert.match(p, /<message>[\s\S]*@Ted help[\s\S]*<\/message>/);
 });
 
-test("groups: only listed groups, only when addressed, and a cap per hour", async () => {
+test("groups: only where the owner is a member, only when addressed, and a cap per hour", async () => {
   const run = async () => "Howdy!";
   const base = { groupId: GID, text: "@Ted hi", isOwner: false, addressedToMe: true };
-  assert.equal(await groupTurn(base, run), undefined); // not listed
-  (settings as any).signalGroups = [GID];
-  assert.equal(await groupTurn({ ...base, addressedToMe: false }, run), undefined); // not addressed
-  assert.equal(await groupTurn(base, run), "Howdy!");
+  assert.equal(await groupTurn(base, async () => false, run), undefined); // the owner is not in this group
+  assert.equal(await groupTurn({ ...base, addressedToMe: false }, async () => true, run), undefined); // not addressed
+  assert.equal(await groupTurn(base, async () => true, run), "Howdy!");
   const t = Date.now();
   for (let i = 0; i < settings.groupRepliesPerHour; i++) mayReply("another-group-id-1234567890", t);
   assert.equal(mayReply("another-group-id-1234567890", t), false);
   assert.equal(mayReply("another-group-id-1234567890", t + 3600_001), true);
+});
+
+test("groups: membership comes from the member list, is remembered, and fails closed", async () => {
+  const isOwner = (w: { number?: string; uuid?: string }) => w.number === OWNER;
+  let calls = 0;
+  const lookup = async () => (calls++, [{ id: "g-in", members: [{ number: OWNER }, { number: "+15555550105" }] }, { id: "g-out", members: [{ number: "+15555550105" }] }]);
+  const t = Date.now();
+  assert.equal(await ownerInGroup("g-in", lookup, isOwner, t), true);
+  assert.equal(await ownerInGroup("g-in", lookup, isOwner, t + 1000), true);
+  assert.equal(calls, 1); // remembered
+  assert.equal(await ownerInGroup("g-out", lookup, isOwner, t), false);
+  assert.equal(await ownerInGroup("g-unknown", lookup, isOwner, t), false);
+  assert.equal(await ownerInGroup("g-fail", async () => { throw new Error("rpc down"); }, isOwner, t), false);
 });

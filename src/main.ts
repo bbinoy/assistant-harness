@@ -10,7 +10,7 @@ import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createDreamer } from "./dream.ts";
-import { groupTurn } from "./group.ts";
+import { groupTurn, ownerInGroup } from "./group.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
@@ -78,14 +78,15 @@ async function hear(m: IncomingMessage) {
   await route({ ...m, text: heard, audio: undefined, voice: true });
 }
 
-// A message in a group chat (src/group.ts): only in groups the owner listed, only when the assistant is
-// @mentioned or replied to, and with no access to anything private. Nothing from a group is kept.
+// A message in a group chat (src/group.ts): in any group the owner is a member of, only when the assistant
+// is @mentioned or replied to, and with no access to anything private. Nothing from a group is kept.
+const isOwnerAccount = (who: { number?: string; uuid?: string }) => who.number === config.ownerNumber || (!!config.ownerAci && who.uuid === config.ownerAci);
 async function inGroup(m: IncomingMessage) {
   const groupId = m.group!.id;
-  if (!settings.signalGroups.includes(groupId)) return; // not listed: ignored, and not even logged
   const isOwner = m.from === config.ownerNumber || (!!config.ownerAci && m.fromUuid === config.ownerAci);
-  if (m.addressedToMe) void signal.typing(false, groupId);
-  const reply = await groupTurn({ groupId, text: m.text, isOwner, fromName: m.fromName, addressedToMe: !!m.addressedToMe });
+  const vouch = () => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount);
+  if (m.addressedToMe && (await vouch())) void signal.typing(false, groupId);
+  const reply = await groupTurn({ groupId, text: m.text, isOwner, fromName: m.fromName, addressedToMe: !!m.addressedToMe }, vouch);
   if (m.addressedToMe) void signal.typing(true, groupId);
   if (reply) await out.replyGroup(groupId, reply, { text: m.text.slice(0, 200), author: m.from || m.fromUuid || "", timestamp: m.timestamp });
 }

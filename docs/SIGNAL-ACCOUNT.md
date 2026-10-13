@@ -55,8 +55,8 @@ The assistant sends you a first message. On your phone it shows up as a message 
 
 With its own account the assistant can be added to a Signal group and take part. It is deliberately a different, much more limited assistant there, because other people write to it:
 
-1. Add it to the group in Signal (by its name or username), then run `npm run signal:groups` on the Mac. It lists the groups it is in, each with the line to put in `.env`: `SIGNAL_GROUPS=<id>` (several ids, comma-separated). Restart it.
-2. It answers **only** when someone @mentions it or replies to one of its messages, in a group you listed. Any other group, and any other message, is ignored.
+1. Add it to a group in Signal, by its name or username. That is all: there is nothing to configure.
+2. It answers **only** when someone @mentions it or replies to one of its messages, and only in a group **you are a member of** (it checks the member list), so a stranger cannot add it to their group and use it. Any other group, and any other message, is ignored.
 3. In a group it has **no access to your mail, calendar, tasks or notes**, will not talk about anything private (even if you ask: do that in your own chat), and has web search only. What people write there is text it responds to, never instructions that change its rules.
 4. Nothing from a group is saved: no memory notes, no message log, and the nightly dream never sees it. The few recent messages it needs for context are held in memory and are gone when it restarts. It answers at most `GROUP_REPLIES_PER_HOUR` times per group (default 12).
 

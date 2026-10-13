@@ -165,10 +165,16 @@ export class SignalClient {
     this.peerAci = peer?.aci;
   }
 
-  // The groups this account is in: ids (what SIGNAL_GROUPS lists) and names.
-  async groups(): Promise<{ id: string; name: string }[]> {
+  // The groups this account is in, with who is in them (numbers and account ids).
+  async groups(): Promise<{ id: string; name: string; members: { number?: string; uuid?: string }[] }[]> {
     const list = await this.call<any[]>("listGroups", {});
-    return (Array.isArray(list) ? list : []).filter((g) => g?.isMember !== false).map((g) => ({ id: String(g.id ?? ""), name: String(g.name ?? "") }));
+    return (Array.isArray(list) ? list : [])
+      .filter((g) => g?.isMember !== false)
+      .map((g) => ({
+        id: String(g.id ?? ""),
+        name: String(g.name ?? ""),
+        members: (Array.isArray(g.members) ? g.members : []).map((x: any) => (typeof x === "string" ? { number: x, uuid: x } : { number: x?.number ?? undefined, uuid: x?.uuid ?? undefined })),
+      }));
   }
 
   // Where our messages go: the recipient in peer mode, our own Note to Self otherwise.
