@@ -101,3 +101,50 @@ test("images: a picture with or without a caption is a message, in a private cha
   assert.deepEqual([grp?.text, grp?.image?.id, grp?.group?.id], ["look", "p1.jpg", "g1"]);
   assert.equal(interpretEnvelope({ sourceNumber: ME, timestamp: 9, dataMessage: { timestamp: 9, attachments: [{ contentType: "video/mp4", id: "v", size: 5 }] } }, peer).message, undefined);
 });
+
+// The shapes below follow signal-cli's JSON-RPC output (JsonMessageEnvelope, JsonEditMessage, JsonSyncDataMessage, JsonRemoteDelete).
+const FRIEND = "+15555550105";
+
+test("edits: an edit in a private chat is a message that says which one it replaces", () => {
+  const env = { sourceNumber: ME, timestamp: 20, editMessage: { targetSentTimestamp: 7, dataMessage: { timestamp: 20, message: "hi bot, corrected" } } };
+  const m = interpretEnvelope(env, peer).message!;
+  assert.deepEqual([m.text, m.timestamp, m.direct, m.from, m.edited], ["hi bot, corrected", 20, true, ME, { targetTimestamp: 7 }]);
+  assert.equal(interpretEnvelope({ ...env, sourceNumber: FRIEND }, peer).message?.direct, false);
+});
+
+test("edits: an edit in a group keeps the group and the mention; pictures and audio are not carried over", () => {
+  const env = {
+    sourceNumber: FRIEND, sourceUuid: "u-1", sourceName: "Eve", timestamp: 21,
+    editMessage: { targetSentTimestamp: 8, dataMessage: { timestamp: 21, message: "￼ what time?", mentions: [{ start: 0, length: 1, uuid: BOT, name: "Ted" }], groupInfo: { groupId: "g1" }, attachments: [{ contentType: "image/jpeg", id: "p.jpg", size: 5 }] } },
+  };
+  const m = interpretEnvelope(env, peer).message!;
+  assert.deepEqual([m.text, m.group, m.addressedToMe, m.edited, m.image, m.fromName], ["@Ted what time?", { id: "g1" }, true, { targetTimestamp: 8 }, undefined, "Eve"]);
+});
+
+test("edits: the owner's own edit from another device (Note to Self) arrives as a sync with an editMessage", () => {
+  const env = { sourceNumber: ME, timestamp: 22, syncMessage: { sentMessage: { destinationNumber: ME, timestamp: 22, editMessage: { targetSentTimestamp: 5, dataMessage: { timestamp: 22, message: "buy oat milk" } } } } };
+  const m = interpretEnvelope(env, self).message!;
+  assert.deepEqual([m.text, m.timestamp, m.direct, m.edited], ["buy oat milk", 22, true, { targetTimestamp: 5 }]);
+  const toOther = { ...env, syncMessage: { sentMessage: { ...env.syncMessage.sentMessage, destinationNumber: FRIEND } } };
+  assert.equal(interpretEnvelope(toOther, self).message?.direct, false);
+  assert.equal(interpretEnvelope({ sourceNumber: FRIEND, editMessage: env.syncMessage.sentMessage.editMessage }, self).message?.direct, false); // someone else's edit
+});
+
+test("edits: an edit that names no target is dropped, never taken for a new message; an edit is never a reaction or a delete", () => {
+  assert.deepEqual(interpretEnvelope({ sourceNumber: ME, editMessage: { dataMessage: { timestamp: 3, message: "x" } } }, peer), {});
+  assert.deepEqual(interpretEnvelope({ sourceNumber: ME, editMessage: { targetSentTimestamp: 0, dataMessage: { timestamp: 3, message: "x" } } }, peer), {});
+  const odd = { sourceNumber: ME, editMessage: { targetSentTimestamp: 4, dataMessage: { timestamp: 3, reaction: { emoji: "👍", targetSentTimestamp: 1 }, remoteDelete: { targetTimestamp: 1 } } } };
+  assert.deepEqual(interpretEnvelope(odd, peer), {});
+  assert.equal(interpretEnvelope({ sourceNumber: ME, dataMessage: { timestamp: 3, message: "plain" } }, peer).message?.edited, undefined);
+});
+
+test("deletes: a remote delete names the message, in a private chat, a group and Note to Self (a sync)", () => {
+  const priv = interpretEnvelope({ sourceNumber: ME, dataMessage: { timestamp: 30, remoteDelete: { targetTimestamp: 7, timestamp: 7 } } }, peer);
+  assert.deepEqual(priv, { deletion: { from: ME, targetTimestamp: 7, direct: true } });
+  const grp = interpretEnvelope({ sourceNumber: FRIEND, sourceUuid: "u-1", sourceName: "Eve", dataMessage: { timestamp: 31, remoteDelete: { targetTimestamp: 8 }, groupInfo: { groupId: "g1" } } }, peer);
+  assert.deepEqual(grp, { deletion: { from: FRIEND, targetTimestamp: 8, direct: false, group: { id: "g1" }, fromUuid: "u-1", fromName: "Eve" } });
+  const sync = interpretEnvelope({ sourceNumber: ME, syncMessage: { sentMessage: { destinationNumber: ME, timestamp: 32, remoteDelete: { targetTimestamp: 5, timestamp: 5 } } } }, self);
+  assert.deepEqual(sync, { deletion: { from: ME, targetTimestamp: 5, direct: true } });
+  assert.deepEqual(interpretEnvelope({ sourceNumber: ME, dataMessage: { timestamp: 1, remoteDelete: { timestamp: 9 } } }, peer).deletion?.targetTimestamp, 9); // older signal-cli: only `timestamp`
+  assert.deepEqual(interpretEnvelope({ sourceNumber: ME, dataMessage: { timestamp: 1, remoteDelete: {} } }, peer), {});
+});

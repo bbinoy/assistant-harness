@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Scope } from "./dreamplan.ts";
-import { compactIfNeeded, messagesSince, recordMessage, type Kind, type Sent } from "./messages.ts";
+import { compactIfNeeded, messagesSince, recordMessage, withoutDeleted, type Extra, type Kind, type Sent } from "./messages.ts";
 import { matchLines } from "./logsearch.ts";
 import { MAX_NOTE_CHARS, type Note } from "./notes.ts";
 import { settings } from "./settings.ts";
@@ -67,25 +67,26 @@ export function listGroups(): KnownGroup[] {
 // ---- history ----
 
 // A line in the group's log. What members wrote is kind "member" (text starts with who wrote it); the
-// assistant's own replies are kind "chat".
-export function recordGroup(groupId: string, kind: Kind, ts: number, text: string): void {
+// assistant's own replies are kind "chat". An edit is kind "edit" (the new text of an earlier line) and a deletion kind "delete" (a marker).
+export function recordGroup(groupId: string, kind: Kind, ts: number, text: string, extra?: Extra): void {
   const file = groupLogFile(groupId);
-  recordMessage(kind, ts, text, new Date(), file);
+  recordMessage(kind, ts, text, new Date(), file, extra);
   void compactIfNeeded(summarizeWithHaiku, settings.groupLogMb * 1_000_000, file).catch((e) => console.error("group log: compaction failed:", (e as Error).message));
 }
 
 export const groupHistorySince = (groupId: string, sinceIso?: string): Sent[] => messagesSince(sinceIso, groupLogFile(groupId));
 
 const MAX_UNSEEN = 60;
-const lineOf = (m: Sent) => `[${new Date(m.at).toTimeString().slice(0, 5)}] ${m.kind === "chat" ? `${settings.assistant}: ` : ""}${m.text.replace(/\n+/g, " / ").slice(0, 600)}`;
+const lineOf = (m: Sent) => `[${new Date(m.at).toTimeString().slice(0, 5)}] ${m.kind === "chat" ? `${settings.assistant}: ` : m.kind === "edit" ? "(edited an earlier message, this is its new text) " : ""}${m.text.replace(/\n+/g, " / ").slice(0, 600)}`;
 
 // The lines a run should be shown, oldest first. A fresh session gets the last n lines. A resumed one already
 // holds everything up to `since` (and the assistant's own replies), so it gets only what members wrote after
 // that: the cheaper way for messages nobody answered to reach the model, prepended to the next turn instead of
 // a model call each. seenAt is the newest line in the log now, stored with the session once the run is made.
 export function groupContext(groupId: string, since?: string, n = 25): { lines: string[]; seenAt?: string } {
-  const all = groupHistorySince(groupId).filter((m) => m.kind === "member" || m.kind === "chat");
-  const picked = since ? all.filter((m) => m.kind === "member" && m.at > since).slice(-MAX_UNSEEN) : all.slice(-n);
+  // What a member took back (deleted for everyone) is not shown, only that it happened; an edit is a line of its own that says so.
+  const all = withoutDeleted(groupHistorySince(groupId)).filter((m) => m.kind === "member" || m.kind === "chat" || m.kind === "edit" || m.kind === "delete");
+  const picked = since ? all.filter((m) => m.kind !== "chat" && m.at > since).slice(-MAX_UNSEEN) : all.slice(-n);
   return { lines: picked.map(lineOf), seenAt: all.at(-1)?.at ?? since };
 }
 

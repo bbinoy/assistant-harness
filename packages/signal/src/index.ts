@@ -3,6 +3,6 @@
 export { SignalClient } from "./client.ts";
 export type { SignalGroup, SignalClientOptions, SendOptions, CloseInfo } from "./client.ts";
 export { attachmentPath, defaultAttachmentsDir, parseQuote, parseAudio, parseImage, withMentions, interpretEnvelope, MAX_AUDIO_BYTES, MAX_IMAGE_BYTES } from "./envelope.ts";
-export type { Channel, Quote, IncomingMessage, IncomingReaction, AudioRef, ImageRef } from "./envelope.ts";
+export type { Channel, Quote, IncomingMessage, IncomingReaction, IncomingDeletion, AudioRef, ImageRef } from "./envelope.ts";
 export { ensureSignalDaemon, type SignalDaemon, type DaemonOptions } from "./daemon.ts";
 export { silentLogger, type Logger } from "./logger.ts";

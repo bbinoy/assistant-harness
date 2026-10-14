@@ -20,11 +20,17 @@ const KEEP_AFTER_COMPACTION = 0.7; // compact down to this share of the limit, s
 // (owner, including voice transcripts) and the owner's reactions (reaction: "👎 on: <the message>"), and what was
 // said in a group is NOT in this log: each group has its own, in the same format (member: what a person wrote there).
 //
+// The log only grows, so an edit or a delete is a line of its own that points at the message it concerns (`of`, a Signal
+// timestamp): "edit" is the new text of an earlier message, "delete" a marker that its author took it back. Neither is a second
+// message by itself: readers fold an edit into its original (foldEdits), hide what was deleted (withoutDeleted), and a lookup
+// by the original's timestamp finds the latest version. `by` is who wrote an inbound message, so an edit or a delete can be
+// checked against its author.
+//
 // The log is also the gate's LEDGER (gate.ts): "action" is something done without posting (a wake-up that stayed
 // silent) and "wake" is the chosen next look (the last one is the state). They are not conversation: everything
 // that reads the log as conversation (chat context, dream, compaction summaries, recent lines, finding the message
 // a reaction was on) skips them; only search_logs and the gate itself see them.
-export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction" | "member" | "action" | "wake";
+export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction" | "member" | "action" | "wake" | "edit" | "delete";
 
 const LEDGER_KINDS: ReadonlySet<Kind> = new Set<Kind>(["action", "wake"]);
 const isLedger = (kind: Kind) => LEDGER_KINDS.has(kind);
@@ -34,6 +40,14 @@ export interface Sent {
   at: string;
   kind: Kind;
   text: string;
+  by?: string; // who wrote an inbound message (owner, member, edit): their number or account id
+  of?: number; // edit, delete: the timestamp of the message it concerns
+}
+
+/** What a log line can carry besides its kind and text. */
+export interface Extra {
+  by?: string;
+  of?: number;
 }
 
 interface Summary {
@@ -100,13 +114,77 @@ function readAll(file: string = FILE): { sent: Sent[]; summary?: Summary } {
 
 const compacting = new Set<string>(); // files being compacted: one run at a time per log
 
-export function recordMessage(kind: Kind, ts: number, text: string, now = new Date(), file: string = FILE): void {
+export function recordMessage(kind: Kind, ts: number, text: string, now = new Date(), file: string = FILE, extra: Extra = {}): void {
   if (!text.trim()) return;
-  appendLine(file, JSON.stringify({ ts, at: now.toISOString(), kind, text: text.slice(0, MAX_TEXT) } satisfies Sent));
+  appendLine(file, JSON.stringify({ ts, at: now.toISOString(), kind, text: text.slice(0, MAX_TEXT), ...(extra.by ? { by: extra.by } : {}), ...(extra.of ? { of: extra.of } : {}) } satisfies Sent));
 }
 
-// The message a reaction was on, if it is still in the log.
-export const findMessage = (ts: number, file: string = FILE): Sent | undefined => readAll(file).sent.find((m) => m.ts === ts && m.kind !== "reaction" && !isLedger(m.kind));
+// ---- edits and deletes ----
+
+// Messages by timestamp (the first line of each; reactions, deletion markers and the ledger are no messages), the original an
+// edit leads back to, and the originals whose author deleted them.
+function index(sent: readonly Sent[]) {
+  const byTs = new Map<number, Sent>();
+  for (const e of sent) if (e.kind !== "reaction" && e.kind !== "delete" && !isLedger(e.kind) && !byTs.has(e.ts)) byTs.set(e.ts, e);
+  const rootOf = (e: Sent): Sent => {
+    let x = e;
+    for (let i = 0; i < 64 && x.kind === "edit" && x.of !== undefined; i++) {
+      const up = byTs.get(x.of);
+      if (!up || up === x) break;
+      x = up;
+    }
+    return x; // an edit whose original was folded away (compaction) is its own root
+  };
+  const deleted = new Set<Sent>();
+  for (const e of sent) if (e.kind === "delete" && e.of !== undefined) {
+    const target = byTs.get(e.of);
+    if (target) deleted.add(rootOf(target));
+  }
+  return { byTs, rootOf, deleted };
+}
+
+/** A message and what became of it: every timestamp it has had, its newest text, whether its author deleted it. */
+export interface Revisions {
+  root: Sent; // the original line (or the oldest edit left, when the original is gone)
+  latest: Sent; // the newest version
+  stamps: number[]; // the original's timestamp and every edit's: all of them point at this one message
+  deleted: boolean;
+}
+
+export function revisionsOf(ts: number, file: string = FILE): Revisions | undefined {
+  const sent = readAll(file).sent;
+  const ix = index(sent);
+  const hit = ix.byTs.get(ts);
+  if (!hit) return undefined;
+  const root = ix.rootOf(hit);
+  const chain = sent.filter((e) => ix.byTs.get(e.ts) === e && ix.rootOf(e) === root);
+  return { root, latest: chain.at(-1)!, stamps: chain.map((e) => e.ts), deleted: ix.deleted.has(root) };
+}
+
+// Pure: the lines minus the messages their authors deleted (all versions of them); the deletion markers stay.
+export function withoutDeleted(sent: readonly Sent[]): Sent[] {
+  const ix = index(sent);
+  if (!ix.deleted.size) return [...sent];
+  return sent.filter((e) => !(ix.byTs.get(e.ts) === e && ix.deleted.has(ix.rootOf(e))));
+}
+
+// Pure: one line per message, with its newest text; edits and deletion markers are gone. For readers that count or learn from
+// what people said (the dream): an edit is neither a second message nor evidence beside the version it replaced. An edit
+// whose original is not among the lines is dropped too (what the dream learnt from the original is not undone, nothing new is learnt).
+export function foldEdits(sent: readonly Sent[]): Sent[] {
+  const ix = index(sent);
+  const newest = new Map<Sent, Sent>();
+  for (const e of sent) if (e.kind === "edit" && ix.byTs.get(e.ts) === e) newest.set(ix.rootOf(e), e);
+  return sent.filter((e) => e.kind !== "edit" && e.kind !== "delete").map((e) => (newest.has(e) ? { ...e, text: newest.get(e)!.text } : e));
+}
+
+// The message a reaction, a quote or an edit points at, if it is still in the log: by the original's timestamp or any edit's, with the
+// newest text. A message its author deleted is gone.
+export function findMessage(ts: number, file: string = FILE): Sent | undefined {
+  const r = revisionsOf(ts, file);
+  if (!r || r.deleted) return undefined;
+  return r.latest === r.root ? r.root : { ...r.root, text: r.latest.text };
+}
 
 // Everything said after `sinceIso` (all of it when undefined), oldest first. Conversation only: no ledger lines.
 export const messagesSince = (sinceIso?: string, file: string = FILE): Sent[] => readAll(file).sent.filter((m) => !isLedger(m.kind) && (!sinceIso || m.at > sinceIso));

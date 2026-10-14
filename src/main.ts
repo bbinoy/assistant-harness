@@ -15,7 +15,7 @@ import { createWakeups } from "./wake.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat, startJobs } from "./heartbeat.ts";
 import { ensureNotesDir } from "./notes.ts";
-import { compactIfNeeded, recordMessage, type Kind } from "./messages.ts";
+import { compactIfNeeded, recordMessage, type Extra, type Kind } from "./messages.ts";
 import { summarizeWithHaiku } from "./summarize.ts";
 import { Mailbird } from "./mailbird.ts";
 import { createProposer } from "./propose.ts";
@@ -38,9 +38,9 @@ const signal = new SignalClient({
   logger: console, // the app's console is the timestamped, redacting one from log.ts
 });
 // What was said goes into that conversation's own log: the owner's chat, or the group's (made on first use).
-function record(groupId: string | undefined, kind: Kind, ts: number, text: string) {
-  if (groupId) return void (groupDir(groupId, groupName(groupId)), recordGroup(groupId, kind, ts, text));
-  recordMessage(kind, ts, text);
+function record(groupId: string | undefined, kind: Kind, ts: number, text: string, extra?: Extra) {
+  if (groupId) return void (groupDir(groupId, groupName(groupId)), recordGroup(groupId, kind, ts, text, extra));
+  recordMessage(kind, ts, text, new Date(), undefined, extra);
   void compactIfNeeded(summarizeWithHaiku).catch((e) => console.error("messages: compaction failed:", e.message));
 }
 const out = createOutbound(signal, (kind, ts, text, groupId) => record(groupId, kind, ts, text));
@@ -115,8 +115,15 @@ const groupBrain = createGroupBrain({ pipeline, recent: (groupId) => logTail(gro
 signal.onMessage((m) => {
   if (m.group) return void pipeline.handleIncoming(group(m.group.id), { type: "message", m }).catch((e) => console.error("group error:", e.message));
   if (!acceptOwner(m, config.ownerNumber)) return void console.log(`ignored a message from ${mask(m.from)}`);
-  if (out.isOwnEcho(m)) return; // one of our own replies coming back
+  if (!m.edited && out.isOwnEcho(m)) return; // one of our own replies coming back (an edit is the owner's, never an echo)
   pipeline.handleIncoming(owner(), { type: "message", m }).catch((e) => console.error("route error:", e.message));
+});
+
+// A message deleted for everyone: the same door as a message (a group's goes to the group, anything else must be the owner's chat).
+signal.onDelete((d) => {
+  if (d.group) return void pipeline.handleIncoming(group(d.group.id), { type: "deletion", d }).catch((e) => console.error("group error:", e.message));
+  if (!acceptOwner(d, config.ownerNumber)) return;
+  pipeline.handleIncoming(owner(), { type: "deletion", d }).catch((e) => console.error("delete error:", e.message));
 });
 
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal

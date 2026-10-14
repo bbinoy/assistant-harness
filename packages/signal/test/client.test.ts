@@ -260,3 +260,17 @@ test("client: attachmentPath joins a plain id to the folder and refuses anything
   for (const id of ["../x", "a/b", ".hidden", "", "x".repeat(101)]) assert.throws(() => attachmentPath({ id }, "/data/att"), /plain attachment id/);
   assert.match(attachmentPath({ id: "x" }), /signal-cli\/attachments\/x$/);
 });
+
+test("client: an edit arrives as a message with `edited`, a remote delete goes to onDelete only", async () => {
+  const { d, c, done } = await connected(PEER);
+  const got: { text: string; edited?: unknown }[] = [];
+  const deleted: number[] = [];
+  c.onMessage((m) => got.push({ text: m.text, edited: m.edited }));
+  c.onDelete((x) => deleted.push(x.targetTimestamp));
+  d.push({ sourceNumber: PEER.number, editMessage: { targetSentTimestamp: 4, dataMessage: { timestamp: 9, message: "fixed" } } });
+  d.push({ sourceNumber: PEER.number, dataMessage: { timestamp: 10, remoteDelete: { targetTimestamp: 9 } } });
+  await until(() => got.length === 1 && deleted.length === 1);
+  assert.deepEqual(got, [{ text: "fixed", edited: { targetTimestamp: 4 } }]);
+  assert.deepEqual(deleted, [9]);
+  await done();
+});
