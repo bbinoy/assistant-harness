@@ -151,13 +151,32 @@ export function gatePrompt(input: Pick<GateInput, "trigger" | "now" | "tail" | "
 }
 
 // The real gate: Haiku, no tools, no connectors, no memory, one JSON answer.
+// One console line of phases per call (sizes in chars and durations in ms, never message content), to see where the time goes:
+//   init   call -> the first message (the process ready and the model started on the prompt)
+//   result call -> the result message (init..result is the model)
+//   api    the model time the SDK itself reports
 export const askGate: Gate = async (input) => {
   const prompt = gatePrompt(input, notesText(input.conv, input.now));
   const system = gateSystem(input.conv, input.trigger, styleLines(input.now));
-  for await (const m of query({ prompt, options: { model: "haiku", systemPrompt: system, tools: [], settingSources: [], strictMcpConfig: true, mcpServers: {}, settings: { autoMemoryEnabled: false }, maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false } })) {
-    if (m.type !== "result") continue;
-    recordCost(m.total_cost_usd);
-    return m.subtype === "success" && !m.is_error ? parseGate(m.structured_output) : NOTHING;
+  const t0 = Date.now();
+  const at: Record<string, number> = {};
+  const mark = (k: string) => void (k in at || (at[k] = Date.now() - t0));
+  let api: number | undefined;
+  let out = NOTHING;
+  try {
+    for await (const m of query({ prompt, options: { model: "haiku", systemPrompt: system, tools: [], settingSources: [], strictMcpConfig: true, mcpServers: {}, settings: { autoMemoryEnabled: false }, maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false } })) {
+      mark("init");
+      if (m.type !== "result") continue;
+      mark("result");
+      api = m.duration_api_ms;
+      recordCost(m.total_cost_usd);
+      const p0 = Date.now();
+      out = m.subtype === "success" && !m.is_error ? parseGate(m.structured_output) : NOTHING;
+      at.parse = Date.now() - p0;
+      break;
+    }
+  } finally {
+    console.log(`timing gate ${input.trigger} prompt=${prompt.length} system=${system.length} ${Object.entries(at).map(([k, v]) => `${k}=${v}`).join(" ")}${api === undefined ? "" : ` api=${api}`} total=${Date.now() - t0}`);
   }
-  return NOTHING;
+  return out;
 };
