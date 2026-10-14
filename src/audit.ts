@@ -33,10 +33,11 @@ export function audit(tool: string, decision: string, source: Source, meta?: Rec
 }
 
 // Entries matching `keep`, oldest first. A damaged line is skipped, never fatal.
-export function readAudit(keep: (e: AuditEntry) => boolean): AuditEntry[] {
+// `contains`: a substring every wanted line has (e.g. '"tool":"heartbeat_triage"'); other lines are skipped without being parsed.
+export function readAudit(keep: (e: AuditEntry) => boolean, contains?: string): AuditEntry[] {
   const out: AuditEntry[] = [];
   for (const line of (readText(FILE) ?? "").split("\n")) {
-    if (!line) continue;
+    if (!line || (contains && !line.includes(contains))) continue;
     try {
       const e = JSON.parse(line) as AuditEntry;
       if (keep(e)) out.push(e);
