@@ -13,7 +13,7 @@ import { triageBatch, type MailInput } from "./triage.ts";
 
 const SEEN = "state/seen.json";
 const LIVENESS = "state/heartbeat.json"; // last tick, for `npm run doctor`
-const SEEN_TTL_MS = 14 * 24 * 3600_000;
+const SEEN_TTL_MS = settings.seenMailDays * 24 * 3600_000;
 const BRIEF_SUBJECT = /^\s*[☀🌙]/u; // our own briefs: never triaged
 const FETCH_CONCURRENCY = 4;
 

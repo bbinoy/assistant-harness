@@ -148,7 +148,7 @@ console.log(`connected to signal-cli (${signal.separateAccount ? "own account" :
 warmChat();
 // A warm process is used only while fresh (agent.ts); keep one ready so a message after a
 // quiet hour is still quick. Local work only, no model call.
-setInterval(() => prepareChat(approve, say, { refresh: true }), 25 * 60_000).unref();
+setInterval(() => prepareChat(approve, say, { refresh: true }), settings.warmRefreshMinutes * 60_000).unref();
 
 const handler = createHandler({ approve: approveBackground, notify, propose: proposer.show });
 handler.resume();

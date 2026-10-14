@@ -169,6 +169,18 @@ export function loadSettings(env: Env) {
     // The participation gate may ask for a pause before answering an untagged message, to seem natural. "typing…" shows meanwhile,
     // so a long pause only makes the answer late: whatever the gate asks for is cut to this many seconds (0: never wait).
     gateMaxDelaySeconds: num(env, "GATE_MAX_DELAY_SECONDS", 4, 0, 120),
+    // Timing constants that used to be hard-coded in the files that use them (defaults unchanged). Raise or lower them in .env.
+    groupStickyMinutes: num(env, "GROUP_STICKY_MINUTES", 30, 1, 1440), // a direct address that could not be answered (paused, over budget) is dropped after this long (group.ts)
+    groupNoticeMinutes: num(env, "GROUP_NOTICE_MINUTES", 10, 0, 1440), // a failure is reported in a group at most this often (conversation.ts; 0: always)
+    groupMemberCacheMinutes: num(env, "GROUP_MEMBER_CACHE_MINUTES", 5, 0, 1440), // how long "the owner is in this group" is remembered (group.ts)
+    slowReplySeconds: num(env, "SLOW_REPLY_SECONDS", 20, 0, 600), // an answer later than this is threaded under the message (quote.ts)
+    echoWindowMinutes: num(env, "ECHO_WINDOW_MINUTES", 5, 1, 60), // our own sent text coming back within this long is an echo, not the owner (outbound.ts)
+    warmRefreshMinutes: num(env, "WARM_REFRESH_MINUTES", 25, 1, 1440), // the owner's warm process is renewed this often, so it is still fresh after a quiet hour (main.ts)
+    briefRetryGapMinutes: num(env, "BRIEF_RETRY_GAP_MINUTES", 10, 1, 240), // an incomplete brief is retried after this long (tasks.ts)
+    briefPendingGraceHours: num(env, "BRIEF_PENDING_GRACE_HOURS", 3, 0, 12), // with the backstop off: urgent mail waits for the brief this long after BRIEF_START_HOUR (tasks.ts)
+    seenMailDays: num(env, "SEEN_MAIL_DAYS", 14, 1, 365), // how long the heartbeat remembers it has seen a mail (heartbeat.ts)
+    noticeAgeHours: num(env, "NOTICE_AGE_HOURS", 24, 1, 168), // what the assistant sent on its own stays "recent" for the chat this long (messages.ts)
+    compactBackoffMinutes: num(env, "COMPACT_BACKOFF_MINUTES", 60, 1, 1440), // after a failed compaction, no new try for this long (session.ts)
     signalAttachmentsDir: `${env.HOME ?? ""}/.local/share/signal-cli/attachments`,
 
     launchdLabel: env.LAUNCHD_LABEL || `com.${env.USER ?? "user"}.ted-personal-assistant`,

@@ -77,7 +77,7 @@ export const group = (groupId: string): Conversation =>
     attention: "addressed",
     optionalPictures: true,
     threadAlways: true, // a group scrolls: say whom you answer
-    noticeEveryMs: 10 * 60_000, // a failure is reported at most this often per group
+    noticeEveryMs: settings.groupNoticeMinutes * 60_000, // a failure is reported at most this often per group
     notice: groupErrorNotice, // nobody there should be sent to a terminal
   });
 

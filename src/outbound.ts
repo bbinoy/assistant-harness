@@ -1,9 +1,10 @@
 import type { Kind as MessageKind } from "./messages.ts";
-import { renderMarkdown, signalSummary, splitSections, toSignalStyles } from "./markdown.ts";
+import { settings } from "./settings.ts";
+import { renderMarkdown,signalSummary, splitSections, toSignalStyles } from "./markdown.ts";
 import type { Quote, SignalClient } from "@ted-personal-assistant/signal";
 
 const CHUNK_LIMIT = 1800; // keep each Signal message comfortably short
-const ECHO_WINDOW_MS = 5 * 60_000;
+const ECHO_WINDOW_MS = settings.echoWindowMinutes * 60_000;
 
 // Split long text on paragraph, then line, then hard boundaries.
 export function chunk(text: string, limit = CHUNK_LIMIT): string[] {

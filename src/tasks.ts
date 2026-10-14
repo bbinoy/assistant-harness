@@ -41,17 +41,15 @@ export function buildTask(convKind: "owner" | "group", out: Pick<GateOutput, "ta
 
 // ---- when the brief is owed, in code ----
 
-const BRIEF_RETRY_GAP_MINUTES = 10;
 const briefCap = () => settings.briefMaxAttempts;
 
 // Is today's brief still to come (not delivered, attempts left, past the start hour)? The radar and the mail alerts wait for it.
 // Only for a bounded window: before the backstop hour (which runs the brief whatever the notes say), or, with the backstop off
 // (hour 24), for BRIEF_PENDING_GRACE_HOURS after the start hour. After that nothing is waiting for a brief, so an urgent mail
 // is alerted and the radar may run, unless an attempt has already started (then it is pending until it is done or given up).
-const BRIEF_PENDING_GRACE_HOURS = 3;
 export const briefPending = (st: LookState, now: Date): boolean => {
   if (st.briefDone || st.briefAttempts >= briefCap() || now.getHours() < settings.briefStartHour) return false;
-  const until = settings.briefBackstopHour < 24 ? settings.briefBackstopHour : settings.briefStartHour + BRIEF_PENDING_GRACE_HOURS;
+  const until = settings.briefBackstopHour < 24 ? settings.briefBackstopHour : settings.briefStartHour + settings.briefPendingGraceHours;
   return now.getHours() < until || st.briefAttempts > 0;
 };
 
@@ -61,7 +59,7 @@ export function briefOwed(st: LookState, now: Date): "backstop" | "retry" | unde
   if (st.briefDone || st.briefAttempts >= briefCap()) return undefined;
   if (st.briefAttempts === 0) return now.getHours() >= settings.briefBackstopHour ? "backstop" : undefined;
   const last = st.lastBriefAttemptAt ? Date.parse(st.lastBriefAttemptAt) : 0;
-  return now.getTime() - last >= BRIEF_RETRY_GAP_MINUTES * 60_000 ? "retry" : undefined;
+  return now.getTime() - last >= settings.briefRetryGapMinutes * 60_000 ? "retry" : undefined;
 }
 
 // Why a chosen preset must not run now (the gate only chooses; these are code).
