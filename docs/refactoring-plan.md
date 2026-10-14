@@ -117,3 +117,23 @@ packages/signal` checks the published surface.
 - Retiring `SCHEDULER=legacy` (brief.ts/radar.ts timers) would remove roughly 100 lines and two code paths.
 - Retry/timeout constants spread across files (`STICKY_MS`, `BRIEF_RETRY_GAP_MINUTES`, `SPARE_MAX_AGE_MS`...) could
   live in settings.ts, which changes how they are configured: proposal only.
+
+## Result (after implementation)
+
+| File | Before | After |
+|---|---|---|
+| src/agent.ts | 500 | 278 |
+| packages/signal/src/client.ts | 529 | 310 (+ envelope.ts 226) |
+| src/dream.ts | 371 | 198 (+ dreamplan.ts 131, dreamapply.ts 59) |
+| src/gate.ts | 264 | 163 (+ ledger.ts 112) |
+| src/cli.ts | 215 | 88 (+ doctor.ts 124) |
+| src/conversation.ts | 450 | 453 (a new `tell()` helper replaced two copies; one import) |
+| src/heartbeat.ts | 297 | 299 |
+| src/persona.ts, src/messages.ts | 232, 189 | unchanged |
+
+Tests: 312 before, 315 after (3 new characterization tests: note-change notice x2, group voice/picture failure).
+Done: items 1 to 9. Not done on purpose: item 3 (intake and log wording) and everything in item 10.
+Not found: a dead function. `tsc --noUnusedLocals` was clean throughout, and after narrowing 62 unneeded exports it
+was still clean, so nothing became unused.
+`npm run check:isolation` calls a live model; it failed once on the first run after the dream split and passed on
+the immediate rerun and at baseline-equivalent code paths, so treat a single failure there as model noise and rerun.
