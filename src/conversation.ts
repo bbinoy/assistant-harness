@@ -34,6 +34,9 @@ export interface Conversation {
   readonly sessionFile: string; // the resumed SDK session (session.ts): idle reset and compaction work on it
   readonly gate: boolean; // is the participation gate in front of it
   readonly approvals: boolean; // can an approval be asked and answered here (the owner only)
+  readonly vouch: boolean; // is the owner's membership checked before anything is read (groups: a stranger cannot add us to a group and use us)
+  readonly attention: "always" | "addressed"; // who gets a read receipt and an explanation of an unusable voice message or picture: everyone (the owner's chat) or only someone who spoke to us
+  readonly optionalPictures: boolean; // a picture is opened only when it will be used, and an unopenable one is dropped (the caption stays); otherwise it is required
   readonly threadAlways: boolean; // an answer to someone who addressed us is always threaded under it
   readonly noticeEveryMs: number; // at most one error notice per this long (0: always)
   readonly notice: (e: unknown) => string;
@@ -48,6 +51,9 @@ const OWNER_CONVERSATION: Conversation = Object.freeze({
   sessionFile: OWNER_SESSION_FILE,
   gate: false,
   approvals: true,
+  vouch: false,
+  attention: "always",
+  optionalPictures: false,
   threadAlways: false,
   noticeEveryMs: 0,
   notice: errorNotice, // tells the owner where to look
@@ -67,6 +73,9 @@ export const group = (groupId: string): Conversation =>
     sessionFile: join(GROUPS_DIR, groupKey(groupId), "session.json"),
     gate: true,
     approvals: false,
+    vouch: true,
+    attention: "addressed",
+    optionalPictures: true,
     threadAlways: true, // a group scrolls: say whom you answer
     noticeEveryMs: 10 * 60_000, // a failure is reported at most this often per group
     notice: groupErrorNotice, // nobody there should be sent to a terminal
@@ -313,7 +322,7 @@ export function createPipeline(deps: PipelineDeps) {
   // Tell the sender why their voice message or picture could not be used: the owner always gets the reason (`before` runs
   // first, for the owner only); in a group only someone who spoke to the assistant does, otherwise it just moves on.
   async function tell(conv: Conversation, m: IncomingMessage, why: string, before?: () => void): Promise<void> {
-    if (conv.kind === "owner") {
+    if (conv.attention === "always") {
       before?.();
       await out.replyPlain(why);
     } else if (m.addressedToMe) await out.reply(why, { kind: "chat", groupId: conv.groupId });
@@ -322,7 +331,7 @@ export function createPipeline(deps: PipelineDeps) {
   // Voice message -> text, or false when it could not be understood (the sender was told, if they should be).
   async function hear(conv: Conversation, m: IncomingMessage): Promise<Held | false> {
     const target = { author: m.from, timestamp: m.timestamp };
-    if (conv.kind === "owner") status(conv, "👂", target);
+    if (conv.attention === "always") status(conv, "👂", target);
     try {
       return { ...m, text: await deps.transcript(m), audio: undefined, voice: true };
     } catch (e) {
@@ -343,9 +352,14 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
-  async function ownerMessage(conv: Conversation, original: IncomingMessage): Promise<void> {
+  // Everything a message goes through before its conversation decides what to do with it. The same steps for the owner and
+  // every group; the Conversation's flags (vouch, attention, optionalPictures) say where they differ.
+  async function intake(conv: Conversation, original: IncomingMessage): Promise<void> {
     const arrived = now();
-    void signal.markRead(original.timestamp); // the owner sees it was read, as soon as we have it
+    if (conv.vouch && !(await deps.vouch(conv.groupId!))) return; // a group we cannot vouch for gets nothing, not even a transcription
+    const author = original.from || original.fromUuid;
+    if (conv.attention === "always") void signal.markRead(original.timestamp); // the owner sees it was read, as soon as we have it
+    else if (original.addressedToMe && author) void signal.markRead(original.timestamp, author); // only those who spoke to us see "seen"
     let m: Held = original;
     if (m.audio) {
       const heard = await hear(conv, m);
@@ -353,11 +367,19 @@ export function createPipeline(deps: PipelineDeps) {
       m = heard;
     }
     if (m.image) {
-      const seen = await see(conv, m);
-      if (!seen) return;
-      m = seen;
+      // Looked at only when it will be used: in "tagged" mode a picture nobody addressed to us is just a line in the history.
+      const seen = !conv.optionalPictures || m.addressedToMe || settings.groupParticipation !== "tagged" ? await see(conv, m) : false;
+      if (!seen && !conv.optionalPictures) return;
+      m = { ...m, image: undefined, picture: seen ? seen.picture : undefined };
     }
-    record(conv, "owner", m.timestamp, m.voice ? `🎙️ ${m.text}` : m.picture ? `🖼️ ${m.text || "image"}` : m.text); // what the owner said: searchable, and what the dream learns from (never the picture itself)
+    // The line for the history: searchable, and what the dream learns from (never the picture itself).
+    const line = original.audio ? `🎙️ ${m.text}` : original.image ? `🖼️ ${m.text || "image"}` : m.text;
+    if (!conv.approvals) return deps.admitGroup(conv, { groupId: conv.groupId!, arrivedAt: arrived, text: line, picture: m.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
+    return ownerTurn(conv, m, line, arrived);
+  }
+
+  async function ownerTurn(conv: Conversation, m: Held, line: string, arrived: number): Promise<void> {
+    record(conv, "owner", m.timestamp, line);
     // While an approval is pending, a message may be its answer. That must skip the queue.
     // A spoken "yes" is never an approval, nor is a caption.
     const target = { author: m.from, timestamp: m.timestamp };
@@ -409,27 +431,6 @@ export function createPipeline(deps: PipelineDeps) {
     });
   }
 
-  // The shared steps for a group message, then the group's own question: should it speak (group.ts).
-  async function groupMessage(conv: Conversation, original: IncomingMessage): Promise<void> {
-    const groupId = conv.groupId!;
-    const arrivedAt = now();
-    if (!(await deps.vouch(groupId))) return; // a group we cannot vouch for gets nothing, not even a transcription
-    const author = original.from || original.fromUuid;
-    if (original.addressedToMe && author) void signal.markRead(original.timestamp, author); // only those who spoke to us see "seen"
-    let m: Held = original;
-    if (m.audio) {
-      const heard = await hear(conv, m);
-      if (!heard) return;
-      m = { ...heard, text: `🎙️ ${heard.text}` };
-    }
-    if (m.image) {
-      // Looked at only when it will be used: in "tagged" mode a picture nobody addressed to us is just a line in the history.
-      const seen = m.addressedToMe || settings.groupParticipation !== "tagged" ? await see(conv, m) : false;
-      m = { ...m, image: undefined, picture: seen ? seen.picture : undefined, text: `🖼️ ${m.text || "image"}` };
-    }
-    return deps.admitGroup(conv, { groupId, arrivedAt, text: m.text, picture: m.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
-  }
-
   async function groupReaction(conv: Conversation, r: IncomingReaction): Promise<void> {
     const groupId = conv.groupId!;
     if (!(await deps.vouch(groupId))) return;
@@ -440,8 +441,8 @@ export function createPipeline(deps: PipelineDeps) {
   // Everything that arrives for a conversation. The caller has already decided who may speak to it
   // (guards.ts for the owner's chat; our own echoes and reactions are dropped before this).
   function handleIncoming(conv: Conversation, ev: Incoming): Promise<void> {
-    if (conv.kind === "owner") return ev.type === "message" ? ownerMessage(conv, ev.m) : ownerReaction(conv, ev.r);
-    return ev.type === "message" ? groupMessage(conv, ev.m) : groupReaction(conv, ev.r);
+    if (conv.kind === "owner") return ev.type === "message" ? intake(conv, ev.m) : ownerReaction(conv, ev.r);
+    return ev.type === "message" ? intake(conv, ev.m) : groupReaction(conv, ev.r);
   }
 
   // A quick reaction of our own, no run needed (the gate chose it).
