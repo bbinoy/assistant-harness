@@ -11,7 +11,7 @@ import { RADAR_SCHEMA } from "../src/radar-rules.ts";
 import { settings } from "../src/settings.ts";
 import { briefPending, buildTask } from "../src/tasks.ts";
 import { ledgerEntries } from "../src/messages.ts";
-import { lookState } from "../src/gate.ts";
+import { lookState } from "../src/ledger.ts";
 import { dataPath } from "../src/state.ts";
 import { readFileSync } from "node:fs";
 import { createWakeups } from "../src/wake.ts";
