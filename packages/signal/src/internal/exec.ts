@@ -14,3 +14,7 @@ export function toolEnv(): NodeJS.ProcessEnv {
 export function onPath(bin: string): boolean {
   return (toolEnv().PATH ?? "").split(":").some((d) => d && existsSync(join(d, bin)));
 }
+
+// For ffmpeg, before -i: read only plain files. A file that is really a playlist (HLS, concat) must not make ffmpeg open a
+// network address or another local file named inside it.
+export const SAFE_INPUT = ["-protocol_whitelist", "file"];

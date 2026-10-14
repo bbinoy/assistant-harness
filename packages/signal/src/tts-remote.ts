@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { toolEnv } from "./internal/exec.ts";
+import { SAFE_INPUT, toolEnv } from "./internal/exec.ts";
 
 // Shared parts of the optional remote speech providers (tts-elevenlabs.ts, tts-http.ts): a bounded HTTPS
 // request, a check that what came back is audio, and the same ffmpeg step to AAC as the local voice.
@@ -11,6 +11,7 @@ import { toolEnv } from "./internal/exec.ts";
 
 const run = promisify(execFile);
 const MAX_REMOTE_AUDIO_BYTES = 25 * 1024 * 1024;
+const MAX_ERROR_BODY_BYTES = 4096; // all an error message ever shows is 160 characters
 
 export type Fetch = typeof fetch;
 export type AudioKind = "wav" | "mp3" | "ogg";
@@ -25,17 +26,38 @@ export const isSafeUrl = (s: string): boolean => {
   }
 };
 
-// Audio format from the content type, else from the first bytes. Pure. Undefined: not audio we know.
+// Audio format from the first bytes, else from the content type. Pure. Undefined: not audio we know. The bytes win because the
+// format found here is forced on ffmpeg below: what the server calls its answer must not pick what ffmpeg parses.
 export function sniffAudio(contentType: string | null, bytes: Uint8Array): AudioKind | undefined {
-  const ct = (contentType ?? "").split(";")[0]!.trim().toLowerCase();
-  if (/^audio\/(wav|x-wav|wave|vnd\.wave)$/.test(ct)) return "wav";
-  if (/^audio\/(mpeg|mp3)$/.test(ct)) return "mp3";
-  if (/^audio\/(ogg|opus)$/.test(ct) || ct === "application/ogg") return "ogg";
   const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
   if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WAVE") return "wav";
   if (ascii(0, 4) === "OggS") return "ogg";
   if (ascii(0, 3) === "ID3" || (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0)) return "mp3";
+  const ct = (contentType ?? "").split(";")[0]!.trim().toLowerCase();
+  if (/^audio\/(wav|x-wav|wave|vnd\.wave)$/.test(ct)) return "wav";
+  if (/^audio\/(mpeg|mp3)$/.test(ct)) return "mp3";
+  if (/^audio\/(ogg|opus)$/.test(ct) || ct === "application/ogg") return "ogg";
   return undefined;
+}
+
+// The body, but never more than `max` bytes: a server that sends no Content-Length (or lies about it) cannot make us hold an
+// unbounded answer in memory. Returns undefined as soon as the limit is passed.
+export async function readLimited(res: Response, max: number): Promise<Uint8Array | undefined> {
+  const reader = res.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
 }
 
 // A short, safe description of a failed request: status and a bit of the body, with the secrets blanked out.
@@ -59,6 +81,10 @@ export interface RemoteRequest {
 // POSTs the request, checks the answer is audio, and returns it as an AAC voice message in a fresh temp folder
 // (the caller deletes that folder, like for the local voice). Any timeout, HTTP error or non-audio answer throws.
 export async function synthesizeRemote(req: RemoteRequest, name: string): Promise<string> {
+  const failed = (e: unknown) => {
+    const x = e as { name?: string };
+    return new Error(`${name} request failed: ${x.name === "TimeoutError" || x.name === "AbortError" ? `timeout after ${Math.round(req.timeoutMs / 1000)} s` : "network error"}`);
+  };
   let res: Response;
   try {
     res = await (req.fetchImpl ?? fetch)(req.url, {
@@ -69,14 +95,17 @@ export async function synthesizeRemote(req: RemoteRequest, name: string): Promis
       signal: AbortSignal.timeout(req.timeoutMs),
     });
   } catch (e) {
-    const x = e as { name?: string; message: string };
-    throw new Error(`${name} request failed: ${x.name === "TimeoutError" || x.name === "AbortError" ? `timeout after ${Math.round(req.timeoutMs / 1000)} s` : "network error"}`);
+    throw failed(e);
   }
-  if (!res.ok) throw new Error(`${name} ${describe(res.status, await res.text().catch(() => ""), req.secrets)}`);
+  if (!res.ok) {
+    const head = await readLimited(res, MAX_ERROR_BODY_BYTES).catch(() => undefined);
+    throw new Error(`${name} ${describe(res.status, head ? new TextDecoder().decode(head) : "", req.secrets)}`);
+  }
   const declared = Number(res.headers.get("content-length") ?? 0);
   if (declared > MAX_REMOTE_AUDIO_BYTES) throw new Error(`${name} answer too large (${declared} bytes)`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length === 0 || bytes.length > MAX_REMOTE_AUDIO_BYTES) throw new Error(`${name} answer has ${bytes.length} bytes`);
+  const bytes = await readLimited(res, MAX_REMOTE_AUDIO_BYTES).catch((e) => { throw failed(e); }); // the timeout also covers reading the body
+  if (!bytes) throw new Error(`${name} answer is larger than ${MAX_REMOTE_AUDIO_BYTES} bytes`);
+  if (bytes.length === 0) throw new Error(`${name} answer has ${bytes.length} bytes`);
   const kind = sniffAudio(res.headers.get("content-type"), bytes);
   if (!kind) throw new Error(`${name} answer is not wav, mp3 or ogg audio (content type ${res.headers.get("content-type") ?? "none"})`);
   const dir = await mkdtemp(join(tmpdir(), "speech-"));
@@ -85,7 +114,7 @@ export async function synthesizeRemote(req: RemoteRequest, name: string): Promis
   await writeFile(raw, bytes, { mode: 0o600 });
   const env = toolEnv();
   try {
-    await run("ffmpeg", ["-v", "error", "-y", "-i", raw, "-c:a", "aac", "-b:a", "64k", out], { timeout: 60_000, env });
+    await run("ffmpeg", ["-v", "error", "-y", ...SAFE_INPUT, "-f", kind, "-i", raw, "-c:a", "aac", "-b:a", "64k", out], { timeout: 60_000, env });
   } catch (e) {
     throw new Error(`ffmpeg failed: ${((e as { stderr?: string }).stderr ?? (e as Error).message).trim().split("\n").slice(-3).join(" | ").slice(0, 200)}`);
   }

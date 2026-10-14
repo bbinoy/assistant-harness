@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { onPath, toolEnv } from "./internal/exec.ts";
+import { onPath, SAFE_INPUT, toolEnv } from "./internal/exec.ts";
 
 // Voice messages are transcribed on this machine: ffmpeg turns the recording into 16 kHz mono audio,
 // whisper.cpp (the open-source port of OpenAI's Whisper) turns that into text. No network, no API key.
@@ -41,7 +41,7 @@ export async function transcribe(file: string, model: string): Promise<string> {
   const env = toolEnv();
   try {
     const wav = join(dir, "in.wav");
-    await run("ffmpeg", ["-v", "error", "-i", file, "-ar", "16000", "-ac", "1", "-f", "wav", wav], { timeout: TIMEOUT_MS, env });
+    await run("ffmpeg", ["-v", "error", ...SAFE_INPUT, "-i", file, "-ar", "16000", "-ac", "1", "-f", "wav", wav], { timeout: TIMEOUT_MS, env });
     const { stdout } = await run("whisper-cli", ["-m", model, "-f", wav, "-l", "auto", "-nt", "-np"], { timeout: TIMEOUT_MS, env, maxBuffer: 4_000_000 });
     return cleanTranscript(stdout);
   } finally {
