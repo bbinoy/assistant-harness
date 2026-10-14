@@ -28,7 +28,8 @@ import { firstWarm, SpareSlot } from "./warmslot.ts";
 // state), kind "action" is something done without posting. Both are invisible to everything that reads the log as
 // conversation.
 
-const MESSAGE_TAIL = 20; // a message look judges the latest exchange: a shorter log is a faster, cheaper call (the clock look keeps the full tail)
+const MESSAGE_TAIL = 12; // a message look judges the latest exchange: a shorter log is a smaller, cheaper call (the clock look keeps the full tail)
+const MESSAGE_LINE_CHARS = 240; // ...and a long message is cut: the start says what it is about
 
 const TASK_NAMES = ["task", "brief", "radar"] as const;
 export type TaskName = (typeof TASK_NAMES)[number];
@@ -93,6 +94,13 @@ export type Gate = (input: GateInput) => Promise<GateOutput>;
 export const styleLines = (now: Date): string =>
   readNotes(now).filter((n) => n.category === "style").map((n) => `- ${n.text.replace(/\s*\n\s*/g, " ").slice(0, 600)}`).join("\n");
 
+// What the gate is told of that personality: it decides whether and when to speak, not how, so a compact one-liner
+// (the first words of each note, a few notes) is enough. The run that writes the reply gets the full styleLines.
+const STYLE_NOTES = 6;
+const STYLE_CHARS = 160;
+export const styleSummary = (now: Date): string =>
+  readNotes(now).filter((n) => n.category === "style").slice(0, STYLE_NOTES).map((n) => n.text.replace(/\s+/g, " ").trim().slice(0, STYLE_CHARS)).join("; ");
+
 // The conversation's notes as data, bounded like every other prompt that includes notes. The owner's setup and
 // voice notes are not for a gate to read; a group has no such categories.
 function notesText(conv: Conversation, now: Date): string {
@@ -146,7 +154,7 @@ export function gatePrompt(input: Pick<GateInput, "trigger" | "now" | "tail" | "
       ? input.secondsSinceMine === undefined ? "You have not spoken here recently." : `You last spoke here ${input.secondsSinceMine} seconds ago.`
       : "Nothing new was written. Is anything due now, by the notes or the log?",
     `What this conversation has asked you to remember (it may say how and when to take part, or what to do on a schedule):\n${fence("notes", notes || "(nothing)")}`,
-    `The log of this conversation, oldest first, newest last. It also shows your own earlier looks and what you did without posting (data):\n${fence("conversation_log", (input.trigger === "message" ? input.tail.slice(-MESSAGE_TAIL) : input.tail).join("\n") || "(none)")}`,
+    `The log of this conversation, oldest first, newest last. It also shows your own earlier looks and what you did without posting (data):\n${fence("conversation_log", (input.trigger === "message" ? input.tail.slice(-MESSAGE_TAIL).map((l) => (l.length > MESSAGE_LINE_CHARS ? `${l.slice(0, MESSAGE_LINE_CHARS)}…` : l)) : input.tail).join("\n") || "(none)")}`,
     input.trigger === "message" ? "Should you say something now? Answer act true or false, and how many seconds (a few at most) to wait before answering." : "Should you do something now? Answer act true or false, with instructions if so.",
   ].join("\n\n");
 }
@@ -163,7 +171,7 @@ const gateOptions = (system: string): Options => ({ model: "haiku", systemPrompt
 // key). A look of another kind (the clock tick, the owner's chat) just starts a process, as before.
 const SPARE_ID = "gate";
 export const gateSpare = new SpareSlot<WarmQuery>({ maxAgeMs: settings.warmIdleMinutes * 60_000, idleMs: () => settings.warmIdleMinutes * 60_000 });
-const spareSystem = (now: Date) => gateSystem({ kind: "group" }, "message", styleLines(now));
+const spareSystem = (now: Date) => gateSystem({ kind: "group" }, "message", styleSummary(now));
 const usesSpare = (input: Pick<GateInput, "conv" | "trigger">) => input.trigger === "message" && input.conv.kind === "group";
 
 export function prepareGate(now: Date = new Date(), start: typeof startup = startup): void {
@@ -187,7 +195,7 @@ export interface GateIO {
 //   api        the model time the SDK itself reports
 export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<GateOutput> {
   const prompt = gatePrompt(input, notesText(input.conv, input.now));
-  const system = gateSystem(input.conv, input.trigger, styleLines(input.now));
+  const system = gateSystem(input.conv, input.trigger, styleSummary(input.now));
   const t0 = Date.now();
   const at: Record<string, number> = {};
   const mark = (k: string) => void (k in at || (at[k] = Date.now() - t0));

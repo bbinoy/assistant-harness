@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { group, owner, type Conversation } from "../src/conversation.ts";
-import { GATE_SCHEMA, gatePrompt, gateSystem, logTail, parseGate, tailLine } from "../src/gate.ts";
+import { GATE_SCHEMA, gatePrompt, gateSystem, logTail, parseGate, styleSummary, tailLine } from "../src/gate.ts";
 import { clampCheck, lookDue, lookState, wakeText } from "../src/ledger.ts";
 import { compactIfNeeded, findMessage, messagesSince, noticeLines, recordMessage, type Kind, type Sent } from "../src/messages.ts";
 import { groupConversation } from "../src/dream.ts";
@@ -35,6 +35,28 @@ test("gate: the delay is capped by the setting in code, and the prompt says typi
   assert.match(p, /line 59/);
   assert.doesNotMatch(p, /line 39\b/); // a message look reads the latest exchange only
   assert.match(gatePrompt({ trigger: "clock", now: T0, tail: long }, ""), /line 0\b/); // the clock look keeps the whole tail
+});
+
+test("gate prompt: a message look sees the latest exchange with long lines cut, a clock look the whole log; the clock and the notes stay", () => {
+  const long = Array.from({ length: 30 }, (_, i) => `[10-14 09:${String(i).padStart(2, "0")}] Eve (a member): msg${i} ${"x".repeat(i === 29 ? 1000 : 10)}`);
+  const p = gatePrompt({ trigger: "message", now: T0, tail: long, secondsSinceMine: 90 }, "- [context] play on Thursdays");
+  assert.match(p, /msg29/);
+  assert.match(p, /msg18\b/);
+  assert.doesNotMatch(p, /msg17\b/); // 12 lines
+  assert.doesNotMatch(p, /x{300}/); // a long message is cut
+  assert.match(p, /msg29 x+…/);
+  assert.match(p, /CURRENT TIME/);
+  assert.match(p, /last spoke here 90 seconds ago/);
+  assert.match(p, /play on Thursdays/);
+  assert.match(gatePrompt({ trigger: "clock", now: T0, tail: long }, ""), /x{1000}/); // the clock look is unchanged
+  assert.ok(p.length < 2500, `${p.length} chars`);
+});
+
+test("gate prompt: the style the gate is told of is one compact line; no style, no personality section", () => {
+  assert.equal(typeof styleSummary(T0), "string");
+  assert.doesNotMatch(gateSystem({ kind: "group" }, "message", ""), /personality/);
+  assert.match(gateSystem({ kind: "group" }, "message", "warm and folksy; few emoji"), /warm and folksy; few emoji/);
+  assert.doesNotMatch(gateSystem({ kind: "owner" }, "clock", "warm and folksy"), /folksy/); // the owner's own chat has no personality section
 });
 
 test("settings: GATE_MAX_DELAY_SECONDS defaults to 4 and is validated", () => {
