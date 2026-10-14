@@ -128,8 +128,9 @@ signal.onDelete((d) => {
 
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal
 // (propose.ts), and the approval of any send shows the draft read back from here (agent.ts).
-const proposer = createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t, "draft") });
-setDraftReader(proposer.read);
+// MAIL_PROVIDER=none: no mail client is made at all, so there is no proposer and no mail handler either.
+const proposer = settings.mail ? createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t, "draft") }) : undefined;
+if (proposer) setDraftReader(proposer.read);
 
 // A 👍 / 👎 on the pending "Approve?" message answers it (the pipeline checks); any other reaction of the
 // owner is feedback. Our own status icons come back as reactions and are dropped.
@@ -161,8 +162,8 @@ warmChat();
 // quiet hour is still quick. Local work only, no model call.
 setInterval(() => prepareChat(approve, say, { refresh: true }), settings.warmRefreshMinutes * 60_000).unref();
 
-const handler = createHandler({ approve: approveBackground, notify, propose: proposer.show });
-handler.resume();
+const handler = proposer ? createHandler({ approve: approveBackground, notify, propose: proposer.show }) : undefined;
+handler?.resume();
 
 const dreamer = createDreamer();
 const groupDreamer = createGroupDreamer();
@@ -184,7 +185,7 @@ const wakeups = createWakeups({
 // dream runs inside the brief preset, before the brief).
 startHeartbeat({
   alert: notify,
-  handle: handler.enqueue,
+  handle: (items) => handler?.enqueue(items),
   briefDue: () => wakeups.briefPending(),
   onTick: () => {
     startJobs({

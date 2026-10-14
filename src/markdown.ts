@@ -150,6 +150,8 @@ export function splitSections(markdown: string, limit = 1800): string[] {
 // which the brief skill puts first, plus a footer pointing at the email. The full brief stays in
 // the email. Falls back to the start of the brief if those headings are missing.
 export const BRIEF_FOOTER = "📧 The full brief is in your email. Say \"brief\" and I'll send it here.";
+// Without mail (MAIL_PROVIDER=none) the brief exists only here and in memory/last-brief.md, so the pointer says where the rest is.
+export const BRIEF_FOOTER_NO_MAIL = "The rest of the brief is saved. Say \"brief\" and I'll send it here.";
 const SIGNAL_FALLBACK_CHARS = 700;
 
 export function signalSummary(markdown: string, footer = BRIEF_FOOTER): string {

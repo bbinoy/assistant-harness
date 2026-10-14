@@ -14,6 +14,25 @@ import { disconnected, NAMES, readConnectors } from "./connectors.ts";
 import { missingSetup, readNotes } from "./notes.ts";
 import { dataPath, readJson, readText } from "./state.ts";
 
+type Line = (ok: boolean | "warn", what: string, detail?: string) => void;
+
+// The mail check. MAIL_PROVIDER=none is a valid setup, not a failure: nothing is connected and nothing is expected.
+export async function mailCheck(line: Line, mail: boolean, connect: () => Promise<number>): Promise<void> {
+  if (!mail) return line(true, "mail: off", "MAIL_PROVIDER=none, chat only");
+  try {
+    line(true, "Mailbird MCP reachable", `${await connect()} inbox(es)`);
+  } catch (e) {
+    line(false, "Mailbird MCP reachable", (e as Error).message.slice(0, 80));
+  }
+}
+
+// The skills that must ship with the repo for the configured setup.
+export const requiredSkills = (mail: boolean): string[] => ["daily-brief", ...(mail ? ["mailbird"] : []), "calendar", "notion-tasks", "meeting-prep", "setup"];
+
+// What the heartbeat line says after "last tick": mail is only mentioned when there is mail.
+export const heartbeatDetail = (beat: { lastTickAt?: string; lastNewMailAt?: string }, ageMin: number, quiet: boolean, mail: boolean, localTime: (iso: string) => string): string =>
+  beat.lastTickAt ? `last tick ${Math.round(ageMin)} min ago${quiet ? ", night idle now" : ""}${mail ? `; last new mail ${beat.lastNewMailAt ? localTime(beat.lastNewMailAt) : "none yet"}` : "; mail off"}` : "no tick recorded yet";
+
 // `npm run doctor`: is everything this agent depends on in place? Prints no secrets.
 export async function doctor() {
   const root = fileURLToPath(new URL("../", import.meta.url));
@@ -51,15 +70,15 @@ export async function doctor() {
   });
   line(up ? true : "warn", `Signal daemon reachable on ${settings.signalHost}:${settings.signalPort}`, up ? "" : "only running while the agent is");
 
-  try {
+  await mailCheck(line, settings.mail, async () => {
     const mb = new Mailbird();
-    await mb.connect();
-    const inboxes = await mb.inboxes();
-    line(true, "Mailbird MCP reachable", `${inboxes.length} inbox(es)`);
-    await mb.close();
-  } catch (e) {
-    line(false, "Mailbird MCP reachable", (e as Error).message.slice(0, 80));
-  }
+    try {
+      await mb.connect();
+      return (await mb.inboxes()).length;
+    } finally {
+      await mb.close().catch(() => {});
+    }
+  });
 
   const auth = run("claude", ["auth", "status"]);
   line(!!auth && !/not logged in|logged out/i.test(auth), "Claude login valid (needed for Notion/Calendar/Gmail connectors)");
@@ -69,15 +88,15 @@ export async function doctor() {
 
   // The skills ship with the repo (plugin/skills), so there is nothing to install. What each
   // one still needs about the owner lives in memory notes, and the chat sets those up.
-  for (const skill of ["daily-brief", "mailbird", "calendar", "notion-tasks", "meeting-prep", "setup"]) {
+  for (const skill of requiredSkills(settings.mail)) {
     line(existsSync(`${settings.pluginDir}/skills/${skill}/SKILL.md`), `skill ${skill} (bundled)`);
   }
   const conn = readConnectors();
   if (conn) {
     for (const k of ["notion", "calendar"] as const) line(conn[k] ? true : "warn", `${NAMES[k]} connector`, conn[k] ? "" : `not available in the last run (${localTime(conn.at)}): add it in your Claude account (Settings, Connectors)`);
   }
-  const gaps = missingSetup(readNotes(), disconnected(conn));
-  line(gaps.length === 0 ? true : "warn", "setup notes", gaps.length ? `not set up yet: ${gaps.join("; ")}. Message the assistant "set up".` : "calendars, tasks, meetings and writing voice are set up");
+  const gaps = missingSetup(readNotes(), disconnected(conn), settings.mail);
+  line(gaps.length === 0 ? true : "warn", "setup notes", gaps.length ? `not set up yet: ${gaps.join("; ")}. Message the assistant "set up".` : settings.mail ? "calendars, tasks, meetings and writing voice are set up" : "calendars, tasks and meetings are set up");
 
   for (const [name, dir] of [["state", settings.stateDir], ["logs", settings.logsDir], ["memory", settings.memoryDir]] as const) {
     if (!existsSync(dir)) continue;
@@ -106,7 +125,7 @@ export async function doctor() {
   line(
     ageMin <= 2 * settings.heartbeatMinutes + 1 || quiet ? true : "warn",
     "heartbeat is ticking",
-    beat.lastTickAt ? `last tick ${Math.round(ageMin)} min ago${quiet ? ", night idle now" : ""}; last new mail ${beat.lastNewMailAt ? localTime(beat.lastNewMailAt) : "none yet"}` : "no tick recorded yet",
+    heartbeatDetail(beat, ageMin, quiet, settings.mail, localTime),
   );
 
   const spent = spentToday();

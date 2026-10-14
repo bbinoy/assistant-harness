@@ -2,10 +2,15 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { Source } from "./audit.ts";
 import type { Category } from "./notes.ts";
 import { RADAR_SCHEMA } from "./radar-rules.ts";
+import { settings } from "./settings.ts";
 
 // The only skills the model can load. The SDK enforces this list (anything else is refused with
 // "not in this session's skills allowlist"); Skill calls never reach canUseTool.
-export const OFFERED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].map((s) => `ted-personal-assistant:${s}`);
+// Without mail the two mail skills are not offered (the others keep a few mail sentences; the system prompt says to skip them, persona.ts).
+const MAIL_SKILLS = ["mailbird", "mailbird-troubleshooting"];
+export const offeredSkills = (mail: boolean): string[] =>
+  ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].filter((s) => mail || !MAIL_SKILLS.includes(s)).map((s) => `ted-personal-assistant:${s}`);
+export const OFFERED_SKILLS = offeredSkills(settings.mail);
 
 // ---- run profiles ----
 // HOW a run is allowed to work, fixed in code and named: the policy source (policy.ts: which tools are allowed, asked,

@@ -77,6 +77,10 @@ async function restore(id: string) {
 }
 
 const [cmd, arg] = process.argv.slice(2);
+if (!settings.mail && (cmd === "restore" || cmd === "triage-check")) {
+  console.error(`${cmd} needs mail, and mail is off (MAIL_PROVIDER=none).`);
+  process.exit(1);
+}
 if (cmd === "report") await report(Number(arg ?? 24));
 else if (cmd === "restore" && arg) await restore(arg);
 else if (cmd === "doctor") await doctor();
