@@ -152,6 +152,7 @@ export function loadSettings(env: Env) {
 
     // Voice notes are transcribed on this Mac with whisper.cpp (src/transcribe.ts); nothing leaves it.
     whisperModel: env.WHISPER_MODEL || `${env.HOME ?? ""}/.cache/ted-personal-assistant/ggml-small.bin`,
+    transcribeConcurrency: num(env, "TRANSCRIBE_CONCURRENCY", 2, 1, 8), // voice notes transcribed at the same time; the rest wait their turn (main.ts, limiter.ts)
     // Spoken replies to voice messages (src/voicereply.ts): local text to speech with Kokoro (scripts/setup-tts.sh).
     voiceReplies: oneOf(env, "VOICE_REPLIES", "on", ["on", "off"] as const) === "on",
     ttsDir: kokoro.dir,

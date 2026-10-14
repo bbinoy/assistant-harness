@@ -25,6 +25,7 @@ import { settings } from "./settings.ts";
 import { openLog } from "./state.ts";
 import { attachmentPath, ensureSignalDaemon, SignalClient, type IncomingMessage } from "@ted-personal-assistant/signal";
 import { providerReady, synthesizeWith } from "@ted-personal-assistant/signal/tts";
+import { Limiter } from "./limiter.ts";
 import { transcribe, voiceReady } from "@ted-personal-assistant/signal/voice";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
@@ -57,12 +58,16 @@ const notify = async (text: string) => {
   prepareChat(approve, say, { refresh: true }); // the chat prompt carries recent pings, so the warm process is stale now (a renewal, not activity)
 };
 
+// Every voice message is transcribed (in a group it may be meant for the assistant), but only a few at a time: a flood waits in line
+// instead of starting that many whisper processes. One line for the owner's chat and every group.
+const transcribing = new Limiter(() => settings.transcribeConcurrency);
+
 // A voice message's words, from the local speech model; the transcript is logged (logs/voice.jsonl) to inspect a
 // mishearing. Throws a sentence the user can be told if it cannot be made out.
 async function transcript(m: IncomingMessage): Promise<string> {
   let heard = "";
   try {
-    heard = await transcribe(attachmentPath(m.audio!, settings.signalAttachmentsDir), settings.whisperModel);
+    heard = await transcribing.run(() => transcribe(attachmentPath(m.audio!, settings.signalAttachmentsDir), settings.whisperModel));
   } catch (e) {
     const gaps = voiceReady(settings.whisperModel);
     console.error("voice: transcription failed:", (e as Error).message);
