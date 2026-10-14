@@ -202,6 +202,9 @@ export function loadSettings(env: Env) {
 }
 
 export const settings = loadSettings(process.env);
+// The speech keys were read into `settings` above. Nothing the agent starts (Claude Code and its MCP servers, ffmpeg, signal-cli)
+// needs them, and they are inherited by every child process unless dropped here.
+for (const name of ["ELEVENLABS_API_KEY", "TTS_HTTP_TOKEN"]) delete process.env[name];
 // SCHEDULER=legacy was retired: the gate is the only scheduler. A stale value in .env is ignored, with one line to say so.
 if (process.env.SCHEDULER === "legacy") console.warn("settings: SCHEDULER=legacy is no longer supported and is ignored (the gate scheduler is the only one); remove it from .env");
 export const OWNER = settings.owner;
