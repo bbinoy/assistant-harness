@@ -539,3 +539,24 @@ test("groups: no read receipt without an author; the owner's chat is always mark
   await o.pipeline.handleIncoming(owner(), msg({ text: "" , audio: { id: "a.aac", size: 3 } }));
   assert.deepEqual(o.r.reads, [{ ts: 111, from: undefined }]);
 });
+
+test("log: a finished turn says which conversation kind replied or failed", async () => {
+  const lines: string[] = [];
+  const { log, error } = console;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  console.error = (...a: unknown[]) => void lines.push(a.join(" "));
+  try {
+    await rig().pipeline.handleIncoming(owner(), msg());
+    await rig({ run: async () => { throw new Error("boom"); } }).pipeline.handleIncoming(owner(), msg());
+    const g = rig();
+    await g.pipeline.runTurn(group(GID), { run: async () => ({ text: "hi", costUsd: 0.01 }), announce: false });
+    await g.pipeline.runTurn(group(GID), { run: async () => { throw new Error("boom"); }, announce: false });
+  } finally {
+    console.log = log;
+    console.error = error;
+  }
+  assert.ok(lines.includes("owner replied (2 chars, $0.0100)"), lines.join("|"));
+  assert.ok(lines.includes("owner: run failed: boom"));
+  assert.ok(lines.includes("group replied (2 chars, $0.0100)"));
+  assert.ok(lines.includes("group: run failed: boom"));
+});

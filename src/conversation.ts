@@ -286,7 +286,7 @@ export function createPipeline(deps: PipelineDeps) {
     try {
       const { text, costUsd } = await turn.run({ firstOutput: () => turn.timing?.mark("first") });
       turn.timing?.set("run", now() - started);
-      console.log(`${conv.kind === "owner" ? "agent" : "group"} replied (${text.length} chars${costUsd === undefined ? "" : `, $${costUsd.toFixed(4)}`})`);
+      console.log(`${conv.kind} replied (${text.length} chars${costUsd === undefined ? "" : `, $${costUsd.toFixed(4)}`})`);
       const sent = await deliver(conv, text, { ...turn, started });
       turn.timing?.mark("total");
       turn.timing?.report(); // before compaction: that runs after the reply and is not part of the wait
@@ -296,7 +296,7 @@ export function createPipeline(deps: PipelineDeps) {
     } catch (e) {
       turn.timing?.mark("total");
       turn.timing?.report();
-      console.error(background ? `agent error (${turn.background ? "wake-up" : "reaction"}):` : `${conv.kind === "owner" ? "agent" : "group: run"} failed:`, (e as Error).message); // a reaction needs no apology
+      console.error(background ? `agent error (${turn.background ? "wake-up" : "reaction"}):` : `${conv.kind}: run failed:`, (e as Error).message); // a reaction needs no apology
       if (conv.kind === "group") audit("group_reply", "failed", "group", { error: (e as Error).message.slice(0, 200) });
       let noticed = false;
       if (!background) status(conv, "⚠️", turn.target);
