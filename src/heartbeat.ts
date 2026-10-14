@@ -61,6 +61,15 @@ export function startJobs(jobs: Record<string, () => unknown>): void {
   }
 }
 
+const newMail = (inbox: { email: string }, row: Row): NewMail => ({
+  accountEmail: inbox.email,
+  conversationId: row.conversationId,
+  messageId: row.lastMessageId,
+  from: row.lastSender,
+  subject: row.subject,
+  receivedAtUtc: row.receivedAtUtc,
+});
+
 const seenKey = (m: { conversationId: string; lastMessageId?: number; messageId?: number }) =>
   `${m.conversationId}:${m.lastMessageId ?? m.messageId}`;
 
@@ -86,14 +95,7 @@ async function checkMail(mb: MailSource) {
       if (seen.keys[key]) continue;
       seen.keys[key] = now;
       if (seeding || BRIEF_SUBJECT.test(row.subject)) continue;
-      fresh.push({
-        accountEmail: inbox.email,
-        conversationId: row.conversationId,
-        messageId: row.lastMessageId,
-        from: row.lastSender,
-        subject: row.subject,
-        receivedAtUtc: row.receivedAtUtc,
-      });
+      fresh.push(newMail(inbox, row));
     }
   }
   for (const [key, ts] of Object.entries(seen.keys)) if (now - ts > SEEN_TTL_MS) delete seen.keys[key];
@@ -285,7 +287,7 @@ export async function triageCheck(mb: MailSource, count: number) {
     const rows = await mb.call<Row[]>("list_conversations", { folderId: inbox.folderId, limit: count });
     for (const r of rows) {
       if (BRIEF_SUBJECT.test(r.subject)) continue;
-      mails.push({ accountEmail: inbox.email, conversationId: r.conversationId, messageId: r.lastMessageId, from: r.lastSender, subject: r.subject, receivedAtUtc: r.receivedAtUtc });
+      mails.push(newMail(inbox, r));
     }
   }
   mails.sort((a, b) => b.receivedAtUtc.localeCompare(a.receivedAtUtc)).splice(count);

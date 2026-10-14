@@ -58,6 +58,8 @@ export function ownerWakePrompt(now: Date, instructions: string, tail: readonly 
   ].filter(Boolean).join("\n\n");
 }
 
+const outcome = (res: { error?: unknown; spoke: boolean }): "posted" | "silent" | "failed" => (res.error ? "failed" : res.spoke ? "posted" : "silent");
+
 const source = (conv: Conversation): Source => (conv.kind === "owner" ? "background" : "group");
 
 export function createWakeups(deps: WakeDeps) {
@@ -80,8 +82,7 @@ export function createWakeups(deps: WakeDeps) {
           if (done) return done;
           throw failure;
         };
-        const res = await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "notice" });
-        return res.error ? "failed" : res.spoke ? "posted" : "silent";
+        return outcome(await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "notice" }));
       });
     }
     return pipeline.enqueue(conv, async () => {
@@ -90,8 +91,7 @@ export function createWakeups(deps: WakeDeps) {
         return { prompt: groupWakePrompt(now, lines, instructions, !!since, pipeline.canSpeak()), seenAt };
       };
       const run = async () => ({ text: await (deps.runGroup ?? realRunner)(build, { conv, now }) });
-      const res = await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "chat" });
-      return res.error ? "failed" : res.spoke ? "posted" : "silent";
+      return outcome(await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "chat" }));
     });
   }
 

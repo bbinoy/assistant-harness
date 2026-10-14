@@ -53,9 +53,10 @@ const approveBackground: Approve = (description, call, abort) => approvals.reque
 // alerts, handled mail, setup problems) and is also remembered, so the chat knows what a reply
 // like "yes, do that" refers to (messages.ts). Memory announcements and chat answers use `say`.
 const say = async (text: string) => void (await out.replyPlain(text, "notice"));
+const warmChat = () => prepareChat(approve, say);
 const notify = async (text: string) => {
   await say(text);
-  prepareChat(approve, say); // the chat prompt carries recent pings, so the warm process is stale now
+  warmChat(); // the chat prompt carries recent pings, so the warm process is stale now
 };
 
 // A voice message's words, from the local speech model; the transcript is logged (logs/voice.jsonl) to inspect a
@@ -76,8 +77,10 @@ async function transcript(m: IncomingMessage): Promise<string> {
 
 // Group chats (src/group.ts): in any group the owner is a member of. Everything said or reacted there goes
 // into that group's own history; the brain decides when the assistant speaks. No access to anything private.
-const isOwnerAccount = (who: { number?: string; uuid?: string }) => who.number === config.ownerNumber || (!!config.ownerAci && who.uuid === config.ownerAci);
-const fromOwner = (w: { from: string; fromUuid?: string }) => w.from === config.ownerNumber || (!!config.ownerAci && w.fromUuid === config.ownerAci);
+const isOwnerId = (number?: string, uuid?: string) => number === config.ownerNumber || (!!config.ownerAci && uuid === config.ownerAci);
+const isOwnerAccount = (who: { number?: string; uuid?: string }) => isOwnerId(who.number, who.uuid);
+const fromOwner = (w: { from: string; fromUuid?: string }) => isOwnerId(w.from, w.fromUuid);
+const vouch = (groupId: string) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount); // is the owner in this group?
 
 // Both kinds of conversation run through one pipeline (src/conversation.ts). Spoken replies need the
 // assistant's own chat (in Note to Self our own voice message would echo back as if the owner had sent
@@ -95,12 +98,12 @@ const pipeline: Pipeline = createPipeline({
     synth: (words) => synthesizeWith(words, settings.tts, console),
   },
   approvals,
-  vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
+  vouch,
   isOwner: fromOwner,
   admitGroup: (_conv, m) => groupBrain(m),
   compact: (conv) => compactChatIfNeeded(conv.sessionFile, conv.source, conv.notesDir), // every conversation, after the reply is out; the next message waits for it
   // Warm process: one, for the owner's chat. Groups have none (bursty, many; a cold start per group turn is the price).
-  afterTurn: (conv) => void (conv.kind === "owner" && prepareChat(approve, say)),
+  afterTurn: (conv) => void (conv.kind === "owner" && warmChat()),
 });
 const groupBrain = createGroupBrain({ pipeline, recent: (groupId) => logTail(group(groupId)) });
 
@@ -144,10 +147,10 @@ signal.onClose(({ error }) => {
 await signal.connect();
 console.log(`connected to signal-cli (${signal.separateAccount ? "own account" : "Note to Self"}); accepting only ${mask(config.ownerNumber)}; auth: ${config.credential}`);
 
-prepareChat(approve, say);
+warmChat();
 // A warm process is used only while fresh (agent.ts); keep one ready so a message after a
 // quiet hour is still quick. Local work only, no model call.
-setInterval(() => prepareChat(approve, say), 25 * 60_000).unref();
+setInterval(warmChat, 25 * 60_000).unref();
 
 const handler = createHandler({ approve: approveBackground, notify, propose: proposer.show });
 handler.resume();
@@ -163,7 +166,7 @@ const dream = () => dreamer.run().then(() => groupDreamer.run()).catch(() => {})
 const wakeups = createWakeups({
   pipeline,
   separateAccount: signal.separateAccount,
-  vouch: (groupId) => ownerInGroup(groupId, () => signal.groups(), isOwnerAccount),
+  vouch,
   runProfile: (profile, prompt, extra) => runProfile(profile, prompt, approveBackground, extra),
   presets: { sendBrief: out.sendBriefSummary, notify: say, beforeBrief: dream },
 });
