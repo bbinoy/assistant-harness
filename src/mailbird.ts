@@ -6,15 +6,28 @@ import { Agent, fetch as undiciFetch } from "undici";
 // Direct MCP client for Mailbird's local server: no model call, no mcp-remote.
 // Connection details come from the same entry Claude Code uses, read here so the
 // bearer token never passes through a model.
-function connectionDetails(): { url: string; headerName: string; headerValue: string } {
-  const cfg = JSON.parse(readFileSync(`${process.env.HOME}/.claude.json`, "utf8")).mcpServers?.mailbird;
-  const args: string[] = cfg?.args ?? [];
-  const url = args.find((a) => a.startsWith("https://127.0.0.1") || a.startsWith("http://127.0.0.1"));
+// The host must BE the loopback address: "https://127.0.0.1.example.com" starts with the same characters but is another machine, and
+// this connection skips certificate checks and sends a bearer token.
+const isLoopbackUrl = (a: unknown): a is string => {
+  try {
+    const u = new URL(String(a));
+    return (u.protocol === "https:" || u.protocol === "http:") && ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname) && !u.username && !u.password;
+  } catch {
+    return false;
+  }
+};
+
+// Pure: the connection details from the "mailbird" entry of ~/.claude.json.
+export function connectionFrom(cfg: { args?: unknown } | undefined): { url: string; headerName: string; headerValue: string } {
+  const args: string[] = Array.isArray(cfg?.args) ? cfg.args.map(String) : [];
+  const url = args.find(isLoopbackUrl);
   const header = args[args.indexOf("--header") + 1];
   if (!url || !header) throw new Error("mailbird MCP entry not found in ~/.claude.json");
   const [headerName, ...rest] = header.split(": ");
   return { url, headerName: headerName!, headerValue: rest.join(": ") };
 }
+
+const connectionDetails = () => connectionFrom(JSON.parse(readFileSync(`${process.env.HOME}/.claude.json`, "utf8")).mcpServers?.mailbird);
 
 interface Inbox {
   accountId: number;
