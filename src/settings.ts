@@ -96,6 +96,11 @@ export function loadSettings(env: Env) {
     // How long an "Approve?" waits before it counts as declined: one asked in a chat turn, and one asked by an unattended run.
     approvalTimeoutMinutes: num(env, "APPROVAL_TIMEOUT_MINUTES", 15, 1, 1440),
     backgroundApprovalTimeoutMinutes: num(env, "BACKGROUND_APPROVAL_TIMEOUT_MINUTES", 120, 1, 2880),
+    // How approvals are worded and read (src/approvals.ts, src/softjudge.ts). strict: today's flow (the question is built by code from
+    // the exact arguments; answers are matched by code, the model only classifies free text). soft: the model also reads every reply
+    // against ALL open approvals (routing, conditions, "later", questions); the question is still built by code. conversational: soft,
+    // plus the question is written by a model and checked by a second, independent model call (code text if the check fails).
+    approvalStyle: oneOf(env, "APPROVAL_STYLE", "strict", ["strict", "soft", "conversational"] as const),
 
     // The longest one model run may take on the wall clock (src/ceiling.ts), so a hung turn cannot block its conversation until a
     // restart. Chat: the owner's chat and every group. Background: gate tasks, brief, radar, mail handler; the time a background run

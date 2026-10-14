@@ -210,6 +210,23 @@ test("private chat: an approval answer is handled before the queue and never rea
   assert.deepEqual(modified.r.sent.map((s) => s.text), ["Applied your change: start → 15:00"]);
 });
 
+test("private chat (soft approvals): a clarifying reply is sent and consumes the message; a judge failure notes it and the message still goes to the chat", async () => {
+  const clarify = rig({ approval: { outcome: "clarify", reply: "Without Bob? Say so and I will redo it." } });
+  await clarify.pipeline.handleIncoming(owner(), msg({ text: "yes but not Bob" }));
+  assert.equal(clarify.r.prompts.length, 0); // not a chat message
+  assert.deepEqual(clarify.r.sent.map((s) => s.text), ["Without Bob? Say so and I will redo it."]);
+  assert.deepEqual(clarify.r.reacts.map((x) => x.emoji), ["💬"]);
+  const note = rig({ approval: { outcome: "none", note: "I couldn't tell whether that answers it, so it is still open." } });
+  await note.pipeline.handleIncoming(owner(), msg({ text: "hmm" }));
+  assert.equal(note.r.prompts.length, 1); // flows on as a normal message
+  assert.match(note.r.sent[0]!.text, /still open/);
+  // an edit never answers an approval: the answer check is not even called
+  const asked: string[] = [];
+  const edited = rig({ approval: (t: string) => (asked.push(t), { outcome: "approved" }) });
+  await edited.pipeline.handleIncoming(owner(), msg({ text: "yes", edited: { targetTimestamp: 90 } } as any));
+  assert.deepEqual(asked, []);
+});
+
 test("private chat: a failed turn becomes a notice (login, limit, other), ⚠️, and typing stops", async () => {
   for (const [err, re] of [[new AuthError("a"), /claude auth login/], [new RateLimitError("r"), /usage limit/], [new Error("secret detail"), /Something broke on my end/]] as const) {
     const { r, pipeline } = rig({ separate: false, run: async () => { throw err; } });

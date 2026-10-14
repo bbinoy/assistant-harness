@@ -5,6 +5,7 @@ import { localTime } from "./pause.ts";
 import { doctor } from "./doctor.ts";
 import { settings } from "./settings.ts";
 import { agreement } from "./autojudge.ts";
+import { APPROVAL_DECISIONS, approvalLines } from "./approvalreport.ts";
 import { migrateLegacyLayout } from "./migrate.ts";
 
 // Small operator tools:
@@ -28,12 +29,19 @@ function judgeSummary(hours: number) {
   console.log(`  asked, and you approved anyway: ${a.judgedAskOwnerApproved}`);
 }
 
+function approvalSummary(hours: number) {
+  const since = new Date(Date.now() - hours * 3600_000).toISOString();
+  const lines = approvalLines(readAudit((e) => e.ts > since && APPROVAL_DECISIONS.includes(e.decision)));
+  if (lines.length) console.log(`\nApprovals: question vs arguments (last ${hours}h)\n${lines.join("\n")}`);
+}
+
 async function report(hours: number) {
   const since = new Date(Date.now() - hours * 3600_000).toISOString();
   const rows = readAudit((e) => isTriage(e) && e.ts > since);
   if (rows.length === 0) {
     console.log(`Nothing triaged in the last ${hours}h.`);
-    return judgeSummary(hours);
+    judgeSummary(hours);
+    return approvalSummary(hours);
   }
   const order = ["archived", "alerted", "covered-by-brief", "queued-for-handler", "archive-deferred", "archive-failed", "alert-failed", "handler-queue-failed", "kept"];
   const decisions = [...order, ...new Set(rows.map((e) => e.decision).filter((d) => !order.includes(d)))];
@@ -46,6 +54,7 @@ async function report(hours: number) {
     }
   }
   judgeSummary(hours);
+  approvalSummary(hours);
 }
 
 async function restore(id: string) {
