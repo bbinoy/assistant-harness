@@ -43,6 +43,7 @@ interface RunOptions {
   // Fires after a tool call succeeds. Used to capture the brief the agent sends.
   onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void;
   onFirstOutput?: () => void; // the model's first message arrived (timing only)
+  judgeContext?: string; // an unattended job: the instructions it was given, shown to the approval judge (autojudge.ts)
 }
 
 // Context size of one model call: everything it was sent.
@@ -58,13 +59,13 @@ function profileSystem(name: OwnerProfile): string {
 }
 
 // The options of an owner profile's run (a fresh session).
-function profileOptions(name: OwnerProfile, extra: { onToolSuccess?: RunOptions["onToolSuccess"] } = {}): RunOptions {
+function profileOptions(name: OwnerProfile, extra: { onToolSuccess?: RunOptions["onToolSuccess"]; judgeContext?: string } = {}): RunOptions {
   const p = PROFILES[name];
-  return { source: p.source, systemPrompt: profileSystem(name), skills: p.skills, maxTurns: p.maxTurns, maxBudgetUsd: p.maxBudgetUsd, outputFormat: p.outputSchema, onToolSuccess: extra.onToolSuccess };
+  return { source: p.source, systemPrompt: profileSystem(name), skills: p.skills, maxTurns: p.maxTurns, maxBudgetUsd: p.maxBudgetUsd, outputFormat: p.outputSchema, onToolSuccess: extra.onToolSuccess, judgeContext: extra.judgeContext };
 }
 
 // One run under a named owner profile: always a fresh session.
-export const runProfile = (name: OwnerProfile, prompt: string, approve: Approve, extra: { onToolSuccess?: RunOptions["onToolSuccess"] } = {}): Promise<AgentReply> =>
+export const runProfile = (name: OwnerProfile, prompt: string, approve: Approve, extra: { onToolSuccess?: RunOptions["onToolSuccess"]; judgeContext?: string } = {}): Promise<AgentReply> =>
   runAgent(prompt, approve, profileOptions(name, extra));
 
 export function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
@@ -124,7 +125,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     plugins: isolated ? undefined : [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
     skills: isolated ? undefined : (opts.skills ? [...opts.skills] : OFFERED_SKILLS),
     disallowedTools: isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
-    canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir),
+    canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir, opts.judgeContext),
     hooks,
     maxTurns: opts.maxTurns,
     maxBudgetUsd: opts.maxBudgetUsd,

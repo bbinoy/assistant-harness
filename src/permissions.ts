@@ -44,7 +44,7 @@ let draftReader: ((messageId: number) => Promise<DraftView | undefined>) | undef
 // Set by main.ts: reads a draft back from Mailbird, for the approval of a send.
 export const setDraftReader = (fn: typeof draftReader) => void (draftReader = fn);
 
-export function makeCanUseTool(approve: Approve, source: Source, memoryDir: string | undefined): CanUseTool {
+export function makeCanUseTool(approve: Approve, source: Source, memoryDir: string | undefined, judgeContext?: string): CanUseTool {
   return async (tool, input, { signal }) => {
     const verdict = classify(tool, input, source, memoryDir);
     if (verdict === "allow") {
@@ -79,7 +79,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     }
     let judged: Verdict | undefined;
     if (settings.autoApprove !== "off" && isJudgeable(tool, input, source)) {
-      judged = await judgeAction({ source, description, ownerMessage: source === "chat" ? chatOwnerMessage : undefined });
+      judged = await judgeAction({ source, description, ownerMessage: source === "chat" ? chatOwnerMessage : undefined, task: source === "chat" ? undefined : judgeContext });
       audit(tool, `judge-${judged.decision}`, source, { reason: judged.reason, mode: settings.autoApprove });
       if (mayAutoApprove(settings.autoApprove, source, judged)) {
         audit(tool, "auto-approved", source, { reason: judged.reason }); // silent on purpose: logged, never announced (npm run report shows them)

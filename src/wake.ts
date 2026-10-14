@@ -36,7 +36,7 @@ interface WakeDeps {
   separateAccount: boolean; // the assistant has its own Signal account (signal.separateAccount). Groups are woken only then: on Note to Self every message would go out as the owner
   pipeline: Pick<Pipeline, "enqueue" | "runTurn" | "record" | "canSpeak">;
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group? (a group we cannot vouch for is never woken)
-  runProfile: (profile: OwnerProfile, prompt: string, extra?: { onToolSuccess?: (tool: string, input: unknown) => void }) => Promise<{ text: string; costUsd?: number; structured?: unknown }>; // the owner's runs by profile (agent.ts runProfile)
+  runProfile: (profile: OwnerProfile, prompt: string, extra?: { onToolSuccess?: (tool: string, input: unknown) => void; judgeContext?: string }) => Promise<{ text: string; costUsd?: number; structured?: unknown }>; // the owner's runs by profile (agent.ts runProfile)
   presets?: { sendBrief: (markdown: string) => Promise<void>; notify: (text: string) => Promise<void>; beforeBrief?: () => Promise<void> }; // what the brief and radar presets need
   runGroup?: Runner;
   gate?: Gate;
@@ -76,7 +76,7 @@ export function createWakeups(deps: WakeDeps) {
       // owner's chat must not wait with it. Only the delivery of the answer takes its place in the queue.
       let done: { text: string; costUsd?: number } | undefined;
       let failure: unknown;
-      await deps.runProfile("background", ownerWakePrompt(now, instructions, logTail(conv, 20), pipeline.canSpeak())).then((r) => void (done = r), (e) => void (failure = e));
+      await deps.runProfile("background", ownerWakePrompt(now, instructions, logTail(conv, 20), pipeline.canSpeak()), { judgeContext: instructions }).then((r) => void (done = r), (e) => void (failure = e));
       return pipeline.enqueue(conv, async () => {
         const run = async () => {
           if (done) return done;

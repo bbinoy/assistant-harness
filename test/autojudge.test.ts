@@ -47,14 +47,24 @@ test("judge report: counts where it agreed with the owner and where it would hav
   assert.deepEqual(a, { total: 5, judgedAuto: 3, autoOwnerApproved: 2, autoOwnerDeclined: 1, judgedAskOwnerApproved: 1 });
 });
 
-test("judge floor: opening a web page is judged only in chat, and only for a plain public address", () => {
+test("judge floor: opening a web page is judged in chat and in the owner's own background jobs, never for the mail handler, and only for a plain public address", () => {
   const fetch = (url: string, source: "chat" | "handler" | "radar" | "brief" | "background" = "chat") => isJudgeable("WebFetch", { url, prompt: "what does it say" }, source);
   assert.equal(fetch("https://en.wikipedia.org/wiki/Zurich"), true);
   assert.equal(fetch("https://example.com/search?q=opening+hours"), true);
-  // unattended runs read untrusted mail and pages: they always ask
-  for (const s of ["handler", "radar", "brief", "background"] as const) assert.equal(fetch("https://example.com/a", s), false, s);
+  for (const s of ["background", "brief", "radar"] as const) assert.equal(fetch("https://example.com/a", s), true, s);
+  // the mail handler reads raw untrusted mail with nobody watching: it always asks
+  assert.equal(fetch("https://example.com/a", "handler"), false);
+  assert.equal(fetch("https://example.com/a", "group" as never), false);
   // an address can carry data out: nothing but a plain https address on a named public host
   for (const bad of ["http://example.com/a", "https://user:pw@example.com/a", "https://example.com:8443/a", "https://127.0.0.1/a", "https://192.168.1.5/a", "https://localhost/a", "https://printer.local/a", "https://intranet.internal/a", "https://[::1]/a", "https://example.com/a#frag", `https://example.com/a?d=${"x".repeat(130)}`, `https://example.com/${"a".repeat(300)}`, "not a url", "file:///etc/passwd", "ftp://example.com/a"]) assert.equal(isPlainWebAddress(bad), false, bad);
   assert.equal(isPlainWebAddress(undefined), false);
   assert.equal(isJudgeable("WebFetch", {}), false);
+});
+
+test("judge prompt: a background job is judged against its instructions, fenced as data", () => {
+  const p = judgePrompt({ source: "background", description: "Open a web page: https://example.com/a", task: "Check the Zurich weather page every morning" });
+  assert.match(p, /background job \(background\)/);
+  assert.match(p, /Check the Zurich weather page/);
+  assert.match(p, /job_instructions/);
+  assert.doesNotMatch(judgePrompt({ source: "chat", description: "x", ownerMessage: "open it" }), /job_instructions/);
 });
