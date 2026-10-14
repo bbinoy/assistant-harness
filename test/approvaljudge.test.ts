@@ -191,8 +191,8 @@ test("one spare: WARM=off starts none for either task; a dead spare falls back t
 });
 
 test("the action judge's prompt: one rule for sends and forwards, and every earlier safety sentence is still there", () => {
-  assert.match(SYSTEM, /Sending or forwarding an email involves other people by nature/);
-  assert.match(SYSTEM, /choose auto ONLY when .* asked for exactly this send or forward, to these recipients/);
+  assert.match(SYSTEM, /Only for an action that sends or forwards an email \(this changes nothing about how any other action is judged\)/);
+  assert.match(SYSTEM, /Choose auto ONLY when .* asked for exactly this send or forward, to these recipients/);
   assert.match(SYSTEM, /extra recipient or bcc/);
   assert.match(SYSTEM, /the assistant's own idea/);
   assert.match(SYSTEM, /only asked to prepare a draft or a reply/);
