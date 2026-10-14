@@ -221,9 +221,9 @@ export function createGroupBrain(brain: Brain) {
         if (batch.stale()) return; // someone wrote meanwhile: that message is judged on its own
         if (!r.ok) {
           console.error("group: gate failed:", (r.e as Error).message); // not addressed: usually nobody is waiting for an answer
-          // ...unless the assistant is in the middle of a conversation here (it spoke lately): then a message may well be for it,
-          // and a silent group looks like a broken one. The usage limit and an expired login are said once, like in a turn that fails.
-          if ((r.e instanceof RateLimitError || r.e instanceof AuthError) && st.lastSpoke && Date.now() - st.lastSpoke < stickyMs()) await pipeline.warn(conv, r.e);
+          // ...unless the gate could not decide at all: a silent group looks like a broken one, and any message may be meant for us.
+          // The usage limit and an expired login are said now and then (groupNoticeMinutes), like in a turn that fails.
+          if (r.e instanceof RateLimitError || r.e instanceof AuthError) await pipeline.warn(conv, r.e);
           return;
         }
         const v = r.v;

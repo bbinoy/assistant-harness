@@ -9,7 +9,7 @@ export function errorNotice(e: unknown): string {
   return e instanceof AuthError
     ? "My login expired. On the Mac, run `claude auth login`, then message me again."
     : e instanceof RateLimitError
-      ? "I've hit my usage limit for now, so I can't think until it resets. Mail triage keeps running. Try me again a bit later."
+      ? "I've hit my usage limit for now, so I can't think until it resets. Try me again a bit later."
       : "Something broke on my end. Check the logs, I'm not telling you what it was.";
 }
 
