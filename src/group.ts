@@ -65,8 +65,16 @@ export function groupWakePrompt(now: Date, lines: readonly string[], instruction
 
 // Is the owner in this group? Looked up from signal-cli's member list, remembered for a few minutes.
 // Anything that goes wrong means no: a group we cannot vouch for gets no answers and no logging.
+const MAX_CACHED_GROUPS = 200;
 const memberCache = new Map<string, { at: number; ok: boolean; name: string }>();
+// Every group that ever sends a message gets an entry (strangers' groups we were added to as well): the map stays bounded.
+function trimMemberCache(now: number): void {
+  if (memberCache.size <= MAX_CACHED_GROUPS) return;
+  for (const [key, v] of memberCache) if (now - v.at >= settings.groupMemberCacheMinutes * 60_000) memberCache.delete(key);
+  while (memberCache.size > MAX_CACHED_GROUPS) memberCache.delete(memberCache.keys().next().value!);
+}
 export const groupName = (groupId: string): string => (memberCache.get(groupId)?.name ?? "").replace(/[\r\n"<>]/g, " ").trim().slice(0, 40) || "a group";
+export const memberCacheSize = () => memberCache.size; // tests
 export async function ownerInGroup(groupId: string, lookup: () => Promise<{ id: string; name?: string; members: { number?: string; uuid?: string }[] }[]>, isOwner: (who: { number?: string; uuid?: string }) => boolean, now = Date.now()): Promise<boolean> {
   const hit = memberCache.get(groupId);
   if (hit && now - hit.at < settings.groupMemberCacheMinutes * 60_000) return hit.ok;
@@ -79,7 +87,9 @@ export async function ownerInGroup(groupId: string, lookup: () => Promise<{ id: 
   } catch {
     return false; // not cached: try again next time
   }
+  memberCache.delete(groupId); // re-inserted last: the oldest entries are the ones to drop
   memberCache.set(groupId, { at: now, ok, name });
+  trimMemberCache(now);
   return ok;
 }
 

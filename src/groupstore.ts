@@ -32,7 +32,10 @@ export function groupDir(groupId: string, name?: string): string {
   if (named.has(groupId) && (!name || named.get(groupId) === name) && existsSync(join(dir, "notes"))) return dir;
   mkdirSync(join(dir, "notes"), { recursive: true, mode: 0o700 });
   const meta = join(dir, "meta.json");
-  const known = existsSync(meta) ? (JSON.parse(readFileSync(meta, "utf8")) as { name?: string }) : undefined;
+  const known = existsSync(meta) ? (JSON.parse(readFileSync(meta, "utf8")) as { id?: string; name?: string }) : undefined;
+  // The folder is named by a 48-bit hash of the id. A different group that hashes to the same folder (someone who grinds ids) must never
+  // share the first group's notes, history and session: refuse it instead.
+  if (known?.id !== undefined && known.id !== groupId) throw new Error(`group folder ${groupKey(groupId)} belongs to another group; refusing to share it`);
   const final = name || known?.name || "";
   if (!known || known.name !== final) writeFileSync(meta, JSON.stringify({ id: groupId, name: final }), { mode: 0o600 });
   named.set(groupId, final);
