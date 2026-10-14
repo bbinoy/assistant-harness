@@ -5,7 +5,7 @@ import { judgeReply, prepareJudge, discardJudge } from "../src/judge.ts";
 import { settings } from "../src/settings.ts";
 
 const setWarm = (v: boolean) => ((settings as { warm: boolean }).warm = v);
-const result = (verdict: string) => ({ type: "result", subtype: "success", is_error: false, structured_output: { verdict } }) as any;
+const result = (verdict: string) => ({ type: "result", subtype: "success", is_error: false, structured_output: { task: "reply", verdict } }) as any;
 async function* one(msg: unknown, log: string[], tag: string) {
   log.push(tag);
   yield msg;
@@ -102,7 +102,7 @@ test("judge spare: each judge keeps its own spare; one prepared for another purp
   }
 });
 
-test("approval judge: uses its warm spare, reports the verdict, and WARM=off no longer starts one", async () => {
+test("approval judge reply: uses its warm spare, reports the verdict, and WARM=off no longer starts one", async () => {
   const was = settings.warm;
   setWarm(true);
   try {
