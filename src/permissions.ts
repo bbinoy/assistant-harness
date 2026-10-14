@@ -37,14 +37,24 @@ const SEND_DRAFT = "mcp__mailbird__send_message_now";
 // slow status check). A DECLINED call can still be asked again.
 const DONE_WINDOW_MS = 30 * 60_000;
 const done = new Map<string, number>();
-const callKey = (tool: string, input: Record<string, unknown>) => `${tool} ${JSON.stringify(input, Object.keys(input).sort())}`;
+// Keys sorted at every depth. (A JSON.stringify key-list replacer also filters NESTED keys, so two events that differ only
+// in start.dateTime had the same key and the second was refused as "already done".)
+const stable = (v: unknown): unknown => (Array.isArray(v) ? v.map(stable) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, stable(x)])) : v);
+export const callKey = (tool: string, input: Record<string, unknown>) => `${tool} ${JSON.stringify(stable(input))}`;
+// Entries older than the window can never match again, so they are dropped as new ones come in (the map cannot grow without end).
+const remember = (key: string) => {
+  const now = Date.now();
+  for (const [k, at] of done) if (now - at >= DONE_WINDOW_MS) done.delete(k);
+  done.set(key, now);
+};
 // Only for actions that change something: opening a page again is harmless, and refusing it would just get in the way.
+export const doneCount = () => done.size; // tests
 const once = (tool: string) => tool !== "WebFetch" && !isReadTool(tool);
 let draftReader: ((messageId: number) => Promise<DraftView | undefined>) | undefined;
 // Set by main.ts: reads a draft back from Mailbird, for the approval of a send.
 export const setDraftReader = (fn: typeof draftReader) => void (draftReader = fn);
 
-export function makeCanUseTool(approve: Approve, source: Source, memoryDir: string | undefined, judgeContext?: string): CanUseTool {
+export function makeCanUseTool(approve: Approve, source: Source, memoryDir: string | undefined, judgeContext?: string, judge: typeof judgeAction = judgeAction): CanUseTool {
   return async (tool, input, { signal }) => {
     const verdict = classify(tool, input, source, memoryDir);
     if (verdict === "allow") {
@@ -79,11 +89,11 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     }
     let judged: Verdict | undefined;
     if (settings.autoApprove !== "off" && isJudgeable(tool, input, source)) {
-      judged = await judgeAction({ source, description, ownerMessage: source === "chat" ? chatOwnerMessage : undefined, task: source === "chat" ? undefined : judgeContext });
+      judged = await judge({ source, description, ownerMessage: source === "chat" ? chatOwnerMessage : undefined, task: source === "chat" ? undefined : judgeContext });
       audit(tool, `judge-${judged.decision}`, source, { reason: judged.reason, mode: settings.autoApprove });
       if (mayAutoApprove(settings.autoApprove, source, judged)) {
         audit(tool, "auto-approved", source, { reason: judged.reason }); // silent on purpose: logged, never announced (npm run report shows them)
-        if (once(tool)) done.set(key, Date.now());
+        if (once(tool)) remember(key);
         return { behavior: "allow", updatedInput: input };
       }
     }
@@ -95,7 +105,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       d.approved ? (d.updatedInput ? "ask-approved-modified" : "ask-approved") : d.feedback ? "ask-feedback" : "ask-declined",
       source,
     );
-    if (d.approved && once(tool)) done.set(key, Date.now());
+    if (d.approved && once(tool)) remember(key);
     if (d.approved) return { behavior: "allow", updatedInput: d.updatedInput ?? input };
     return {
       behavior: "deny",
