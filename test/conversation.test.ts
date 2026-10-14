@@ -495,3 +495,12 @@ test("private chat: a burst keeps every picture, at most MAX_PICTURES; an unread
   assert.deepEqual(bad.r.sent.map((s) => s.text), ["I couldn't open that picture."]);
   assert.equal(bad.r.prompts.length, 0);
 });
+
+test("groups: an unusable voice message or picture is explained only to someone who spoke to the assistant", async () => {
+  const gm = (over: Partial<IncomingMessage>): Incoming => gmsg({ text: "", ...over });
+  const bad = rig({ transcript: async () => { throw new Error("I couldn't hear any words in that voice message."); }, picture: async () => { throw new Error("I couldn't open that picture."); } });
+  await bad.pipeline.handleIncoming(group(GID), gm({ audio: { id: "a.aac", size: 10 }, addressedToMe: true }));
+  await bad.pipeline.handleIncoming(group(GID), gm({ audio: { id: "a.aac", size: 10 }, addressedToMe: false }));
+  await bad.pipeline.handleIncoming(group(GID), gm({ image: { id: "p.jpg", size: 10 }, addressedToMe: true }));
+  assert.deepEqual(bad.r.sent.map((s) => [s.text, s.groupId]), [["I couldn't hear any words in that voice message.", GID], ["I couldn't open that picture.", GID]]);
+});

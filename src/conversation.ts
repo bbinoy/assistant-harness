@@ -310,6 +310,15 @@ export function createPipeline(deps: PipelineDeps) {
     return canSpeak() ? `${text}\n\n${voiceOption(true)}` : text;
   }
 
+  // Tell the sender why their voice message or picture could not be used: the owner always gets the reason (`before` runs
+  // first, for the owner only); in a group only someone who spoke to the assistant does, otherwise it just moves on.
+  async function tell(conv: Conversation, m: IncomingMessage, why: string, before?: () => void): Promise<void> {
+    if (conv.kind === "owner") {
+      before?.();
+      await out.replyPlain(why);
+    } else if (m.addressedToMe) await out.reply(why, { kind: "chat", groupId: conv.groupId });
+  }
+
   // Voice message -> text, or false when it could not be understood (the sender was told, if they should be).
   async function hear(conv: Conversation, m: IncomingMessage): Promise<Held | false> {
     const target = { author: m.from, timestamp: m.timestamp };
@@ -317,13 +326,7 @@ export function createPipeline(deps: PipelineDeps) {
     try {
       return { ...m, text: await deps.transcript(m), audio: undefined, voice: true };
     } catch (e) {
-      // The owner always gets the reason; in a group only someone who spoke to it does, otherwise it just moves on.
-      if (conv.kind === "owner") {
-        status(conv, "⚠️", target);
-        await out.replyPlain((e as Error).message);
-      } else if (m.addressedToMe) {
-        await out.reply((e as Error).message, { kind: "chat", groupId: conv.groupId });
-      }
+      await tell(conv, m, (e as Error).message, () => status(conv, "⚠️", target));
       return false;
     }
   }
@@ -335,8 +338,7 @@ export function createPipeline(deps: PipelineDeps) {
     try {
       return { ...m, image: undefined, picture: await deps.picture(m) };
     } catch (e) {
-      if (conv.kind === "owner") await out.replyPlain((e as Error).message);
-      else if (m.addressedToMe) await out.reply((e as Error).message, { kind: "chat", groupId: conv.groupId });
+      await tell(conv, m, (e as Error).message);
       return false;
     }
   }
