@@ -175,6 +175,7 @@ src/connectors.ts    which connectors (Notion, Calendar, mail) the last run coul
 src/notes.ts         the owner's notes: how background runs read them, path guard, forget (pure core, tested)
 src/memory-tools.ts  `forget_note`, `search_logs`, `undo_dream`: one in-process MCP server per conversation, scoped to it
 src/contain.ts       `isInside`: the one path-containment check (symlinks and `..` resolved) behind every file tool
+src/logtrim.ts       cuts launchd-stderr.log down in place at start (pure part tested)
 src/session.ts       when a conversation's session resumes, starts fresh or gets compacted (pure, tested)
 src/migrate.ts       one-time move of old state/ files into logs/ and memory/ (idempotent)
 src/fence.ts         fences untrusted or stored text as data inside a prompt

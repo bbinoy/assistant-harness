@@ -6,6 +6,7 @@
 process.umask(0o077);
 
 import { appendFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { trimLogInPlace } from "./logtrim.ts";
 import { migrateLegacyLayout } from "./migrate.ts";
 import { redact } from "./redact.ts";
 import { settings } from "./settings.ts";
@@ -32,6 +33,8 @@ function rotateIfNeeded() {
   } catch { /* no file yet */ }
 }
 rotateIfNeeded();
+// launchd's raw stderr file is never rotated by anyone else: over 5 MB at start, keep the last 1 MB.
+const trimmedStderr = trimLogInPlace(dataPath("logs/launchd-stderr.log"), MAX_BYTES, 1024 * 1024);
 
 const pad = (n: number, w = 2) => String(n).padStart(w, "0");
 function stamp(d = new Date()) {
@@ -64,6 +67,7 @@ for (const level of ["log", "error", "warn", "info", "debug"] as const) {
   };
 }
 
+if (trimmedStderr) console.log(`logs/launchd-stderr.log was over ${MAX_BYTES / 1024 / 1024} MB: dropped the oldest ${Math.round(trimmedStderr / 1024)} KB`);
 if (migrated.length) console.log(`migrated ${migrated.length} file(s) out of state/: ${migrated.join(", ")}`);
 
 // Let launchd restart us, but leave a trace of why.
