@@ -18,7 +18,7 @@ import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
 import { recentNotices } from "./messages.ts";
 import { OWNER_SESSION_FILE, type ChatSession } from "./session.ts";
 import { settings } from "./settings.ts";
-import { readText, writeJson } from "./state.ts";
+import { readJson, readText, writeJson } from "./state.ts";
 import { recordToolsSeen, toolsSeen } from "./toolsseen.ts";
 import { firstWarm, SpareSlot } from "./warmslot.ts";
 
@@ -151,7 +151,10 @@ async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOptions, prev
     if (message.type !== "result") continue;
     if (opts.memory?.notify) announceMemoryChanges(opts.memory.notify, message.subtype === "success" ? message.result : "");
     if (opts.sessionFile) {
-      const next: ChatSession = { sessionId: message.session_id, costUsd: message.total_cost_usd, lastTurnAt: new Date().toISOString(), lastContextTokens: lastContext, ...(opts.seenAt ? { seenAt: opts.seenAt } : {}) };
+      // The first turn of a session shows what tools, skills and prompts alone cost; later turns keep that baseline (a compaction keeps it too).
+      const before = readJson<ChatSession>(opts.sessionFile, { costUsd: 0 });
+      const baseTokens = before.sessionId === message.session_id ? before.baseTokens : lastContext; // a session from before this existed has none: the absolute limit applies until it starts fresh
+      const next: ChatSession = { sessionId: message.session_id, costUsd: message.total_cost_usd, lastTurnAt: new Date().toISOString(), lastContextTokens: lastContext, ...(baseTokens !== undefined ? { baseTokens } : {}), ...(opts.seenAt ? { seenAt: opts.seenAt } : {}) };
       writeJson(opts.sessionFile, next);
     }
     recordCost(message.total_cost_usd - previousCost); // failures cost money too

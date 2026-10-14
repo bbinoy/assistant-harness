@@ -16,7 +16,7 @@ export interface Resume {
   seenAt?: string;
 }
 
-const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens });
+const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens, compactGrowth: settings.chatCompactGrowthTokens });
 
 // A conversation continues its saved session unless session.ts says to start fresh.
 export function chatResume(announce: boolean, file: string = OWNER_SESSION_FILE, source: Source = "chat"): Resume {

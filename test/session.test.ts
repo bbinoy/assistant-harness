@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { planSession, type ChatSession } from "../src/session.ts";
 
-const opts = { idleResetHours: 6, compactTokens: 60_000 };
+const opts = { idleResetHours: 6, compactTokens: 60_000, compactGrowth: 40_000 };
 const now = new Date("2026-10-12T12:00:00Z");
 const ago = (hours: number) => new Date(now.getTime() - hours * 3600_000).toISOString();
 const session = (s: Partial<ChatSession>): ChatSession => ({ sessionId: "s1", costUsd: 1, ...s });
@@ -33,16 +33,26 @@ test("session: old session.json without the new fields still resumes", () => {
 });
 
 test("session: the thresholds come from settings", () => {
-  const tight = { idleResetHours: 1, compactTokens: 10_000 };
+  const tight = { idleResetHours: 1, compactTokens: 10_000, compactGrowth: 5_000 };
   assert.equal(planSession(session({ lastTurnAt: ago(2) }), now, tight), "fresh");
   assert.equal(planSession(session({ lastTurnAt: ago(0.5), lastContextTokens: 10_001 }), now, tight), "resume then compact");
 });
 
 test("session: a failed compaction backs off for an hour, then tries again", () => {
   const base = { sessionId: "s", costUsd: 1, lastTurnAt: "2026-10-12T10:00:00Z", lastContextTokens: 90_000 };
-  const opts = { idleResetHours: 6, compactTokens: 60_000 };
+  const opts = { idleResetHours: 6, compactTokens: 60_000, compactGrowth: 40_000 };
   const failedAt = "2026-10-12T10:05:00Z";
   assert.equal(planSession({ ...base, compactFailedAt: failedAt }, new Date("2026-10-12T10:30:00Z"), opts), "resume");
   assert.equal(planSession({ ...base, compactFailedAt: failedAt }, new Date("2026-10-12T11:06:00Z"), opts), "resume then compact");
   assert.equal(planSession(base, new Date("2026-10-12T10:30:00Z"), opts), "resume then compact");
+});
+
+test("session: compaction counts growth since the first turn, the same for a big owner floor and a small group floor", () => {
+  const at = (base: number, last: number) => planSession(session({ lastTurnAt: ago(1), baseTokens: base, lastContextTokens: last }), now, opts);
+  assert.equal(at(50_000, 90_000), "resume"); // owner: 40k of conversation is exactly the limit
+  assert.equal(at(50_000, 90_001), "resume then compact");
+  assert.equal(at(10_000, 50_000), "resume"); // group: the same 40k of conversation
+  assert.equal(at(10_000, 50_001), "resume then compact");
+  // a session saved before the baseline existed keeps the absolute limit
+  assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 60_001 }), now, opts), "resume then compact");
 });

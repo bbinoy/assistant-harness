@@ -16,6 +16,7 @@ export interface ChatSession {
   lastTurnAt?: string; // ISO time the last chat turn finished
   lastContextTokens?: number; // context size of that turn (input + cached input of its last model call)
   compactFailedAt?: string; // ISO time of the last failed compaction: back off instead of retrying every turn
+  baseTokens?: number; // context size of the session's first turn: tools, skills and prompts, before any conversation. Compaction counts growth from here
   seenAt?: string; // groups: the newest log line the session has been shown (group lines nobody answered are prepended after it)
 }
 
@@ -24,11 +25,15 @@ const COMPACT_BACKOFF_MS = settings.compactBackoffMinutes * 60_000;
 type SessionPlan = "fresh" | "resume" | "resume then compact";
 
 // Missing fields (a session.json from before these rules) never trigger anything: resume.
-export function planSession(s: ChatSession, now: Date, opts: { idleResetHours: number; compactTokens: number }): SessionPlan {
+// The compaction point is the same idea for the owner and every group: the conversation itself (growth since the first turn) has
+// outgrown `compactGrowth`. The owner's tools and skills alone are ~50k and a group's ~10k, so one absolute number would mean
+// very different amounts of conversation; `compactTokens` is only the fallback for a session saved before baseTokens existed.
+export function planSession(s: ChatSession, now: Date, opts: { idleResetHours: number; compactTokens: number; compactGrowth: number }): SessionPlan {
   if (!s.sessionId) return "fresh";
   const last = s.lastTurnAt ? Date.parse(s.lastTurnAt) : NaN;
   if (Number.isFinite(last) && now.getTime() - last > opts.idleResetHours * 3600_000) return "fresh";
-  if (typeof s.lastContextTokens === "number" && s.lastContextTokens > opts.compactTokens) {
+  const limit = typeof s.baseTokens === "number" ? s.baseTokens + opts.compactGrowth : opts.compactTokens;
+  if (typeof s.lastContextTokens === "number" && s.lastContextTokens > limit) {
     const failed = s.compactFailedAt ? Date.parse(s.compactFailedAt) : NaN;
     if (Number.isFinite(failed) && now.getTime() - failed < COMPACT_BACKOFF_MS) return "resume"; // it just failed; do not pay for another try yet
     return "resume then compact";
