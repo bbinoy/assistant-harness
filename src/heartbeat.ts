@@ -1,5 +1,6 @@
 import { formatAlert, inQuietHours, planActions } from "./actions.ts";
 import { mailBody } from "./mailtext.ts";
+import { mailAlertRequest, type NoticeWriter } from "./notice.ts";
 import { LIMITS, oneLine } from "./sanitize.ts";
 import { audit } from "./audit.ts";
 import type { HandleItem } from "./handler.ts";
@@ -43,6 +44,7 @@ interface NewMail {
 
 interface HeartbeatHooks {
   alert: (text: string) => Promise<void>; // tell the owner something (plain text)
+  write?: NoticeWriter; // writes the alert from the facts (notice.ts); absent: the template text (tests)
   handle: (items: HandleItem[]) => void; // queue mail for the handler
   briefDue: () => boolean; // today's brief is still due: it will report urgent mail itself
   onTick: () => void; // tick-driven jobs (wake-ups, dream, brief, radar): independent of the mail check, never awaited
@@ -146,10 +148,10 @@ async function fetchInputs(mb: MailSource, mails: NewMail[]): Promise<MailInput[
 // Classify all new mail in one batch, act on the plan, record every decision.
 // Returns mail that should be retried next tick. Once the batch is classified nothing here
 // throws: every side effect is guarded, so a failure can never cause a repeat alert.
-async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: HeartbeatHooks): Promise<NewMail[]> {
+async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: HeartbeatHooks, triage: typeof triageBatch = triageBatch): Promise<NewMail[]> {
   console.log(`heartbeat: ${fresh.length} new conversation(s)`);
 
-  const results = await triageBatch(await fetchInputs(mb, fresh));
+  const results = await triage(await fetchInputs(mb, fresh));
   const plan = planActions(results, { maxArchives: settings.maxArchivesPerTick });
   const decision: string[] = results.map((t) => (settings.heartbeatLive ? "kept" : `would-${t.label}`));
   const extra: Record<number, Record<string, unknown>> = {};
@@ -173,8 +175,12 @@ async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: Heartbeat
       if (hooks.briefDue()) {
         for (const i of plan.alert) decision[i] = "covered-by-brief";
       } else {
+        const items = plan.alert.map((i) => ({ from: fresh[i]!.from, subject: fresh[i]!.subject, reason: results[i]!.reason }));
+        const template = formatAlert(items);
+        // Written by a model from the facts, plain text; any failure sends the template, so an alert is never lost.
+        const text = hooks.write ? await hooks.write(mailAlertRequest(items, template)).catch(() => template) : template;
         const ok = await hooks
-          .alert(formatAlert(plan.alert.map((i) => ({ from: fresh[i]!.from, subject: fresh[i]!.subject, reason: results[i]!.reason }))))
+          .alert(text)
           .then(() => true, (e) => (console.error("heartbeat: alert failed:", (e as Error).message), false));
         for (const i of plan.alert) decision[i] = ok ? "alerted" : "alert-failed";
       }
@@ -230,7 +236,7 @@ async function archiveStaleBriefs(mb: MailSource, ids: string[]) {
 }
 
 // `env` is for tests: a fake mail source (or the factory that would make the real one) and fake timers.
-export function startHeartbeat(hooks: HeartbeatHooks, env: { mail?: MailSource; newMail?: () => MailSource; setTimeout?: (f: () => void, ms: number) => unknown; setInterval?: (f: () => void, ms: number) => unknown } = {}) {
+export function startHeartbeat(hooks: HeartbeatHooks, env: { triage?: typeof triageBatch; mail?: MailSource; newMail?: () => MailSource; setTimeout?: (f: () => void, ms: number) => unknown; setInterval?: (f: () => void, ms: number) => unknown } = {}) {
   // MAIL_PROVIDER=none: no mail client is made, let alone connected. Only the liveness line is kept (mailOff below).
   const mb = settings.mail ? (env.mail ?? (env.newMail ?? (() => new Mailbird()))()) : undefined;
   let running = false;
@@ -251,7 +257,7 @@ export function startHeartbeat(hooks: HeartbeatHooks, env: { mail?: MailSource; 
       if (mail.seeding) {
         console.log("heartbeat: baseline recorded, existing inbox treated as seen");
       } else {
-        if (mail.fresh.length > 0) for (const m of await processNewMail(mb, mail.fresh, hooks)) mail.unsee(m);
+        if (mail.fresh.length > 0) for (const m of await processNewMail(mb, mail.fresh, hooks, env.triage)) mail.unsee(m);
         if (settings.heartbeatLive && mail.staleBriefs.length > 0) await archiveStaleBriefs(mb, mail.staleBriefs);
       }
       mail.commit(); // only now are these messages "seen"

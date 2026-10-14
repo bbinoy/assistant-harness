@@ -66,13 +66,11 @@ The email has the rest, kept to the day ahead:
 
 **10:42.** A new message arrives while you are in a meeting. It is urgent, so you get exactly one alert:
 
-> 📥 1 email needs you:
-> - Keeley Jones: Need your decision on the PR plan by noon (the whole campaign is waiting on a yes or no)
+> Keeley Jones needs your decision on the PR plan by noon: the whole campaign is waiting on a yes or no.
 
 **11:15.** A scheduling request arrives. It is routine, so the assistant checks your calendar and leaves a draft in the thread. It never sends:
 
-> 🤝 Handled 1:
-> Roy Kent: drafted a reply offering Tue 15:00 or Wed 10:30, both free (he'd like it "quick and without any bloody small talk")
+> I drafted a reply to Roy Kent offering Tue 15:00 or Wed 10:30, both free. He'd like it quick and without any bloody small talk.
 
 **Whenever something is due.** Every conversation, yours and each group Ted is in, gets a look from a small model on every heartbeat tick once its "next look" time has come, or when something was said or a note changed since: it reads the clock, the notes and the tail of the log and decides whether to do anything on its own. So a note like "every morning post a fun fact" or "nudge us on Friday" works in your chat and in a group, and "don't reply so fast" changes the pace. Silent at night (your chat), and it may still decide to say nothing. The same gate decides when the daily brief and the radar run (default rules: brief once in the morning, radar every few hours and before meetings; a note such as "brief at 6:30" or "no radar on weekends" changes them), while code keeps how they run. Group wake-ups run with the group's rights only; yours with the radar's (reads and web search; anything else asks on your phone).
 

@@ -14,6 +14,7 @@ import { logTail } from "./gate.ts";
 import { createWakeups } from "./wake.ts";
 import { createHandler } from "./handler.ts";
 import { startHeartbeat, startJobs } from "./heartbeat.ts";
+import { writeNotice } from "./notice.ts";
 import { ensureNotesDir } from "./notes.ts";
 import { compactIfNeeded, recordMessage, type Extra, type Kind } from "./messages.ts";
 import { summarizeWithHaiku } from "./summarize.ts";
@@ -162,7 +163,7 @@ warmChat();
 // quiet hour is still quick. Local work only, no model call.
 setInterval(() => prepareChat(approve, say, { refresh: true }), settings.warmRefreshMinutes * 60_000).unref();
 
-const handler = proposer ? createHandler({ approve: approveBackground, notify, propose: proposer.show }) : undefined;
+const handler = proposer ? createHandler({ approve: approveBackground, notify, write: writeNotice, propose: proposer.show }) : undefined;
 handler?.resume();
 
 const dreamer = createDreamer();
@@ -185,6 +186,7 @@ const wakeups = createWakeups({
 // dream runs inside the brief preset, before the brief).
 startHeartbeat({
   alert: notify,
+  write: writeNotice,
   handle: (items) => handler?.enqueue(items),
   briefDue: () => wakeups.briefPending(),
   onTick: () => {
