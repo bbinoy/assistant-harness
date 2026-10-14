@@ -50,3 +50,10 @@ test("approval text: opening a web page shows the exact address", () => {
   assert.match(text, /^🌐 Open a web page/);
   assert.match(text, /Address: https:\/\/calendly\.com\/someone\/intro\?utm=a/);
 });
+
+test("approval text: a send looks the same for every provider and always shows bcc, attachments and an empty recipient list", () => {
+  const mailbird = describeCall("mcp__mailbird__send_message_now", { messageId: 1 }, { to: ["a@example.com"], cc: ["c@example.com"], bcc: ["b@example.com"], subject: "Hi", body: "Text", hasAttachments: true });
+  assert.equal(mailbird, "✉️ Send email now\nTo: a@example.com\nCc: c@example.com\nBcc: b@example.com\nSubject: Hi\nAttachments: yes (names not shown)\n\nText");
+  assert.match(describeCall("mcp__mailbird__forward_conversation", { conversationId: "g", body: "FYI" }), /^✉️ Forward email\nTo: \(nobody yet\)/);
+  assert.match(describeCall("mcp__mailbird__create_draft", { accountId: 1, to: [{ email: "a@example.com" }], bcc: [{ email: "b@example.com" }], subject: "S", body: "B" }), /^✉️ Save email draft\nTo: a@example\.com\nBcc: b@example\.com\nSubject: S/);
+});

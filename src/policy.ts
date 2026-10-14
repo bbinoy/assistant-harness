@@ -4,11 +4,13 @@ import { resolve, sep } from "node:path";
 import { isInside } from "./contain.ts";
 import { isNotePath } from "./notes.ts";
 import { settings } from "./settings.ts";
+import { entryFor, flagFor, isReadTool } from "./toolmanifest.ts";
 
 // Permissions as code. Every tool call any agent run wants to make passes classify():
 //   allow - run it
 //   ask   - the owner approves or declines on their phone
 //   deny  - never, whatever anyone says
+// A tool's manifest flag gives the verdict: no -> allow; auto and yes -> ask (auto: the judge may skip the question, permissions.ts).
 // Unknown tools default to "ask", never to "allow".
 
 export type Verdict = "allow" | "ask" | "deny";
@@ -23,45 +25,8 @@ const DENY: RegExp[] = [
 // injected email could otherwise get ~/.ssh or .env attached to a draft. The agent never needs this.
 const LOCAL_FILE = /file:\/\//i;
 
-// Read-only verbs, matched against the tool's own name (after the server name), ignoring a
-// "notion-" style prefix: both "get_message" and "notion-fetch" are reads.
-const READ_VERB = /^(list|get|search|read|query|fetch|summarize|suggest|whats|download|show|ai-search)/i;
-
-export function isReadTool(tool: string): boolean {
-  const name = (tool.split("__").pop() ?? "").replace(/^notion-/i, "");
-  return READ_VERB.test(name);
-}
-
-// In-thread reply drafts: never sent, the owner sees them in their mail client.
-const DRAFT_REPLIES = new Set(["mcp__mailbird__reply_to_conversation", "mcp__mailbird__reply_all_to_conversation"]);
-
-// Writes chat and the daily brief may do unattended. All reversible or draft-only.
-const ROUTINE_WRITES = new Set([
-  ...DRAFT_REPLIES,
-  "mcp__mailbird__archive_conversation",
-  "mcp__mailbird__select_conversation",
-  "mcp__mailbird__create_draft",
-  "mcp__mailbird__update_draft",
-  "mcp__mailbird__send_self_briefing", // can only ever send to the owner
-  "mcp__claude_ai_Notion__notion-create-pages",
-  "mcp__claude_ai_Notion__notion-update-page",
-]);
-
-// Least privilege by who is acting. The mail handler reads untrusted email with nobody
-// watching, so on its own it may only leave reply drafts; anything else it must ask for.
-export const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
-  chat: ROUTINE_WRITES,
-  brief: ROUTINE_WRITES,
-  handler: DRAFT_REPLIES,
-  heartbeat: new Set(), // the heartbeat itself never runs an agent
-  // The radar reads calendar and mail, and may only write a meeting-prep page in Notion; anything
-  // else it tries asks the owner on the phone like the handler's.
-  radar: new Set(["mcp__claude_ai_Notion__notion-create-pages", "mcp__claude_ai_Notion__notion-update-page"]),
-  // An unprompted run for the owner's chat (a wake-up, gate.ts): reads, and nothing else without asking.
-  background: new Set(),
-  group: new Set(), // group chats get web search and their own notes only (classify)
-  dream: new Set(), // the dream has no tools at all: it answers with JSON and code applies it (dream.ts)
-};
+// Which tool needs which approval is the manifest (toolmanifest.ts); this file adds what a flag cannot say.
+export { isReadTool };
 
 // The owner's memory is the SDK's auto-memory: the chat agent keeps small notes in
 // memory/notes/ with the built-in Read, Write and Edit tools, plus our forget_note. Those tools
@@ -111,13 +76,10 @@ export function hiddenTools(
   return [...cfg.hiddenConnectors, ...new Set(extra)];
 }
 
-// The web. Pages and search results are untrusted content, like mail, and a fetched URL can carry
-// data out in its query string. So: searching is allowed in chat (a question typed by the
-// owner; results are snippets and links), opening a page is allowed only after the owner has
-// seen the exact address on their phone, and nothing unattended gets either (those runs read
-// untrusted mail). The approval text shows the address (format.ts).
+// The web. Pages and search results are untrusted content, like mail, and a fetched URL can carry data out in its query
+// string. The manifest says who may search (chat, background) and who may open a page (and that the judge decides);
+// the address veto is autojudge.ts. A group gets web search only (classify).
 const WEB_SEARCH = "WebSearch";
-const WEB_FETCH = "WebFetch";
 
 // groupNotesDir: for a group run, THE one folder its file tools may touch (its own notes). Without it a group
 // gets no file access at all.
@@ -130,25 +92,16 @@ export function classify(tool: string, input: Record<string, unknown>, source: S
   }
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
-  if (NOTE_FILE_TOOLS.has(tool)) return source === "chat" && (isNotePath(input.file_path) || (tool === "Read" && isReadableData(input.file_path))) ? "allow" : "deny";
-  if (tool === FORGET_NOTE || tool === SEARCH_LOGS || tool === UNDO_DREAM) return source === "chat" ? "allow" : "deny";
-  // The owner's chat and the owner's unattended background run (a gate task, not the mail handler) may search; opening a
-  // page asks. A search query is a small exfiltration channel, accepted because every write and every page fetch still asks.
-  if (tool === WEB_SEARCH) return source === "chat" || source === "background" ? "allow" : "deny";
-  if (tool === WEB_FETCH) return source === "chat" || source === "background" ? "ask" : "deny";
-  if (tool === "Skill" || isReadTool(tool)) return "allow"; // which skills load is limited by the SDK's skills allowlist (agent.ts)
-  return UNATTENDED_WRITES[source].has(tool) ? "allow" : "ask";
+  // The note file tools are chat only (manifest) and only on a path inside the notes (or, for Read, the data folders): the path is code.
+  if (NOTE_FILE_TOOLS.has(tool) && !(isNotePath(input.file_path) || (tool === "Read" && isReadableData(input.file_path)))) return "deny";
+  const flag = flagFor(tool, source);
+  return flag === undefined ? "deny" : flag === "no" ? "allow" : "ask";
 }
 
 // --- "yes, but make it 16:00": consent with a small edit, applied without re-asking ---
 
-// Only low-risk, non-sending tools may be edited-and-approved in one reply.
+// Only low-risk, non-sending tools may be edited-and-approved in one reply: calendar events.
 // Everything else (send, forward, share...) goes back through a fresh approval.
-const MODIFIABLE = new Set([
-  "mcp__claude_ai_Google_Calendar__create_event",
-  "mcp__claude_ai_Google_Calendar__update_event",
-]);
-
 // Fields that decide who is affected. Never changeable through a chat reply.
 const PROTECTED_FIELD = /^(to|cc|bcc|attendees?|recipients?|emails?|calendarId|guests?)$/i;
 
@@ -158,7 +111,7 @@ export interface Change {
 }
 
 export function isModifiable(tool: string): boolean {
-  return MODIFIABLE.has(tool);
+  return entryFor(tool)?.action === "calendar-write";
 }
 
 // Returns the patched input, or undefined if the patch is not acceptable

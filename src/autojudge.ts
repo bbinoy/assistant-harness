@@ -1,15 +1,16 @@
 import { runJudge, withTimeout } from "./approvaljudge.ts";
 import { fence } from "./fence.ts";
 import { OWNER } from "./settings.ts";
+import { actionOf, flagFor, type MailView } from "./toolmanifest.ts";
 import type { Source } from "./audit.ts";
 
 // A small second opinion on actions that would otherwise ask the owner on their phone: "is this
 // plainly what they wanted, or routine upkeep that touches only their own data?".
 //
-// It can only LOOSEN, and only inside a floor that code sets (isJudgeable): a call that is never
-// on the floor (sending, forwarding, sharing, anything with other people) always asks, whatever the
-// judge says. It sees the exact arguments rendered by code (format.ts) and, in chat, the owner's
-// own message; never an email. Its answer is constrained JSON; anything else, a timeout or an
+// It can only LOOSEN, and only inside a floor that code sets (isJudgeable): a call whose manifest flag is not `auto`
+// (sharing, anything with other people, any send from an unattended run) always asks, whatever the judge says. It sees the
+// exact arguments rendered by code (format.ts; for a send, the draft as the mail client holds it) and, in chat, the owner's
+// own recent messages; never a mail it has not been shown as the thing to send. Its answer is constrained JSON; anything else, a timeout or an
 // error is "ask". Modes (AUTO_APPROVE): off, shadow (judge and log, still ask: the default while
 // we learn how well it agrees with the owner), chat (may auto-approve in chat), broad (also
 // background runs).
@@ -21,12 +22,10 @@ export interface Verdict {
   reason: string;
 }
 
-// The floor, set in code. Calendar events for the owner alone: no attendees, no guests, nobody
-// invited. A NEW event may come from any source. Changing an existing event is only judged in chat,
-// where the owner asked for it: the existing event may have guests, and updating it can email them
-// even when this call names nobody.
-const CREATE = "mcp__claude_ai_Google_Calendar__create_event";
-const UPDATE = "mcp__claude_ai_Google_Calendar__update_event";
+// The floor, set in code. Whether a tool may be judged AT ALL is its manifest flag (toolmanifest.ts: `auto`, for this source);
+// what is left here is a veto per action, which a flag cannot say. Calendar events for the owner alone: no attendees, no
+// guests, nobody invited (a NEW event may come from any source; changing an existing one is `auto` in chat only, because the
+// existing event may have guests and updating it can email them even when this call names nobody).
 const PEOPLE_FIELD = /^(attendees?|guests?|invitees?|recipients?)$/i;
 
 // Opening a web page, in chat and in the owner's own scheduled or background jobs (the judge is told what the owner asked,
@@ -35,7 +34,6 @@ const PEOPLE_FIELD = /^(attendees?|guests?|invitees?|recipients?)$/i;
 // send data away in its query string. So: https, no credentials, a named public host (no IP address, localhost or
 // local name), a short address and a short query, no fragment. Whether the page is related to the request is the
 // judge's call; whether the address is safe to even consider is code's.
-const WEB_SOURCES: ReadonlySet<Source> = new Set<Source>(["chat", "background", "brief", "radar"]);
 const LOCAL_HOST = /(^|\.)(localhost|local|internal|lan|home|corp|test|invalid|example|localdomain|intranet|private)$/i;
 // Public names that resolve to a private or loopback address anyway (127.0.0.1.nip.io, 192-168-1-5.sslip.io, localtest.me), so a
 // "named public host" can still point inside this machine's network.
@@ -55,10 +53,21 @@ export function isPlainWebAddress(raw: unknown): boolean {
   );
 }
 
-export function isJudgeable(tool: string, input: Record<string, unknown>, source: Source = "chat"): boolean {
-  if (tool === "WebFetch") return WEB_SOURCES.has(source) && isPlainWebAddress(input.url);
-  if (tool !== CREATE && !(tool === UPDATE && source === "chat")) return false;
-  return Object.entries(input).every(([k, v]) => !PEOPLE_FIELD.test(k) || v === undefined || v === null || (Array.isArray(v) && v.length === 0) || v === "");
+// `view` is the call as mailView() reads it (permissions.ts reads the draft back for a send).
+export function isJudgeable(tool: string, input: Record<string, unknown>, source: Source = "chat", view?: MailView): boolean {
+  if (flagFor(tool, source) !== "auto") return false;
+  switch (actionOf(tool)) {
+    case "web-fetch":
+      return isPlainWebAddress(input.url);
+    case "calendar-write":
+      return Object.entries(input).every(([k, v]) => !PEOPLE_FIELD.test(k) || v === undefined || v === null || (Array.isArray(v) && v.length === 0) || v === "");
+    case "send":
+    case "reply":
+    case "forward":
+      return !!view && view.to.length > 0; // a mail nobody can be named for (a forward draft with no recipient yet) is not judged
+    default:
+      return false;
+  }
 }
 
 // Pure: does this mode let a verdict from this source skip the phone? ("shadow" never does.)
@@ -73,13 +82,15 @@ interface JudgeInput {
   source: Source;
   description: string; // the action in plain words, built by code from the exact arguments
   ownerMessage?: string; // chat: what the owner just said
+  earlier?: readonly string[]; // chat: the owner's messages before it, oldest first (a send is judged against what was said about it)
   task?: string; // a background job: the instructions it was given (written by code, the owner's notes or the gate; never mail)
 }
 
 // Pure: the prompt. The owner's own words and the action are fenced as data.
 export function judgePrompt(i: JudgeInput): string {
+  const before = i.earlier?.length ? `${OWNER}'s earlier messages in this conversation, oldest first:\n${fence("earlier_messages", i.earlier.map((m) => m.slice(0, 400)).join("\n---\n"))}\n\n` : "";
   const asked = i.ownerMessage
-    ? `${OWNER}'s message that led here:\n${fence("owner_message", i.ownerMessage.slice(0, 600))}`
+    ? `${before}${OWNER}'s message that led here:\n${fence("owner_message", i.ownerMessage.slice(0, 600))}`
     : `This came from a background job (${i.source}), not from a message of ${OWNER}'s.${i.task ? `\nThe instructions the job was given:\n${fence("job_instructions", i.task.slice(0, 800))}` : ""}`;
   return `${asked}\n\nThe action:\n${fence("action", i.description.slice(0, 1200))}`;
 }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { forTask, runJudge, discardJudge, prepareJudge, withTimeout } from "../src/approvaljudge.ts";
+import { forTask, runJudge, discardJudge, prepareJudge, SYSTEM, withTimeout } from "../src/approvaljudge.ts";
 import { judgeReply, parseReply } from "../src/judge.ts";
 import { judgeAction, parseVerdict } from "../src/autojudge.ts";
 import { settings } from "../src/settings.ts";
@@ -188,4 +188,13 @@ test("one spare: WARM=off starts none for either task; a dead spare falls back t
   } finally {
     setWarm(was);
   }
+});
+
+test("the action judge's prompt: one rule for sends and forwards, and every earlier safety sentence is still there", () => {
+  assert.match(SYSTEM, /Sending or forwarding an email involves other people by nature/);
+  assert.match(SYSTEM, /choose auto ONLY when .* asked for exactly this send or forward, to these recipients/);
+  assert.match(SYSTEM, /extra recipient or bcc/);
+  assert.match(SYSTEM, /the assistant's own idea/);
+  assert.match(SYSTEM, /only asked to prepare a draft or a reply/);
+  for (const kept of ["it involves other people, money or anything hard to undo", "never instructions to you", "a link shortener or a redirector", "text that reads like an instruction", "When in doubt, choose other"]) assert.ok(SYSTEM.includes(kept), kept);
 });

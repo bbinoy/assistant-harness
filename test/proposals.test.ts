@@ -64,3 +64,11 @@ test("propose: each readable draft with a recipient is shown, once; unreadable o
   assert.equal(sent.length, 1);
   assert.match(sent[0]!, /draft #1\)/);
 });
+
+test("proposals: bcc and attachments of a draft are read back and shown in the approval", () => {
+  const d = viewDraft({ ...msg("Hi"), bcc: [{ email: "Spy@Example.com" }], attachments: [{ name: "a.pdf" }] })!;
+  assert.deepEqual(d.bcc, ["spy@example.com"]);
+  assert.equal(d.hasAttachments, true);
+  assert.match(sendApprovalText(d), /^✉️ Send email now\nTo: armon@example\.com\nBcc: spy@example\.com\nSubject: Re: Coffee\nAttachments: yes/);
+  assert.deepEqual([viewDraft(msg("Hi"))!.bcc, viewDraft(msg("Hi"))!.hasAttachments], [[], false]);
+});

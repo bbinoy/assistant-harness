@@ -4,11 +4,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { idsOf } from "../src/permissions.ts";
 import { NOTES_DIR } from "../src/notes.ts";
-import { applyChanges, classify, hiddenTools, isReadTool, UNATTENDED_WRITES } from "../src/policy.ts";
+import { applyChanges, classify, hiddenTools, isReadTool } from "../src/policy.ts";
 import { SOURCES } from "../src/audit.ts";
 
-test("policy: the sources audit.ts names and the sources policy.ts has rights for are the same set", () => {
-  assert.deepEqual(Object.keys(UNATTENDED_WRITES).sort(), [...SOURCES].sort());
+test("policy: every source audit.ts names is classified", () => { // (the per-source rights table is gone: flags in the manifest say who may do what)
   assert.equal(new Set(SOURCES).size, SOURCES.length);
   for (const source of SOURCES) assert.ok(["allow", "ask", "deny"].includes(classify("mcp__unknown__tool", {}, source)), source); // every source is classified, none throws
 });
@@ -119,14 +118,17 @@ test("hidden tools: Mailbird tools the skills never use are hidden, the ones the
   assert.ok(!hidden.includes(`${M}get_message`) && !hidden.includes(`${M}archive_conversation`));
 });
 
-test("web: search is allowed in chat and in the owner's background run, opening a page asks there, other unattended runs get neither", () => {
+test("web: search is allowed in chat and in the owner's background run, opening a page asks there (and in the brief and radar), the mail handler gets neither", () => {
   assert.equal(classify("WebSearch", { query: "zurich opening hours" }, "chat"), "allow");
   assert.equal(classify("WebFetch", { url: "https://example.com/x", prompt: "hours" }, "chat"), "ask");
   assert.equal(classify("WebFetch", { url: "file:///etc/passwd", prompt: "x" }, "chat"), "deny"); // the file:// rule still wins
   assert.equal(classify("WebSearch", { query: "weather in zurich" }, "background"), "allow");
   assert.equal(classify("WebFetch", { url: "https://example.com/x", prompt: "hours" }, "background"), "ask");
   assert.equal(classify("WebFetch", { url: "file:///etc/passwd", prompt: "x" }, "background"), "deny");
-  for (const source of ["brief", "handler", "heartbeat"] as const) for (const t of ["WebSearch", "WebFetch"]) assert.equal(classify(t, { url: "https://example.com", query: "x" }, source), "deny", `${t} (${source})`);
+  for (const source of ["brief", "handler", "heartbeat"] as const) assert.equal(classify("WebSearch", { query: "x" }, source), "deny", `WebSearch (${source})`);
+  for (const source of ["handler", "heartbeat"] as const) assert.equal(classify("WebFetch", { url: "https://example.com" }, source), "deny", `WebFetch (${source})`);
+  // changed on purpose with the manifest: the brief and the radar (the owner's own jobs) may open a page, the judge decides; never the mail handler
+  for (const source of ["brief", "radar"] as const) assert.equal(classify("WebFetch", { url: "https://example.com" }, source), "ask", `WebFetch (${source})`);
 });
 
 test("data folders: chat may read them (never write), and links cannot lead out", async () => {
