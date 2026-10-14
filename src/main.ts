@@ -2,7 +2,7 @@ import "./log.ts"; // first: timestamps, redaction and owner-only files for ever
 import { createPipeline, group, owner, type Pipeline } from "./conversation.ts";
 import { ask, runProfile, prepareChat } from "./agent.ts";
 import { compactChatIfNeeded } from "./chatsession.ts";
-import { setDraftReader, setAutoApprovedNotice, type Approve } from "./permissions.ts";
+import { setDraftReader, type Approve } from "./permissions.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
@@ -118,7 +118,6 @@ signal.onMessage((m) => {
 
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal
 // (propose.ts), and the approval of any send shows the draft read back from here (agent.ts).
-setAutoApprovedNotice(say);
 const proposer = createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t, "draft") });
 setDraftReader(proposer.read);
 

@@ -95,10 +95,10 @@ The email has the rest, kept to the day ahead:
 > **You:** remember that messages from Jamie are never urgent
 > **Ted:** Saved: Jamie's "URGENT!!!" emails will now wait their turn. Which, between you and me, is a long line.
 
-**11:20.** Plain things on your own calendar just happen, and you are told. Anything that involves other people waits for your say-so:
+**11:20.** Plain things on your own calendar just happen, quietly (they are logged, and `npm run report` lists them). Anything that involves other people waits for your say-so:
 
 > **You:** put "find a decent cup of tea" in my calendar tomorrow at 15:00
-> **Ted:** ✅ Done without asking: 📅 Create calendar event "find a decent cup of tea", Wed 14 Oct, 15:00-16:00
+> **Ted:** Done: "find a decent cup of tea", Wed 14 Oct, 15:00-16:00.
 >
 > **You:** and invite Coach Beard to it
 >

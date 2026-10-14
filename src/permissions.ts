@@ -31,11 +31,15 @@ export function idsOf(input: Record<string, unknown>): Record<string, unknown> |
 let chatOwnerMessage: string | undefined;
 export const setChatOwnerMessage = (text: string) => void (chatOwnerMessage = text);
 
-// Where "done without asking" notices go (set by main).
-let autoApprovedNotice: ((text: string) => Promise<void>) | undefined;
-export const setAutoApprovedNotice = (fn: (text: string) => Promise<void>) => void (autoApprovedNotice = fn);
-
 const SEND_DRAFT = "mcp__mailbird__send_message_now";
+// An action the owner approved is done: the same call again (same tool, same arguments) within half an hour is refused
+// without a question, because repeating it would send, create or change it twice (a model once retried a send after a
+// slow status check). A DECLINED call can still be asked again.
+const DONE_WINDOW_MS = 30 * 60_000;
+const done = new Map<string, number>();
+const callKey = (tool: string, input: Record<string, unknown>) => `${tool} ${JSON.stringify(input, Object.keys(input).sort())}`;
+// Only for actions that change something: opening a page again is harmless, and refusing it would just get in the way.
+const once = (tool: string) => tool !== "WebFetch" && !isReadTool(tool);
 let draftReader: ((messageId: number) => Promise<DraftView | undefined>) | undefined;
 // Set by main.ts: reads a draft back from Mailbird, for the approval of a send.
 export const setDraftReader = (fn: typeof draftReader) => void (draftReader = fn);
@@ -55,6 +59,12 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     }
     // A small model's second opinion, only for what code puts on the floor (autojudge.ts). In shadow
     // mode it only logs; the owner is asked either way.
+    const key = callKey(tool, input);
+    const doneAt = once(tool) ? done.get(key) : undefined;
+    if (doneAt !== undefined && Date.now() - doneAt < DONE_WINDOW_MS) {
+      audit(tool, "deny-already-done", source);
+      return { behavior: "deny", message: "That exact call was already approved and done a moment ago. Do not repeat it; check its result once if you need to be sure it went through." };
+    }
     let description = describeCall(tool, input);
     if (tool === SEND_DRAFT) {
       // Show what Mailbird holds right now, not what the model says it is sending. If that cannot
@@ -72,8 +82,8 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       judged = await judgeAction({ source, description, ownerMessage: source === "chat" ? chatOwnerMessage : undefined });
       audit(tool, `judge-${judged.decision}`, source, { reason: judged.reason, mode: settings.autoApprove });
       if (mayAutoApprove(settings.autoApprove, source, judged)) {
-        audit(tool, "auto-approved", source, { reason: judged.reason });
-        void autoApprovedNotice?.(`✅ Done without asking: ${description.replace(/\n+/g, " | ").slice(0, 300)}`).catch(() => {});
+        audit(tool, "auto-approved", source, { reason: judged.reason }); // silent on purpose: logged, never announced (npm run report shows them)
+        if (once(tool)) done.set(key, Date.now());
         return { behavior: "allow", updatedInput: input };
       }
     }
@@ -85,6 +95,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       d.approved ? (d.updatedInput ? "ask-approved-modified" : "ask-approved") : d.feedback ? "ask-feedback" : "ask-declined",
       source,
     );
+    if (d.approved && once(tool)) done.set(key, Date.now());
     if (d.approved) return { behavior: "allow", updatedInput: d.updatedInput ?? input };
     return {
       behavior: "deny",
