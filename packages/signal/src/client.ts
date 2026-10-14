@@ -15,6 +15,8 @@ export interface CloseInfo {
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
 
+const DEFAULT_MAX_LINE_CHARS = 16 * 1024 * 1024; // a group list with hundreds of groups is a few MB; an envelope is a few KB
+
 /** Options of {@link SignalClient}. */
 export interface SignalClientOptions {
   /** Where signal-cli's daemon listens (JSON-RPC over TCP; there is no unix-socket or stdio support). */
@@ -33,6 +35,8 @@ export interface SignalClientOptions {
   rpcTimeoutMs?: number;
   /** How long {@link SignalClient.isOwnReaction} remembers a reaction the client sent, in ms (default 300 000). */
   ownReactionMs?: number;
+  /** The longest line (one JSON message) the client will buffer before it hangs up, in characters (default 16 777 216). */
+  maxLineChars?: number;
 }
 
 /** What {@link SignalClient.send} can carry besides the text. */
@@ -85,6 +89,7 @@ export class SignalClient {
   private log: Logger;
   private rpcTimeoutMs: number;
   private ownReactionMs: number;
+  private maxLineChars: number;
 
   constructor(opts: SignalClientOptions) {
     this.log = opts.logger ?? silentLogger;
@@ -95,6 +100,7 @@ export class SignalClient {
     this.peerAci = opts.peer?.aci;
     this.rpcTimeoutMs = opts.rpcTimeoutMs ?? 30_000;
     this.ownReactionMs = opts.ownReactionMs ?? 5 * 60_000;
+    this.maxLineChars = opts.maxLineChars ?? DEFAULT_MAX_LINE_CHARS;
   }
 
   /**
@@ -224,6 +230,12 @@ export class SignalClient {
       const line = this.buffer.slice(0, nl).trim();
       this.buffer = this.buffer.slice(nl + 1);
       if (line) this.onLine(line);
+    }
+    // One JSON object per line: a "line" that never ends is not signal-cli. End the connection instead of growing without limit.
+    if (this.buffer.length > this.maxLineChars) {
+      this.log.error(`signal-cli sent more than ${this.maxLineChars} characters without a line break; closing the connection`);
+      this.buffer = "";
+      this.socket?.destroy(new Error("line too long"));
     }
   }
 
