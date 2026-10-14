@@ -164,7 +164,11 @@ export const askGate: Gate = async (input) => {
   let api: number | undefined;
   let out = NOTHING;
   try {
-    for await (const m of query({ prompt, options: { model: "haiku", systemPrompt: system, tools: [], settingSources: [], strictMcpConfig: true, mcpServers: {}, settings: { autoMemoryEnabled: false }, maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false } })) {
+    const q = query({ prompt, options: { model: "haiku", systemPrompt: system, tools: [], settingSources: [], strictMcpConfig: true, mcpServers: {}, settings: { autoMemoryEnabled: false }, maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false } });
+    const it = q[Symbol.asyncIterator]();
+    // Not `for await ... break`: leaving that loop waits ~0.8 s for the process to wind down, on the critical path.
+    for (let n = await it.next(); !n.done; n = await it.next()) {
+      const m = n.value;
       mark("init");
       if (m.type !== "result") continue;
       mark("result");
@@ -173,6 +177,7 @@ export const askGate: Gate = async (input) => {
       const p0 = Date.now();
       out = m.subtype === "success" && !m.is_error ? parseGate(m.structured_output) : NOTHING;
       at.parse = Date.now() - p0;
+      q.close(); // the answer is in
       break;
     }
   } finally {
