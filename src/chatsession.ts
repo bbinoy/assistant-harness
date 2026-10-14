@@ -1,7 +1,7 @@
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
-import { OWNER_SESSION_FILE, freshReason, planSession, type ChatSession, type CompactMode } from "./session.ts";
+import { OWNER_SESSION_FILE, idleExpired, planSession, type ChatSession, type CompactMode } from "./session.ts";
 import { settings } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";
 
@@ -16,14 +16,7 @@ export interface Resume {
   seenAt?: string;
 }
 
-const DREAM_STATE = "state/dream.json"; // written by dream.ts
-// When the nightly dream last ran (state/dream.json, the group dreams run in the same pass), for the new-day reset. Unreadable: no effect.
-const dreamTime = (): number | undefined => {
-  const at = Date.parse(readJson<{ lastRunAt?: string }>(DREAM_STATE, {}).lastRunAt ?? "");
-  return Number.isFinite(at) ? at : undefined;
-};
-
-const chatPlanOpts = (mode: CompactMode) => ({ dreamAt: dreamTime(), idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens, compactGrowth: settings.chatCompactGrowthTokens, quietMinutes: settings.compactQuietMinutes, mode });
+const chatPlanOpts = (mode: CompactMode) => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens, compactGrowth: settings.chatCompactGrowthTokens, quietMinutes: settings.compactQuietMinutes, mode });
 
 // A conversation continues its saved session unless session.ts says to start fresh.
 export function chatResume(announce: boolean, file: string = OWNER_SESSION_FILE, source: Source = "chat"): Resume {
@@ -32,10 +25,9 @@ export function chatResume(announce: boolean, file: string = OWNER_SESSION_FILE,
   const now = new Date();
   const opts = chatPlanOpts("off");
   if (planSession(saved, now, opts) === "fresh") {
-    const why = freshReason(saved, now, opts);
-    if (announce && why) {
-      console.log(why === "new-day" ? `${source}: the nightly dream has run since the last turn, starting a fresh session` : `${source}: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
-      audit("chat_session", why === "new-day" ? "new-day-reset" : "idle-reset", source);
+    if (announce && idleExpired(saved, now, opts.idleResetHours)) {
+      console.log(`${source}: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
+      audit("chat_session", "idle-reset", source);
     }
     return { previousCost: 0 };
   }

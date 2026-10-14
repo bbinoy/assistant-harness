@@ -195,7 +195,7 @@ export function loadSettings(env: Env) {
 
     // Chat session hygiene: the SDK only compacts near the context limit, so a long-lived
     // session would re-send an ever-growing history on every turn.
-    chatIdleResetHours: num(env, "CHAT_IDLE_RESET_HOURS", 24, 1, 168), // idle this long: start a fresh session (only a backstop: the nightly dream already starts a new day, chatsession.ts)
+    chatIdleResetHours: num(env, "CHAT_IDLE_RESET_HOURS", 72, 1, 168), // idle this long: start a fresh session. Across days the conversation continues and compaction keeps it small (chatsession.ts)
     chatCompactGrowthTokens: num(env, "CHAT_COMPACT_GROWTH_TOKENS", 100_000, 5_000, 400_000), // the conversation itself (context minus tools, skills and prompts) this big: compact afterwards, owner and groups alike
     chatCompactTokens: num(env, "CHAT_COMPACT_TOKENS", 150_000, 10_000, 500_000), // fallback for a session saved before the baseline was recorded: a turn this big: compact afterwards (tools and skills alone are ~50k)
 
