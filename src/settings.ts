@@ -105,7 +105,8 @@ export function loadSettings(env: Env) {
     runMaxMinutesBackground: num(env, "RUN_MAX_MINUTES_BACKGROUND", 180, 1, 2880),
 
     // A small model's second opinion on approvals (src/autojudge.ts). It may skip the question for
-    // calendar events that only touch you (broad: any source, chat: only in chat); shadow: it judges
+    // whatever the manifest marks `auto` (toolmanifest.ts): calendar events that only touch you, plain web pages, and in chat a
+    // send you asked for (broad: any source the flag allows, chat: only in chat); shadow: it judges
     // and logs, you still decide; off: never.
     autoApprove: oneOf(env, "AUTO_APPROVE", "broad", ["off", "shadow", "chat", "broad"] as const),
 
