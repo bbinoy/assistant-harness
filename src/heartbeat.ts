@@ -1,5 +1,6 @@
 import { formatAlert, inQuietHours, planActions } from "./actions.ts";
 import { mailBody } from "./mailtext.ts";
+import { mailAlertRequest, type NoticeWriter } from "./notice.ts";
 import { LIMITS, oneLine } from "./sanitize.ts";
 import { audit } from "./audit.ts";
 import type { HandleItem } from "./handler.ts";
@@ -43,6 +44,7 @@ interface NewMail {
 
 interface HeartbeatHooks {
   alert: (text: string) => Promise<void>; // tell the owner something (plain text)
+  write?: NoticeWriter; // writes the alert from the facts (notice.ts); absent: the template text (tests)
   handle: (items: HandleItem[]) => void; // queue mail for the handler
   briefDue: () => boolean; // today's brief is still due: it will report urgent mail itself
   onTick: () => void; // tick-driven jobs (wake-ups, dream, brief, radar): independent of the mail check, never awaited
@@ -146,10 +148,10 @@ async function fetchInputs(mb: MailSource, mails: NewMail[]): Promise<MailInput[
 // Classify all new mail in one batch, act on the plan, record every decision.
 // Returns mail that should be retried next tick. Once the batch is classified nothing here
 // throws: every side effect is guarded, so a failure can never cause a repeat alert.
-async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: HeartbeatHooks): Promise<NewMail[]> {
+async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: HeartbeatHooks, triage: typeof triageBatch = triageBatch): Promise<NewMail[]> {
   console.log(`heartbeat: ${fresh.length} new conversation(s)`);
 
-  const results = await triageBatch(await fetchInputs(mb, fresh));
+  const results = await triage(await fetchInputs(mb, fresh));
   const plan = planActions(results, { maxArchives: settings.maxArchivesPerTick });
   const decision: string[] = results.map((t) => (settings.heartbeatLive ? "kept" : `would-${t.label}`));
   const extra: Record<number, Record<string, unknown>> = {};
@@ -173,8 +175,12 @@ async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: Heartbeat
       if (hooks.briefDue()) {
         for (const i of plan.alert) decision[i] = "covered-by-brief";
       } else {
+        const items = plan.alert.map((i) => ({ from: fresh[i]!.from, subject: fresh[i]!.subject, reason: results[i]!.reason }));
+        const template = formatAlert(items);
+        // Written by a model from the facts, plain text; any failure sends the template, so an alert is never lost.
+        const text = hooks.write ? await hooks.write(mailAlertRequest(items, template)).catch(() => template) : template;
         const ok = await hooks
-          .alert(formatAlert(plan.alert.map((i) => ({ from: fresh[i]!.from, subject: fresh[i]!.subject, reason: results[i]!.reason }))))
+          .alert(text)
           .then(() => true, (e) => (console.error("heartbeat: alert failed:", (e as Error).message), false));
         for (const i of plan.alert) decision[i] = ok ? "alerted" : "alert-failed";
       }
@@ -229,9 +235,10 @@ async function archiveStaleBriefs(mb: MailSource, ids: string[]) {
   }
 }
 
-// `env` is for tests: a fake mail source and fake timers.
-export function startHeartbeat(hooks: HeartbeatHooks, env: { mail?: MailSource; setTimeout?: (f: () => void, ms: number) => unknown; setInterval?: (f: () => void, ms: number) => unknown } = {}) {
-  const mb = env.mail ?? new Mailbird();
+// `env` is for tests: a fake mail source (or the factory that would make the real one) and fake timers.
+export function startHeartbeat(hooks: HeartbeatHooks, env: { triage?: typeof triageBatch; mail?: MailSource; newMail?: () => MailSource; setTimeout?: (f: () => void, ms: number) => unknown; setInterval?: (f: () => void, ms: number) => unknown } = {}) {
+  // MAIL_PROVIDER=none: no mail client is made, let alone connected. Only the liveness line is kept (mailOff below).
+  const mb = settings.mail ? (env.mail ?? (env.newMail ?? (() => new Mailbird()))()) : undefined;
   let running = false;
   let failing = false;
 
@@ -239,7 +246,7 @@ export function startHeartbeat(hooks: HeartbeatHooks, env: { mail?: MailSource; 
   // timer fire starts them all, none waits for or depends on another, and a failing or hanging mail check (Mailbird
   // down, a slow handler) never skips them. Each has its own re-entrancy guard.
   const mailCheck = async () => {
-    if (running || isPaused()) return; // mail ticks never overlap
+    if (!mb || running || isPaused()) return; // mail ticks never overlap
     // Night: no mail work at all (no Mailbird calls, no model turns). Everything that arrived
     // is picked up together by the first tick after quietEndHour.
     if (inQuietHours(new Date(), settings.quietStartHour, settings.quietEndHour)) return;
@@ -250,7 +257,7 @@ export function startHeartbeat(hooks: HeartbeatHooks, env: { mail?: MailSource; 
       if (mail.seeding) {
         console.log("heartbeat: baseline recorded, existing inbox treated as seen");
       } else {
-        if (mail.fresh.length > 0) for (const m of await processNewMail(mb, mail.fresh, hooks)) mail.unsee(m);
+        if (mail.fresh.length > 0) for (const m of await processNewMail(mb, mail.fresh, hooks, env.triage)) mail.unsee(m);
         if (settings.heartbeatLive && mail.staleBriefs.length > 0) await archiveStaleBriefs(mb, mail.staleBriefs);
       }
       mail.commit(); // only now are these messages "seen"
@@ -264,13 +271,19 @@ export function startHeartbeat(hooks: HeartbeatHooks, env: { mail?: MailSource; 
       running = false;
     }
   };
+  // Without mail the "check" is just proof of life, so `doctor` sees the heartbeat ticking. Same pause and night rules, no calls, no log lines.
+  const mailOff = async () => {
+    if (isPaused() || inQuietHours(new Date(), settings.quietStartHour, settings.quietEndHour)) return;
+    const prev = readJson<{ lastNewMailAt?: string }>(LIVENESS, {});
+    writeJson(LIVENESS, { lastTickAt: new Date().toISOString(), lastNewMailAt: prev.lastNewMailAt });
+  };
   const tick = () => {
     try {
       hooks.onTick(); // starts its jobs without waiting for them
     } catch (e) {
       console.error("heartbeat: tick jobs failed to start:", (e as Error).message);
     }
-    void mailCheck().catch((e) => console.error("heartbeat: mail check failed:", (e as Error).message));
+    void (mb ? mailCheck : mailOff)().catch((e) => console.error("heartbeat: mail check failed:", (e as Error).message));
   };
 
   (env.setTimeout ?? setTimeout)(tick, 20_000); // first tick shortly after start
@@ -278,7 +291,8 @@ export function startHeartbeat(hooks: HeartbeatHooks, env: { mail?: MailSource; 
   console.log(
     `heartbeat: every ${settings.heartbeatMinutes} min, idle ${settings.quietStartHour}:00-${settings.quietEndHour}:00, actions ${settings.heartbeatLive ? "LIVE" : "log-only"}`,
   );
-  return { tick, mailCheck };
+  if (!mb) console.log("mail: off (MAIL_PROVIDER=none)");
+  return { tick, mailCheck: mb ? mailCheck : mailOff };
 }
 
 // `npm run triage-check`: classify the newest inbox mail exactly as the heartbeat would, and

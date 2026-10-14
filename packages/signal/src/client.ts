@@ -1,6 +1,6 @@
 import net from "node:net";
 import { silentLogger, type Logger } from "./logger.ts";
-import { interpretEnvelope, type IncomingMessage, type IncomingReaction, type Quote } from "./envelope.ts";
+import { interpretEnvelope, type IncomingDeletion, type IncomingMessage, type IncomingReaction, type Quote } from "./envelope.ts";
 
 // The Signal client: a JSON-RPC 2.0 connection to a running `signal-cli daemon` (one JSON object per line over
 // TCP): receive, send, react, read receipts, typing, group list. What signal-cli reports is interpreted by envelope.ts.
@@ -72,6 +72,7 @@ export class SignalClient {
   private pending = new Map<number, Pending>();
   private handler: ((m: IncomingMessage) => void) | undefined;
   private reactionHandler: ((r: IncomingReaction) => void) | undefined;
+  private deletionHandler: ((d: IncomingDeletion) => void) | undefined;
   private closeHandler: ((info: CloseInfo) => void) | undefined;
   private closed = false;
   private closeRequested = false;
@@ -180,6 +181,11 @@ export class SignalClient {
     this.reactionHandler = handler;
   }
 
+  /** Sets the handler for messages deleted for everyone (replaces the previous one). */
+  onDelete(handler: (d: IncomingDeletion) => void) {
+    this.deletionHandler = handler;
+  }
+
   /**
    * Sets the handler called once when the connection ends, whether by {@link close}, by signal-cli going away or by a
    * socket error. There is no reconnect: the host decides (exit and let a supervisor restart it, or build a new client).
@@ -260,8 +266,9 @@ export class SignalClient {
   }
 
   private onEnvelope(env: any) {
-    const { message, reaction } = interpretEnvelope(env, { account: this.account, peer: this.peer, peerAci: this.peerAci });
+    const { message, reaction, deletion } = interpretEnvelope(env, { account: this.account, peer: this.peer, peerAci: this.peerAci });
     if (reaction) this.reactionHandler?.(reaction);
+    else if (deletion) this.deletionHandler?.(deletion);
     else if (message) this.handler?.(message);
   }
 

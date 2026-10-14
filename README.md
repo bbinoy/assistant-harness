@@ -76,8 +76,7 @@ Tasks, meeting prep and calendar need the Notion and Google Calendar connectors.
 
 **10:42.** An urgent mail arrives while you are in a meeting, so you get exactly one alert:
 
-> 📥 1 email needs you:
-> - Keeley Jones: Need your decision on the PR plan by noon
+> Keeley Jones needs your decision on the PR plan by noon: the whole campaign is waiting on a yes or no.
 
 **Any time.** Just talk to Ted, in text or a voice note:
 
@@ -110,7 +109,7 @@ Personal agents are having a moment. Ted is deliberately narrow: one person, you
 | | **Ted** | **[OpenClaw](https://en.wikipedia.org/wiki/OpenClaw)** | **[Grok Bot](https://www.vellum.ai/blog/official-grok-bot-breakdown)** | **[Instinct](https://www.vellum.ai/blog/official-instinct-breakdown)** |
 |---|---|---|---|---|
 | **What it is** | A personable assistant in your Signal chats, with memory and mail, calendar and task skills | A general-purpose agent platform | A general agent on a cloud computer | A general assistant you text or call |
-| **Before it acts** | Code-enforced policy: reads run, outward actions ask on your phone, deletes are denied | Per-agent tool permissions; sandboxed or full system access, your choice | Allow once / always / deny, plus auto-review rules | Reported by Vellum: no approval step required for actions. Corrections welcome |
+| **Before it acts** | Code-enforced policy: reads run, outward actions ask on your phone (in chat, a send you asked for exactly may go through on a small model's judgement), deletes are denied | Per-agent tool permissions; sandboxed or full system access, your choice | Allow once / always / deny, plus auto-review rules | Reported by Vellum: no approval step required for actions. Corrections welcome |
 | **Scope of power** | Mail, calendar and task tools, plus web search (opening a page asks first, unless the approval judge sees it plainly serves your request). No shell; files only inside its own memory notes | Can be given shell, file system and web automation; 100+ skills plus a marketplace | Connectors to Gmail, Outlook, Drive, Teams, Salesforce and more | Email, messages, screen, audio, location |
 | **Source** | Open (MIT), about 7,500 lines of TypeScript in `src/` | Open, large | Proprietary | Proprietary |
 | **Cost** | Your Claude plan. Measured in October 2026 with Sonnet: about $0.01 for a simple warm reply, $0.03 to $0.08 for a calendar question | Free software plus your model costs | $200/month, or bundled with SuperGrok Heavy and Cursor plans | Free in invite-only beta, pricing not published |
@@ -134,6 +133,8 @@ npm run install:launchd                     # starts it now and at every login
 Link signal-cli and check your mail client first: [docs/SETUP.md](docs/SETUP.md). For a separate Signal contact for Ted (recommended), see [docs/SIGNAL-ACCOUNT.md](docs/SIGNAL-ACCOUNT.md). Then message Ted "set up" in Signal: it finds your calendars and Notion pages, learns how you write from your sent mail (if you allow it), and saves what it learns as notes. No files to edit.
 
 **Keep it running while you're away.** Ted lives on your Mac, so it only works while the Mac is awake. If it stays plugged in, open *System Settings > Battery > Options* (on a desktop Mac: *Energy*) and turn on *Prevent automatic sleeping on power adapter when the display is off*. The screen can still turn off. On a laptop, keep the lid open. If the Mac does sleep, nothing breaks: Ted picks up where it left off when it wakes.
+
+**No mail client?** With `MAIL_PROVIDER=none` Ted runs chat only (Signal chat, memory, wake-ups, calendar radar, a daily brief of calendar and tasks): [chat-only setup](docs/SETUP.md#chat-only-no-mail).
 
 ## Make it yours
 

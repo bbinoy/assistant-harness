@@ -10,7 +10,7 @@ This is a personal project that runs daily for its author. It works, its safety-
 - **Node 24+** (TypeScript runs directly, there is no build step).
 - **[Claude Code](https://docs.claude.com/en/docs/claude-code/overview)** installed and logged in (`claude auth login`). The agent uses your stored login so it can reach your claude.ai connectors (Notion, Google Calendar, Gmail…). *Check Anthropic's current terms for using your plan for personal automation like this.* An API key or `claude setup-token` also work but cannot use those connectors (see `HARNESS_AUTH` in `.env.example`).
 - **[signal-cli](https://github.com/AsamK/signal-cli)** (`brew install signal-cli`). Either linked to your own Signal account as a secondary device (Note to Self, the default), or, better, registered as the assistant's own account ([SIGNAL-ACCOUNT.md](SIGNAL-ACCOUNT.md)).
-- **A mail client with an MCP server.** This repo uses [Mailbird](https://www.getmailbird.com/); see [Why a local mail client](ADAPTING.md#why-the-default-is-a-local-client) and [ADAPTING.md](ADAPTING.md) if you use Gmail only.
+- **A mail client with an MCP server**, unless you run chat only (below). This repo uses [Mailbird](https://www.getmailbird.com/); see [Why a local mail client](ADAPTING.md#why-the-default-is-a-local-client) and [ADAPTING.md](ADAPTING.md) if you use Gmail only.
 - Optional: Notion and Google Calendar connected under *claude.ai → Settings → Connectors*, for the task and calendar parts of the brief.
 
 ## Install
@@ -37,6 +37,16 @@ npm run install:launchd               # installs a launchd job; the agent starts
 
 Send yourself a message on Signal. The first heartbeat tick only records a **baseline** of your current inbox (it does not triage old mail). The first daily brief runs on the next tick at or after 07:00.
 
+### Chat only (no mail)
+
+Mail is optional. For the Signal chat, memory, wake-ups, the calendar radar and a daily brief without an inbox, you need only **Claude Code** (logged in) and **signal-cli**: skip the Mailbird step above and put this in `.env`:
+
+```
+MAIL_PROVIDER=none
+```
+
+What changes: no mail client is started or contacted anywhere; the heartbeat only keeps its liveness line (one log line at start, `mail: off (MAIL_PROVIDER=none)`, nothing per tick); the daily brief has no email step, so the brief the model writes is the deliverable, and you get its pep talk and focus on Signal (say "brief" for the rest, it is saved in `memory/last-brief.md`); the model is not offered the mail skills or the Mailbird tools and is told there is no mail; `npm run doctor` shows `mail: off` as OK and does not look for Mailbird; setup does not ask about your writing style or sent mail; `npm run restore` and `npm run triage-check` refuse to run. The default is `MAIL_PROVIDER=mailbird`, which behaves as described everywhere else in these docs. `MAIL_PROVIDER=gmail` is reserved for a later version and stops the agent at start with "not implemented yet".
+
 ### Skills and first-time setup
 
 The skills the agent works with ship in the repo, in `plugin/skills/`, and are loaded straight from there: there is nothing to install or copy. They hold no personal details. What they need to know about you (which calendars to check, where your Notion task list and meeting pages are, how you write) lives in your memory notes, and the agent sets those up with you in the chat.
@@ -50,7 +60,7 @@ After the agent is running, send it **"set up"** on Signal. It walks you through
 | Calendars | lists your Google calendars, you pick which count, plus your time zone | `setup-calendars.md` |
 | Tasks | searches Notion for your task list and uses it (it asks only if it finds nothing or several, and can create one for you) | `setup-tasks.md` |
 | Meeting notes | searches Notion for your meetings database the same way, or creates a page for prep notes | `setup-meetings.md` |
-| How you write | with your permission, reads up to 15 of your sent mails and describes your style for you to correct | `voice-writing.md` |
+| How you write (mail only) | with your permission, reads up to 15 of your sent mails and describes your style for you to correct | `voice-writing.md` |
 | Optional | booking link, topics for the brief's radar | `setup-booking-link.md`, `brief-radar-topics.md` |
 
 **Notion and Google Calendar come through connectors in your Claude account** (Settings, then Connectors). If one is not connected, its tools do not exist, and the agent says so plainly ("Notion isn't connected") instead of asking you to type in what the connector would have told it, and skips that part: tasks and meeting prep without Notion, the calendar review without Google Calendar. Mail triage, chat and writing-style setup need neither. Connect it, message the agent again, and it carries on. `npm run doctor` shows the status of each connector as of the last run.

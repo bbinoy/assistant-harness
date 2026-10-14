@@ -62,6 +62,10 @@ export function loadSettings(env: Env) {
     voice: env.TTS_VOICE || "am_onyx",
     speed: num(env, "TTS_SPEED", 0.95, 0.5, 2),
   };
+  // Where mail comes from. none: chat only, no mail client anywhere (heartbeat, brief, prompts and doctor all leave mail out).
+  // gmail is a name reserved for a later step: it must stop the agent, not quietly behave like another provider.
+  const mailProvider = oneOf(env, "MAIL_PROVIDER", "mailbird", ["none", "mailbird", "gmail"] as const);
+  if (mailProvider === "gmail") throw new Error("MAIL_PROVIDER=gmail is not implemented yet (use mailbird, or none for chat only)");
   // The data root holds three folders: state/ (bookkeeping), logs/ and memory/ (what the
   // model reads). Overridable so tests never touch the real data.
   const dataDir = env.HARNESS_DATA_DIR ? resolve(env.HARNESS_DATA_DIR) : resolve(fileURLToPath(new URL("../", import.meta.url)));
@@ -73,6 +77,9 @@ export function loadSettings(env: Env) {
     // "sonnet" is an alias the SDK resolves to the current Sonnet, so new releases are
     // picked up automatically. Pin a full model id if you prefer stability.
     model: env.HARNESS_MODEL || "sonnet",
+
+    mailProvider,
+    mail: mailProvider !== "none", // is there any mail to look at? Every mail-only path asks this, never the provider's name
 
     heartbeatMinutes: num(env, "HEARTBEAT_MINUTES", 15, 1, 240),
     heartbeatLive: oneOf(env, "HEARTBEAT_ACTIONS", "live", ["live", "log"] as const) === "live",
@@ -98,7 +105,8 @@ export function loadSettings(env: Env) {
     runMaxMinutesBackground: num(env, "RUN_MAX_MINUTES_BACKGROUND", 180, 1, 2880),
 
     // A small model's second opinion on approvals (src/autojudge.ts). It may skip the question for
-    // calendar events that only touch you (broad: any source, chat: only in chat); shadow: it judges
+    // whatever the manifest marks `auto` (toolmanifest.ts): calendar events that only touch you, plain web pages, and in chat a
+    // send you asked for (broad: any source the flag allows, chat: only in chat); shadow: it judges
     // and logs, you still decide; off: never.
     autoApprove: oneOf(env, "AUTO_APPROVE", "broad", ["off", "shadow", "chat", "broad"] as const),
 
@@ -111,13 +119,17 @@ export function loadSettings(env: Env) {
     // What the model can see (policy.ts, hiddenTools): every tool it sees is re-sent on every
     // model call, so hide what your skills never use. A skill that needs a hidden tool will
     // fail, so list it here. Connectors: tool-name prefixes. Notion and Mailbird: the tools to keep.
-    hiddenConnectors: list(
-      env,
-      "HIDDEN_CONNECTORS",
-      ["mcp__claude_ai_Interactive_Brokers_IBKR", "mcp__claude_ai_Gmail", "mcp__claude_ai_Google_Drive", "mcp__claude_ai_Google_Docs", "mcp__claude_ai_Claude_Docs"],
-      /^mcp__[\w-]+$/,
-      "a tool-name prefix like mcp__claude_ai_Gmail",
-    ),
+    // Without mail the Mailbird server is hidden whole (none of its tools is sent to the model), whatever HIDDEN_CONNECTORS says.
+    hiddenConnectors: [
+      ...list(
+        env,
+        "HIDDEN_CONNECTORS",
+        ["mcp__claude_ai_Interactive_Brokers_IBKR", "mcp__claude_ai_Gmail", "mcp__claude_ai_Google_Drive", "mcp__claude_ai_Google_Docs", "mcp__claude_ai_Claude_Docs"],
+        /^mcp__[\w-]+$/,
+        "a tool-name prefix like mcp__claude_ai_Gmail",
+      ),
+      ...(mailProvider === "none" ? ["mcp__mailbird"] : []),
+    ],
     mailbirdTools: list(
       env,
       "MAILBIRD_TOOLS",

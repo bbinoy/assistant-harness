@@ -80,3 +80,40 @@ test("heartbeat: a failing mail check does not skip the tick jobs, and a hanging
     Object.assign(s, was);
   }
 });
+
+// The alert is written by the notice writer from the facts; when that fails the template still goes out.
+for (const [name, write, expected] of [
+  ["a written alert is sent", async () => "Dana is waiting on your signature.", /^Dana is waiting/],
+  ["a failing writer still alerts with the template", async (): Promise<string> => { throw new Error("boom"); }, /^📥 1 email needs you:/],
+] as const) {
+  test(`heartbeat: ${name}`, async () => {
+    const s = settings as unknown as Record<string, unknown>;
+    const was = { quietStartHour: s.quietStartHour, quietEndHour: s.quietEndHour, heartbeatLive: s.heartbeatLive, mail: s.mail };
+    Object.assign(s, { quietStartHour: 0, quietEndHour: 0, heartbeatLive: true, mail: true });
+    const { writeJson, readJson } = await import("../src/state.ts");
+    const seenBefore = readJson("state/seen.json", undefined);
+    writeJson("state/seen.json", { seededAt: "2026-01-01T00:00:00.000Z", keys: {} });
+    const row = { conversationId: "c1", subject: "Contract", lastSender: "Dana", receivedAtUtc: "2026-10-14T09:00:00", lastMessageId: 7 };
+    const mail = {
+      inboxes: async () => [{ email: "me@x.org", folderId: "f", senderName: "Me" }],
+      call: async (n: string) => (n === "list_conversations" ? [row] : { body: "please sign", from: { displayName: "Dana", email: "d@x.org" } }),
+      close: async () => {},
+    } as unknown as MailSource;
+    const sent: string[] = [];
+    const log = console.log;
+    console.log = () => {};
+    try {
+      const hb = startHeartbeat(
+        { alert: async (t) => void sent.push(t), write, handle: () => {}, briefDue: () => false, onTick: () => {} },
+        { mail, triage: async (m) => m.map(() => ({ label: "act_now" as const, kind: "personal_or_work" as const, reason: "waiting", protected: false })), setTimeout: () => 0, setInterval: () => 0 },
+      );
+      await hb.mailCheck();
+    } finally {
+      console.log = log;
+      Object.assign(s, was);
+      writeJson("state/seen.json", seenBefore ?? { keys: {} });
+    }
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!, expected);
+  });
+}

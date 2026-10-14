@@ -4,6 +4,7 @@ import type { Approve } from "./permissions.ts";
 import { audit } from "./audit.ts";
 import { draftCollector } from "./propose.ts";
 import { overBudget } from "./budget.ts";
+import { handlerReportRequest, type NoticeWriter } from "./notice.ts";
 import { OWNER } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";
 
@@ -46,14 +47,17 @@ export function handlerPrompt(items: HandleItem[]): string {
 // (<why>)". Only what it actually did is reported. Mail it decided not to act on is not a
 // notification: it stays in the inbox and appears in the daily brief. Returns "" when there is
 // nothing to say.
-export function formatReport(text: string, owner: string): string {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+export function handledLines(text: string, owner: string): string[] {
   const left = new RegExp(`left for ${owner}\\b`, "i");
-  const done = lines.filter((l) => !left.test(l));
+  return text.split("\n").map((l) => l.trim()).filter(Boolean).filter((l) => !left.test(l));
+}
+
+export function formatReport(text: string, owner: string): string {
+  const done = handledLines(text, owner);
   return done.length ? `🤝 Handled ${done.length}:\n${done.join("\n")}`.slice(0, 1500) : "";
 }
 
-export function createHandler(deps: { approve: Approve; notify: (text: string) => Promise<void>; propose?: (draftIds: readonly number[]) => Promise<number> }) {
+export function createHandler(deps: { approve: Approve; notify: (text: string) => Promise<void>; write?: NoticeWriter; propose?: (draftIds: readonly number[]) => Promise<number> }) {
   let working = false;
 
   async function work() {
@@ -73,7 +77,7 @@ export function createHandler(deps: { approve: Approve; notify: (text: string) =
           const { text, costUsd } = await runHandlerTurn(handlerPrompt(batch), deps.approve, drafts.onToolSuccess);
           audit("mail_handler", "done", "handler", { count: batch.length, costUsd });
           const report = formatReport(text, OWNER);
-          if (report) await deps.notify(report);
+          if (report) await deps.notify(deps.write ? await deps.write(handlerReportRequest(handledLines(text, OWNER), report)).catch(() => report) : report);
           if (drafts.ids.length > 0) await deps.propose?.(drafts.ids); // show each draft on the phone
         } catch (e) {
           console.error("handler failed:", (e as Error).message);

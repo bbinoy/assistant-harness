@@ -4,7 +4,8 @@ import { isJudgeable, judgeAction, mayAutoApprove, type Verdict } from "./autoju
 import type { Decision } from "./approvals.ts";
 import { describeCall } from "./format.ts";
 import { classify, isReadTool } from "./policy.ts";
-import { sendApprovalText, type DraftView } from "./proposals.ts";
+import type { DraftView } from "./proposals.ts";
+import { actionOf, entryFor, mailView, type MailView } from "./toolmanifest.ts";
 import { OWNER, settings } from "./settings.ts";
 
 // Permissions as code: policy.ts decides allow / ask / deny; "ask" goes to the owner's phone (the Approve callback).
@@ -26,12 +27,12 @@ export function idsOf(input: Record<string, unknown>): Record<string, unknown> |
   return Object.keys(ids).length ? { ids } : undefined;
 }
 
-// What the owner just said in chat, for the approval judge. A module-level value because the warm
-// chat process is built before the message arrives; chat turns run one at a time.
-let chatOwnerMessage: string | undefined;
-export const setChatOwnerMessage = (text: string) => void (chatOwnerMessage = text);
-
-const SEND_DRAFT = "mcp__mailbird__send_message_now";
+// What the owner just said in chat, and the two messages before it, for the approval judge (a send is judged against what was said
+// about it, which may have been a message ago: "reply to Armon that Tuesday works" ... "send it"). A module-level value because
+// the warm chat process is built before the message arrives; chat turns run one at a time.
+let chatOwnerMessages: string[] = [];
+export const setChatOwnerMessage = (text: string) => void (chatOwnerMessages = [...chatOwnerMessages, text].slice(-3));
+const MAIL_OUT = new Set(["send", "reply", "forward"]); // actions that put mail in front of other people, judged against the owner's words
 // An action the owner approved is done: the same call again (same tool, same arguments) within half an hour is refused
 // without a question, because repeating it would send, create or change it twice (a model once retried a send after a
 // slow status check). A DECLINED call can still be asked again.
@@ -76,20 +77,25 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       return { behavior: "deny", message: "That exact call was already approved and done a moment ago. Do not repeat it; check its result once if you need to be sure it went through." };
     }
     let description = describeCall(tool, input);
-    if (tool === SEND_DRAFT) {
-      // Show what Mailbird holds right now, not what the model says it is sending. If that cannot
-      // be read, the owner would be approving blind, so the send does not happen.
+    let view: MailView | undefined;
+    if (MAIL_OUT.has(actionOf(tool))) {
+      // Show what the mail client holds right now, not what the model says it is sending (a send of a draft), and the same view for
+      // every provider. If that cannot be read, the owner would be approving blind, so the send does not happen.
       const id = Number((input as { messageId?: unknown }).messageId);
-      const view = draftReader && Number.isFinite(id) ? await draftReader(id).catch(() => undefined) : undefined;
-      if (!view || view.to.length === 0) {
+      const fromDraft = entryFor(tool)?.view === "mbSend";
+      const draft = fromDraft && draftReader && Number.isFinite(id) ? await draftReader(id).catch(() => undefined) : undefined;
+      view = mailView(tool, input, draft && { ...draft, bcc: draft.bcc ?? [], hasAttachments: draft.hasAttachments ?? false });
+      if (!view || (view.action !== "forward" && view.to.length === 0)) {
         audit(tool, "deny-unreadable-draft", source);
-        return { behavior: "deny", message: "That draft could not be read back from Mailbird, so it cannot be shown for approval and was not sent." };
+        return { behavior: "deny", message: "That mail could not be read back, so it cannot be shown for approval and was not sent." };
       }
-      description = sendApprovalText(view);
+      description = describeCall(tool, input, view);
     }
     let judged: Verdict | undefined;
-    if (settings.autoApprove !== "off" && isJudgeable(tool, input, source)) {
-      judged = await judge({ source, description, ownerMessage: source === "chat" ? chatOwnerMessage : undefined, task: source === "chat" ? undefined : judgeContext });
+    const [ownerMessage, ...earlier] = [...chatOwnerMessages].reverse();
+    // A chat send is judged against the owner's words; with none on record there is nothing to judge it against.
+    if (settings.autoApprove !== "off" && isJudgeable(tool, input, source, view) && (view === undefined || (source === "chat" && ownerMessage !== undefined))) {
+      judged = await judge({ source, description, ownerMessage: source === "chat" ? ownerMessage : undefined, earlier: source === "chat" ? earlier.reverse() : undefined, task: source === "chat" ? undefined : judgeContext });
       audit(tool, `judge-${judged.decision}`, source, { reason: judged.reason, mode: settings.autoApprove });
       if (mayAutoApprove(settings.autoApprove, source, judged)) {
         audit(tool, "auto-approved", source, { reason: judged.reason }); // silent on purpose: logged, never announced (npm run report shows them)

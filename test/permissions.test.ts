@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Verdict } from "../src/autojudge.ts";
-import { callKey, doneCount, makeCanUseTool, setDraftReader } from "../src/permissions.ts";
+import { callKey, doneCount, makeCanUseTool, setChatOwnerMessage, setDraftReader } from "../src/permissions.ts";
 
 const SEND = "mcp__mailbird__send_message_now";
 // A judge that always says "ask": these tests are about the guard, and must never start a real model process.
@@ -83,4 +83,51 @@ test("remembered calls expire out of the map after the 30 minute window", async 
   } finally {
     Date.now = realNow;
   }
+});
+
+// --- sends are judged in chat, from the owner's words and the exact draft; never unattended ---
+
+test("a chat send is judged against the owner's messages and the draft with bcc; auto skips the question, ask asks", async () => {
+  setDraftReader(async () => ({ to: ["jessica@example.com"], cc: [], bcc: ["spy@example.com"], subject: "Re: hi", body: "Hi Jessica", hasAttachments: true }) as never);
+  setChatOwnerMessage("reply to Jessica that Tuesday works");
+  setChatOwnerMessage("send it");
+  let asked = 0;
+  const seen: { description: string; ownerMessage?: string; earlier?: readonly string[] }[] = [];
+  const judge = (decision: "auto" | "ask") => async (i: never): Promise<Verdict> => (seen.push(i), { decision, reason: "test" });
+  const opts = { signal: new AbortController().signal } as never;
+  const auto = makeCanUseTool(async () => (asked++, { approved: true }), "chat", undefined, undefined, judge("auto") as never);
+  assert.equal((await auto(SEND, { messageId: 41, confirm: true }, opts))!.behavior, "allow");
+  assert.equal(asked, 0, "the judge said auto: no question");
+  assert.match(seen[0]!.description, /^✉️ Send email now\nTo: jessica@example\.com\nBcc: spy@example\.com\nSubject: Re: hi\nAttachments: yes/);
+  assert.equal(seen[0]!.ownerMessage, "send it");
+  assert.deepEqual(seen[0]!.earlier, ["reply to Jessica that Tuesday works"]);
+  const askJudge = makeCanUseTool(async () => (asked++, { approved: true }), "chat", undefined, undefined, judge("ask") as never);
+  assert.equal((await askJudge(SEND, { messageId: 42, confirm: true }, opts))!.behavior, "allow");
+  assert.equal(asked, 1, "the judge said ask: the owner is asked");
+});
+
+test("unattended runs never have a send judged, however the judge would answer", async () => {
+  setDraftReader(async () => ({ to: ["jessica@example.com"], cc: [], bcc: [], subject: "s", body: "b", hasAttachments: false }) as never);
+  const opts = { signal: new AbortController().signal } as never;
+  for (const source of ["handler", "brief", "radar", "background"] as const) {
+    let judged = 0;
+    let asked = 0;
+    const judge = async (): Promise<Verdict> => (judged++, { decision: "auto", reason: "x" });
+    const canUse = makeCanUseTool(async () => (asked++, { approved: false }), source, undefined, "send the reply", judge as never);
+    assert.equal((await canUse(SEND, { messageId: 50 + asked, confirm: true }, opts))!.behavior, "deny");
+    assert.equal(judged, 0, source);
+    assert.equal(asked, 1, `${source} asks the owner`);
+  }
+});
+
+test("a forward with no recipient yet is never judged; a send whose draft cannot be read is refused", async () => {
+  const opts = { signal: new AbortController().signal } as never;
+  let judged = 0;
+  const judge = async (): Promise<Verdict> => (judged++, { decision: "auto", reason: "x" });
+  const canUse = makeCanUseTool(async () => ({ approved: false }), "chat", undefined, undefined, judge as never);
+  assert.equal((await canUse("mcp__mailbird__forward_conversation", { conversationId: "g", body: "FYI" }, opts))!.behavior, "allow"); // only saves a draft: no question, nothing to judge
+  assert.equal(judged, 0);
+  setDraftReader(async () => undefined);
+  const r = await canUse(SEND, { messageId: 9, confirm: true }, opts);
+  assert.match((r as { message: string }).message, /could not be read back/);
 });

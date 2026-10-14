@@ -5,7 +5,7 @@ import { AuthError, failure, RateLimitError } from "./errors.ts";
 import { fence } from "./fence.ts";
 import { groupNotesBlock } from "./groupstore.ts";
 import { clampCheck, DEFAULT_CHECK_MINUTES, MAX_CHECK_MINUTES, MIN_CHECK_MINUTES, parseWake } from "./ledger.ts";
-import { ledgerEntries, type Sent } from "./messages.ts";
+import { ledgerEntries, withoutDeleted, type Sent } from "./messages.ts";
 import type { Conversation } from "./conversation.ts";
 import { readNotes } from "./notes.ts";
 import { localDay } from "./pause.ts";
@@ -124,11 +124,12 @@ export function tailLine(m: Sent): string {
   const flat = m.text.replace(/\n+/g, " / ").slice(0, 300);
   if (m.kind === "action") return `${t} (you acted without posting: ${flat})`;
   if (m.kind === "owner") return `${t} ${OWNER}: ${flat}`;
-  if (m.kind === "member" || m.kind === "reaction") return `${t} ${flat}`;
+  if (m.kind === "member" || m.kind === "reaction" || m.kind === "delete") return `${t} ${flat}`;
+  if (m.kind === "edit") return `${t} (an edit of an earlier message, not a new one) ${flat}`;
   return `${t} ${settings.assistant}: ${flat}`;
 }
 
-export const logTail = (conv: Pick<Conversation, "logFile">, n = 40): string[] => ledgerEntries(conv.logFile).slice(-n).map(tailLine);
+export const logTail = (conv: Pick<Conversation, "logFile">, n = 40): string[] => withoutDeleted(ledgerEntries(conv.logFile)).slice(-n).map(tailLine); // what its author took back is not shown
 
 // "typing…" is already showing while a delay runs, so a long one only makes the answer late; the cap is enforced in parseGate.
 const delayText = (max: number = settings.gateMaxDelaySeconds): string =>

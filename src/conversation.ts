@@ -4,7 +4,8 @@ import { audit } from "./audit.ts";
 import { errorNotice, groupErrorNotice } from "./errors.ts";
 import { GROUPS_DIR, groupKey, groupLogFile, groupNotesDir } from "./groupstore.ts";
 import type { GroupMessage } from "./group.ts";
-import { FILE as OWNER_LOG, findMessage, type Kind } from "./messages.ts";
+import { FILE as OWNER_LOG, findMessage, revisionsOf, type Extra, type Kind } from "./messages.ts";
+import { DELETED_LINE, editNote, isAuthor, sameText } from "./edit.ts";
 import { NOTES_DIR } from "./notes.ts";
 import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
 import { OWNER_SESSION_FILE } from "./session.ts";
@@ -14,7 +15,7 @@ import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
 import { clean, LIMITS, oneLine } from "./sanitize.ts";
 import { startTiming, type Timing } from "./timing.ts";
-import type { IncomingMessage, IncomingReaction, Quote } from "@ted-personal-assistant/signal";
+import type { IncomingDeletion, IncomingMessage, IncomingReaction, Quote } from "@ted-personal-assistant/signal";
 import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal/tts";
 
 // The one pipeline every conversation goes through: the owner's private chat and each group. What differs
@@ -83,9 +84,9 @@ export const group = (groupId: string): Conversation =>
   });
 
 // A message with its picture, once prepared (the bytes are held for this turn only; src/image.ts).
-type Held = IncomingMessage & { voice?: boolean; picture?: Picture }; // voice: the text is a transcript of a voice message (set by hear)
+type Held = IncomingMessage & { voice?: boolean; picture?: Picture; edit?: { before?: string } }; // voice: the text is a transcript of a voice message (set by hear); edit: an edit of a message that was answered already, with the version it replaces
 
-export type Incoming = { type: "message"; m: IncomingMessage } | { type: "reaction"; r: IncomingReaction };
+export type Incoming = { type: "message"; m: IncomingMessage } | { type: "reaction"; r: IncomingReaction } | { type: "deletion"; d: IncomingDeletion };
 
 // What one run needs. The caller (the owner's path here, the group brain in group.ts) builds it.
 interface RunHooks {
@@ -122,7 +123,7 @@ interface PipelineDeps {
     replyPlain(text: string, kind?: Kind): Promise<number>;
     sendVoice(file: string, spoken: string, groupId?: string): Promise<number>;
   };
-  record: (groupId: string | undefined, kind: Kind, ts: number, text: string) => void; // into that conversation's log
+  record: (groupId: string | undefined, kind: Kind, ts: number, text: string, extra?: Extra) => void; // into that conversation's log
   account: string; // our own Signal number: the author of messages of ours that a reaction points at
   runOwner: (prompt: string, ownerMessage: string, pictures?: Picture[], hooks?: RunHooks) => Promise<{ text: string; costUsd?: number }>;
   picture: (m: IncomingMessage) => Promise<Picture>; // throws a sentence the sender can be told
@@ -214,7 +215,24 @@ export function createPipeline(deps: PipelineDeps) {
   // A run is already queued for the current burst, so a message arriving now joins it (no verdict of its own is needed).
   const burstQueued = (conv: Conversation): boolean => !!bursts.get(conv.key)?.queued;
 
-  const record = (conv: Conversation, kind: Kind, ts: number, text: string) => deps.record(conv.groupId, kind, ts, text);
+  const record = (conv: Conversation, kind: Kind, ts: number, text: string, extra?: Extra) => deps.record(conv.groupId, kind, ts, text, extra);
+
+  // Messages still waiting for their turn (the settling pause, or queued behind a running turn): an edit replaces one and a delete
+  // removes one. Matched by timestamp: the original's or an edit's, whichever the sender's app uses.
+  const stampOf = (x: unknown) => (x as { timestamp: number }).timestamp;
+  const pendingOf = (conv: Conversation, stamps: readonly number[]) => bursts.get(conv.key)?.pending.find((x) => stamps.includes(stampOf(x)));
+  const authorOf = (x: unknown) => (x as { author?: string; from?: string; fromUuid?: string }).author ?? (x as { from?: string }).from ?? (x as { fromUuid?: string }).fromUuid;
+  function dropPending(conv: Conversation, stamps: readonly number[]): void {
+    const st = bursts.get(conv.key);
+    if (st) st.pending = st.pending.filter((x) => !stamps.includes(stampOf(x)));
+  }
+
+  // Timestamps of messages that were taken as the answer to an approval: an edit of one never answers anything (see edit()).
+  const approvalAnswers = new Set<number>();
+  const answeredApproval = (ts: number) => {
+    approvalAnswers.add(ts);
+    if (approvalAnswers.size > 200) approvalAnswers.delete(approvalAnswers.keys().next().value!);
+  };
 
   // Working / done / failed icons on the owner's message. Only in Note to Self, where Signal shows no
   // "typing…"; in an own-account chat the typing indicator says it, and groups are never decorated.
@@ -327,7 +345,7 @@ export function createPipeline(deps: PipelineDeps) {
 
   // The owner's messages of one burst, as the model sees them: oldest first, each with its own quote and voice marks.
   function ownerPrompt(ms: readonly Held[]): string {
-    const one = (m: Held) => withQuoteContext(m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.picture ? `${PICTURE_NOTE} ${m.text}`.trim() : m.text, m.quote);
+    const one = (m: Held) => withQuoteContext(m.edit ? editNote(m.text, m.edit.before) : m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.picture ? `${PICTURE_NOTE} ${m.text}`.trim() : m.text, m.quote);
     const text = ms.length === 1 ? one(ms[0]!) : `${ms.length} messages arrived one after another, oldest first. Answer them together, as one reply:\n\n${ms.map(one).join("\n\n")}`;
     return canSpeak() ? `${text}\n\n${voiceOption(true)}` : text;
   }
@@ -371,6 +389,7 @@ export function createPipeline(deps: PipelineDeps) {
     const original = cleanIncoming(raw); // the door: hidden characters never get past here
     const arrived = now();
     if (conv.vouch && !(await deps.vouch(conv.groupId!))) return; // a group we cannot vouch for gets nothing, not even a transcription
+    if (original.edited) return edit(conv, original, arrived);
     const author = original.from || original.fromUuid;
     if (conv.attention === "always") void signal.markRead(original.timestamp); // the owner sees it was read, as soon as we have it
     else if (original.addressedToMe && author) void signal.markRead(original.timestamp, author); // only those who spoke to us see "seen"
@@ -392,13 +411,43 @@ export function createPipeline(deps: PipelineDeps) {
     return ownerTurn(conv, m, line, arrived);
   }
 
-  async function ownerTurn(conv: Conversation, m: Held, line: string, arrived: number): Promise<void> {
-    record(conv, "owner", m.timestamp, line);
+  // An edit of an earlier message, the same for the owner's chat and every group. Only its author may edit it; the original may be
+  //   still waiting (settling, queued, or being judged by the gate): the edit takes its place, so the answer is about the new text;
+  //   answered already: the edit is a new message that says it is one (and what it replaced), so the answer can be corrected;
+  //   unchanged (after whitespace and Unicode normalisation): nothing happens.
+  // An edit is never an approval answer, whatever the original was: the owner's path below skips the approval check, and an edit of a
+  // message that WAS taken as an answer is dropped altogether.
+  async function edit(conv: Conversation, m: IncomingMessage, arrived: number): Promise<void> {
+    const targetTs = m.edited!.targetTimestamp;
+    const past = revisionsOf(targetTs, conv.logFile);
+    const stamps = past ? past.stamps : [targetTs];
+    if (stamps.some((t) => approvalAnswers.has(t))) return void console.log("edit of an approval answer ignored");
+    const waiting = pendingOf(conv, stamps);
+    if (!waiting && past && past.root.kind !== "owner" && past.root.kind !== "member" && past.root.kind !== "edit") return void console.log("edit of a message that is not someone's own ignored");
+    if (!waiting && !past && conv.kind === "group") return void console.log("edit of an unknown message in a group ignored"); // nobody to check it against
+    if (!isAuthor(m, waiting ? authorOf(waiting) : past?.root.by, conv.kind === "owner")) return void console.log(`edit by someone other than the author ignored (${conv.kind})`);
+    const prior = waiting ? (waiting as { text: string }).text : past?.latest.text;
+    const author = m.from || m.fromUuid;
+    const via = { targetTimestamp: targetTs, stamps, prior, pending: !!waiting, picture: (waiting as { picture?: Picture } | undefined)?.picture };
+    if (conv.kind === "group") {
+      if (author && m.addressedToMe) void signal.markRead(m.timestamp, author);
+      return deps.admitGroup(conv, { groupId: conv.groupId!, arrivedAt: arrived, text: m.text, picture: via.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, edit: via });
+    }
+    if (prior !== undefined && sameText(prior, m.text)) return void console.log("edit changes nothing, ignored");
+    if (waiting) dropPending(conv, stamps);
+    const held: Held = { ...m, picture: via.picture, ...(waiting ? {} : { edit: { before: prior } }) };
+    return ownerTurn(conv, held, m.text, arrived, { of: targetTs });
+  }
+
+  async function ownerTurn(conv: Conversation, m: Held, line: string, arrived: number, edited?: { of: number }): Promise<void> {
+    record(conv, edited ? "edit" : "owner", m.timestamp, line, { by: m.from || m.fromUuid, ...(edited ? { of: edited.of } : {}) });
     // While an approval is pending, a message may be its answer. That must skip the queue.
-    // A spoken "yes" is never an approval, nor is a caption.
+    // A spoken "yes" is never an approval, nor is a caption. Nor is an edit: an approval is answered by a new message, a reaction
+    // or a quoted reply, so "no" edited into "yes" (or back) changes nothing.
     const target = { author: m.from, timestamp: m.timestamp };
-    const { outcome, changes } = m.voice || m.picture ? { outcome: "none" as const, changes: undefined } : await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote);
+    const { outcome, changes } = edited || m.voice || m.picture ? { outcome: "none" as const, changes: undefined } : await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote);
     if (outcome !== "none") {
+      answeredApproval(m.timestamp);
       console.log(`approval ${outcome}${changes ? ` (${changes.map((c) => c.field).join(", ")})` : ""}`);
       void signal.react({ approved: "👍", modified: "👍", declined: "👎", feedback: "💬" }[outcome], target, conv.groupId);
       // An edited call runs without a second look, so say exactly what changed.
@@ -452,9 +501,28 @@ export function createPipeline(deps: PipelineDeps) {
     return deps.admitGroup(conv, { groupId, text: "", timestamp: now(), isOwner: deps.isOwner(r), fromName: r.fromName && oneLine("group member name", r.fromName, LIMITS.name), addressedToMe: false, reaction: { emoji: oneLine("reaction", r.emoji, 16), on } });
   }
 
+  // A message deleted for everyone. Only its author can. Still waiting: it is dropped, so it is never answered and nothing in it is
+  // acted on. Answered already: a marker line says so, nothing runs again. Nobody is told about it, in a group least of all.
+  async function deletion(conv: Conversation, d: IncomingDeletion): Promise<void> {
+    if (conv.vouch && !(await deps.vouch(conv.groupId!))) return;
+    const past = revisionsOf(d.targetTimestamp, conv.logFile);
+    const stamps = past ? past.stamps : [d.targetTimestamp];
+    const waiting = pendingOf(conv, stamps);
+    if (!waiting && !past) return void console.log("delete of an unknown message ignored");
+    if (past?.deleted) return;
+    if (!waiting && past && past.root.kind !== "owner" && past.root.kind !== "member" && past.root.kind !== "edit") return void console.log("delete of a message that is not someone's own ignored");
+    if (!isAuthor(d, waiting ? authorOf(waiting) : past?.root.by, conv.kind === "owner")) return void console.log(`delete by someone other than the author ignored (${conv.kind})`);
+    dropPending(conv, stamps);
+    console.log(`${conv.kind} message deleted by its author${waiting ? " before it was answered" : ""}`);
+    if (conv.kind === "owner") return record(conv, "delete", now(), `[${DELETED_LINE}]`, { of: d.targetTimestamp });
+    // The group brain writes the marker (it knows how members are named) and forgets a pending address of the deleted message.
+    return deps.admitGroup(conv, { groupId: conv.groupId!, text: "", timestamp: now(), isOwner: deps.isOwner(d), fromName: d.fromName && oneLine("group member name", d.fromName, LIMITS.name), addressedToMe: false, deletion: { targetTimestamp: d.targetTimestamp, stamps } });
+  }
+
   // Everything that arrives for a conversation. The caller has already decided who may speak to it
   // (guards.ts for the owner's chat; our own echoes and reactions are dropped before this).
   function handleIncoming(conv: Conversation, ev: Incoming): Promise<void> {
+    if (ev.type === "deletion") return deletion(conv, ev.d);
     if (conv.kind === "owner") return ev.type === "message" ? intake(conv, ev.m) : ownerReaction(conv, ev.r);
     return ev.type === "message" ? intake(conv, ev.m) : groupReaction(conv, ev.r);
   }
@@ -462,7 +530,7 @@ export function createPipeline(deps: PipelineDeps) {
   // A quick reaction of our own, no run needed (the gate chose it).
   const react = (conv: Conversation, emoji: string, target: { author: string; timestamp: number }) => void signal.react(emoji, target, conv.groupId);
 
-  return { handleIncoming, enqueue, burst, burstQueued, wait, holdTyping, runTurn, deliver, record, canSpeak, react, warn };
+  return { handleIncoming, enqueue, burst, burstQueued, wait, holdTyping, runTurn, deliver, record, canSpeak, react, warn, dropPending };
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>;

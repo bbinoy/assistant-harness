@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 // The pure half of the Signal client: the small types of our own and the functions that turn what signal-cli reports into them
 // (testable without any network). client.ts is the connection.
-//   interpretEnvelope  a "receive" notification -> a message or a reaction
+//   interpretEnvelope  a "receive" notification -> a message (also an edited one), a reaction or a remote delete
 // Two modes, picked by the constructor options of the client (see README): Note to Self, or the bot's own account.
 
 /** The message a reply points at (Signal's "reply" / quote). */
@@ -43,6 +43,27 @@ export interface IncomingMessage {
   audio?: AudioRef;
   /** A picture (the first one; `text` is its caption, possibly empty); resolve its file with {@link attachmentPath}. */
   image?: ImageRef;
+  /**
+   * Set when this is an EDIT: `text` is the new text, `timestamp` the edit's own timestamp, and `targetTimestamp` the
+   * timestamp of the message it replaces (the original's, or an earlier edit's: Signal clients differ). An edit is
+   * untrusted like any message and Signal only lets the original author send one, but nothing here checks that: compare
+   * the sender with the original's author before you apply it. Audio and pictures are not carried over (edits are text only here).
+   */
+  edited?: { targetTimestamp: number };
+}
+
+/** Somebody deleted a message for everyone ("remote delete"). */
+export interface IncomingDeletion {
+  /** Who deleted it. Signal only honours the author, but nothing here checks: compare with the original's author. */
+  from: string;
+  /** Timestamp of the message that was deleted (the original's, or the latest edit's). */
+  targetTimestamp: number;
+  /** As {@link IncomingMessage.direct}. */
+  direct: boolean;
+  /** Set when it happened in a group. */
+  group?: { id: string };
+  fromUuid?: string;
+  fromName?: string;
 }
 
 /** A voice note or audio file signal-cli has downloaded: its id names the file in its attachments folder. */
@@ -166,9 +187,12 @@ export interface Channel {
  * account, and the owner's messages arrive as ordinary incoming ones; a sender is the peer only if their number (or
  * account id) matches, and groups are never direct. Nothing here authenticates anybody beyond that.
  */
-export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMessage; reaction?: IncomingReaction } {
+export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMessage; reaction?: IncomingReaction; deletion?: IncomingDeletion } {
   if (!env) return {};
-  const data = env.dataMessage;
+  // signal-cli reports an edit as `editMessage: { targetSentTimestamp, dataMessage }` on the envelope, and the owner's own edit
+  // on another device as `syncMessage.sentMessage.editMessage` (same shape; the sentMessage's own message fields are then empty).
+  const edit = env.editMessage ?? env.syncMessage?.sentMessage?.editMessage;
+  const data = env.dataMessage ?? env.editMessage?.dataMessage;
   const sent = env.syncMessage?.sentMessage; // something WE did on another device (self mode: the phone)
   const number = env.sourceNumber ?? env.source ?? "";
 
@@ -182,7 +206,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
   } else {
     const toSelf = !!sent && (sent.destinationNumber ?? sent.destination) === ch.account;
     direct = toSelf;
-    body = data ?? sent;
+    body = data ?? sent?.editMessage?.dataMessage ?? sent;
     if (data) direct = false; // a message from someone else
   }
   if (!body) return {};
@@ -190,7 +214,16 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
   const group = ch.peer !== undefined && data?.groupInfo?.groupId ? { id: String(data.groupInfo.groupId) } : undefined;
   if (data?.groupInfo && !group) return {};
 
-  if (body.reaction) {
+  // An edit that does not say what it edits is dropped, not taken for a new message; its body is text only.
+  const target = Number(edit?.targetSentTimestamp);
+  if (edit && !(target > 0)) return {};
+  if (!edit && body.remoteDelete) {
+    const d = body.remoteDelete; // `targetTimestamp`; older signal-cli versions called it `timestamp`
+    const targetTimestamp = Number(d.targetTimestamp ?? d.timestamp ?? 0);
+    if (!(targetTimestamp > 0)) return {};
+    return { deletion: { from, targetTimestamp, direct, ...(group ? { group, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}) } };
+  }
+  if (!edit && body.reaction) {
     const r = body.reaction;
     return {
       reaction: {
@@ -204,8 +237,8 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
       },
     };
   }
-  const audio = parseAudio(body.attachments);
-  const image = parseImage(body.attachments);
+  const audio = edit ? undefined : parseAudio(body.attachments);
+  const image = edit ? undefined : parseImage(body.attachments);
   if (!body.message && !audio && !image) return {};
   const quote = parseQuote(body.quote);
   const mentioned = (Array.isArray(body.mentions) ? body.mentions : []).some((m: any) => m?.uuid === ch.account || m?.number === ch.account);
@@ -213,11 +246,12 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
     message: {
       from,
       text: withMentions(body.message ?? "", body.mentions),
-      timestamp: body.timestamp ?? env.timestamp,
+      timestamp: body.timestamp ?? edit?.dataMessage?.timestamp ?? env.timestamp,
       direct,
       quote,
       audio,
       ...(image ? { image } : {}),
+      ...(edit ? { edited: { targetTimestamp: target } } : {}),
       ...(group ? { group, addressedToMe: mentioned || quote?.author === ch.account, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}),
     },
   };

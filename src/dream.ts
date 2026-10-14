@@ -7,7 +7,7 @@ import { OWNER_SCOPE, planOps, type NoteFile, type Plan, type Scope } from "./dr
 import { clockLine } from "./brief.ts";
 import { budgetSpent, recordCost } from "./budget.ts";
 import { fence } from "./fence.ts";
-import { messagesSince, type Sent } from "./messages.ts";
+import { foldEdits, messagesSince, withoutDeleted, type Sent } from "./messages.ts";
 import { NOTES_DIR } from "./notes.ts";
 import { isPaused, localDay } from "./pause.ts";
 import { dreamSystem } from "./persona.ts";
@@ -36,10 +36,11 @@ const hhmm = (iso: string) => `${iso.slice(5, 10)} ${new Date(iso).toTimeString(
 // Pure: the conversation since the last dream as lines. Only the owner's own typed or spoken words
 // can ground a note (ownerText). Their reactions are shown as signals, but the message they were on may
 // quote mail, and the assistant's replies only make sense of "yes, do that": neither is evidence.
+// A message the owner deleted is not evidence at all, and an edited one counts once, as edited.
 export function conversationLines(messages: readonly Sent[]): { lines: string[]; ownerText: string } {
   const lines: string[] = [];
   const owner: string[] = [];
-  for (const m of messages) {
+  for (const m of foldEdits(withoutDeleted(messages))) {
     if (m.kind === "owner") { lines.push(`[${hhmm(m.at)}] ${OWNER}: ${m.text.replace(/\n+/g, " / ")}`); owner.push(m.text); }
     else if (m.kind === "reaction") { lines.push(`[${hhmm(m.at)}] ${OWNER} reacted ${m.text.replace(/\n+/g, " / ")}`); } // shows what was reacted to, which may quote mail: never evidence
     else if (m.kind === "chat") lines.push(`[${hhmm(m.at)}] assistant (context only): ${m.text.slice(0, 300).replace(/\n+/g, " / ")}`);
@@ -69,7 +70,7 @@ const dreamPrompt = (now: Date, notes: readonly NoteFile[], messages: readonly S
 export function groupConversation(messages: readonly Sent[]): { lines: string[]; memberText: string } {
   const lines: string[] = [];
   const member: string[] = [];
-  for (const m of messages) {
+  for (const m of foldEdits(withoutDeleted(messages))) {
     if (m.kind === "member") { lines.push(`[${hhmm(m.at)}] ${m.text.replace(/\n+/g, " / ")}`); member.push(m.text); }
     else if (m.kind === "chat") lines.push(`[${hhmm(m.at)}] assistant (context only): ${m.text.slice(0, 300).replace(/\n+/g, " / ")}`);
   }

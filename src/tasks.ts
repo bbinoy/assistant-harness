@@ -1,6 +1,6 @@
 import { audit } from "./audit.ts";
 import type { OwnerProfile, ProfileName } from "./profiles.ts";
-import { BRIEF_INSTRUCTIONS, currentBriefPrompt, markBriefDone, runBriefAttempt, type BriefOutcome } from "./brief.ts";
+import { briefInstructions, currentBriefPrompt, markBriefDone, runBriefAttempt, type BriefOutcome } from "./brief.ts";
 import { buildDigest, readTriageSince } from "./digest.ts";
 import type { GateOutput, TaskName } from "./gate.ts";
 import { ledger, type LookState } from "./ledger.ts";
@@ -31,7 +31,7 @@ export interface Task {
 export function buildTask(convKind: "owner" | "group", out: Pick<GateOutput, "task" | "instructions">, o: { radar?: boolean } = {}): Task | undefined {
   const radar = o.radar ?? settings.proactive;
   if (convKind === "owner") {
-    if (out.task === "brief") return { name: "brief", instructions: BRIEF_INSTRUCTIONS, profile: "brief", after: "brief", retries: settings.briefMaxAttempts - 1 };
+    if (out.task === "brief") return { name: "brief", instructions: briefInstructions(), profile: "brief", after: "brief", retries: settings.briefMaxAttempts - 1 };
     if (out.task === "radar" && radar) return { name: "radar", instructions: radarInstructions(WINDOW_MINUTES), profile: "radar", after: "radar" };
   }
   const instructions = out.instructions?.trim();
@@ -92,7 +92,7 @@ export async function runBriefTask(io: PresetIO, task: Task, st: LookState, now:
   console.log(`brief: starting (gate, attempt ${attempt}/${cap})`);
   let completed = false;
   const outcome = await runBriefAttempt(
-    { run: (p, cb) => io.runProfile("brief", p, { onToolSuccess: cb, judgeContext: task.instructions }).then((r) => ({ text: r.text, costUsd: r.costUsd ?? 0 })), sendBrief: io.sendBrief, notify: io.notify },
+    { run: (p, cb) => io.runProfile("brief", p, { onToolSuccess: cb, judgeContext: task.instructions }).then((r) => ({ text: r.text, costUsd: r.costUsd ?? 0 })), sendBrief: io.sendBrief, notify: io.notify, delivery: settings.mail ? "email" : "signal" },
     currentBriefPrompt(now, undefined, task.instructions),
     attempt,
     () => ((completed = true), markBriefDone(now, attempt)),

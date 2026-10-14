@@ -15,6 +15,7 @@ Breaking changes
 - Nothing is logged by default; pass `logger` to see messages.
 
 Added
+- Edited messages: `IncomingMessage.edited?: { targetTimestamp }` (from signal-cli's `editMessage`, also the sync of your own edit in Note to Self). Messages deleted for everyone: `SignalClient.onDelete(handler)` with `IncomingDeletion`. Before, `interpretEnvelope` dropped both.
 - `attachmentPath(ref, dir?)`, `defaultAttachmentsDir()`.
 - `@ted-personal-assistant/signal/testing`: `FakeSignalDaemon`, `FakeRpcError`.
 - Clear error when a request is made before `connect()` or after the connection closed.

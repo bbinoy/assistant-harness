@@ -2,6 +2,10 @@
 // arguments. Deliberately not model-written: an approval prompt that a model
 // paraphrases can misrepresent the call it is meant to guard.
 
+import { mailView, type MailView } from "./toolmanifest.ts";
+
+// Titles for tools shown generically. (Mail tools are shown from mailView() below, whatever the provider; these titles
+// are only for a call mailView cannot read.)
 const TOOLS: Record<string, { icon: string; title: string; labels?: Record<string, string> }> = {
   mcp__claude_ai_Google_Calendar__create_event: { icon: "📅", title: "Create calendar event" },
   mcp__claude_ai_Google_Calendar__update_event: { icon: "📅", title: "Change calendar event" },
@@ -96,7 +100,51 @@ const LABELS: Record<string, string> = {
 const SKIP = new Set(["startTime", "endTime", "start", "end", "timeZone", "timezone", "summary", "title"]);
 const SKIP_VALUES = new Set(["primary"]);
 
-export function describeCall(tool: string, input: Record<string, unknown>): string {
+// --- an outgoing mail, the same for every provider (toolmanifest.ts mailView) ---
+
+const MAX_SHOWN = 1200;
+
+// A reply draft is the new text ABOVE the quoted original ("> ..." lines, or "On <date> <name> wrote:").
+// The owner only needs to read what is new; the whole draft is still what gets sent and checked.
+const QUOTE_HEADER = /^(On .{5,120} wrote:|Am .{5,120} schrieb.*:|Le .{5,120} a [ée]crit\s*:)\s*$/;
+const QUOTE_START = /^(>|On .{5,120} wrote:\s*$|Am .{5,120} schrieb.*:\s*$|Le .{5,120} a [ée]crit\s*:\s*$)/m;
+export function authoredPart(body: string): { text: string; hasQuote: boolean } {
+  const i = body.search(QUOTE_START);
+  if (i < 0) return { text: body.trim(), hasQuote: false };
+  // Only real quote lines (and the "wrote:" line that introduces them) may be left out of what is shown. Any other text after
+  // the first quote marker is new text: a reply typed below the quote, or something slipped in under a fake "> ..." line.
+  const isQuote = (l: string, k: number) => (k === 0 && QUOTE_HEADER.test(l)) || l.trim() === "" || l.trimStart().startsWith(">");
+  const below = body.slice(i).split("\n").filter((l, k) => !isQuote(l, k)).map((l) => l.trim());
+  return { text: [body.slice(0, i).trim(), ...below].filter(Boolean).join("\n"), hasQuote: true };
+}
+
+export function cutBody(body: string): string {
+  const { text, hasQuote } = authoredPart(body);
+  const cut = text.length > MAX_SHOWN ? `${text.slice(0, MAX_SHOWN)}… (+${text.length - MAX_SHOWN} more characters not shown)` : text;
+  return hasQuote ? `${cut}\n\n(the quoted original follows below it in the email)` : cut;
+}
+
+// Recipients and subject come from the mail client or the model (the subject from the sender of the mail being answered): one clean
+// line each, so a line break cannot fake another header and an invisible or right-to-left character cannot disguise an address.
+// Bcc and attachments are always shown when there are any: they are what a send must not hide.
+export function mailHeader(d: Pick<MailView, "to" | "cc" | "bcc" | "subject" | "hasAttachments">): string {
+  const list = (a: string[]) => a.map((x) => clip(x, 200)).join(", ");
+  return [
+    `To: ${d.to.length ? list(d.to) : "(nobody yet)"}`,
+    ...(d.cc.length ? [`Cc: ${list(d.cc)}`] : []),
+    ...(d.bcc.length ? [`Bcc: ${list(d.bcc)}`] : []),
+    `Subject: ${clip(d.subject, 200)}`,
+    ...(d.hasAttachments ? ["Attachments: yes (names not shown)"] : []),
+  ].join("\n");
+}
+
+const MAIL_TITLES: Record<MailView["action"], string> = { send: "✉️ Send email now", reply: "✉️ Send reply now", forward: "✉️ Forward email", draft: "✉️ Save email draft" };
+export const mailText = (v: MailView): string => `${MAIL_TITLES[v.action]}\n${mailHeader(v)}\n\n${cutBody(v.body)}`;
+
+// `draft`: for a send of an existing draft, the draft as the mail client holds it (mailView).
+export function describeCall(tool: string, input: Record<string, unknown>, draft?: Omit<MailView, "action">): string {
+  const view = mailView(tool, input, draft);
+  if (view) return mailText(view);
   const meta = TOOLS[tool];
   const lines: string[] = [meta ? `${meta.icon} ${meta.title}` : `❓ ${humanise(tool)}`];
 
