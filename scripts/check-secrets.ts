@@ -26,6 +26,11 @@ const rules: { name: string; re: RegExp; skipFiles?: RegExp; allow?: RegExp }[] 
     allow: /@example\.(com|org)|noreply@(github|anthropic)\.com|@users\.noreply\.github\.com/ },
   { name: "personal home path", re: /\/Users\/[a-z0-9_-]+\//i, allow: /\/Users\/(you|alex|name)\// },
   { name: "private key", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+  { name: "provider token (GitHub, Slack, AWS)", re: /\b(gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/ },
+  { name: "ElevenLabs/OpenAI-style key", re: /\bsk[-_][A-Za-z0-9_-]{24,}/, allow: /abcdefghijklmnop/ }, // (the redaction test uses an obviously fake key)
+  { name: "JWT", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}/ },
+  // a Signal account id (SIGNAL_OWNER_ACI) is a UUID; the repeating-digit ones in tests are obviously fake
+  { name: "UUID (could be a Signal account id)", re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i, skipFiles: /package-lock\.json$/, allow: /\b([0-9a-f])\1{7}-|00000000-0000/i },
   { name: "long secret-looking token", re: /\b[A-Za-z0-9_-]{40,}\b/, skipFiles: /package-lock\.json$|\.test\.ts$/, allow: /mcp__|https?:\/\/|sha\d+-|node_modules|[a-z]+(-[a-z]+){4,}|[a-z]+(_[a-z]+){4,}/ },
 ];
 
@@ -35,7 +40,7 @@ if (existsSync(".env")) {
   for (const line of readFileSync(".env", "utf8").split("\n")) {
     const m = line.match(/^([A-Z_]+)=(.*)$/);
     const v = m?.[2]?.replace(/^["']|["']$/g, "").trim();
-    if (m && v && v.length >= 6 && /TOKEN|KEY|NUMBER|SECRET|PASSWORD/.test(m[1]!)) secrets.push({ label: `value of ${m[1]} in .env`, value: v });
+    if (m && v && v.length >= 6 && /TOKEN|KEY|NUMBER|SECRET|PASSWORD|ACCOUNT|ACI\b/.test(m[1]!)) secrets.push({ label: `value of ${m[1]} in .env`, value: v });
   }
 }
 try {

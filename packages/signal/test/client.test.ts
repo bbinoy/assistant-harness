@@ -233,6 +233,28 @@ test("client: a request that gets no answer times out after rpcTimeoutMs", async
   c.close();
 });
 
+test("client: a line that never ends is not buffered without limit; the connection is closed instead", async () => {
+  const d = await FakeSignalDaemon.start();
+  open.push(d);
+  const errors: string[] = [];
+  const c = new SignalClient({ host: d.host, port: d.port, account: ME, maxLineChars: 500, logger: { ...console, error: (...a: unknown[]) => void errors.push(a.join(" ")) } });
+  await c.connect();
+  await until(() => d.connections > 0);
+  const closes: { requested: boolean; error?: Error }[] = [];
+  c.onClose((info) => closes.push(info));
+  const got: string[] = [];
+  c.onMessage((m) => got.push(m.text));
+  // lines shorter than the limit are fine, however many arrive
+  d.push({ sourceNumber: ME, syncMessage: { sentMessage: { destinationNumber: ME, message: "fine", timestamp: 1 } } });
+  await until(() => got.length === 1);
+  d.raw("x".repeat(400));
+  d.raw("y".repeat(400)); // 800 characters and still no line break
+  await until(() => closes.length === 1);
+  assert.equal(closes[0]!.requested, false);
+  assert.match(String(closes[0]!.error?.message), /line too long/);
+  assert.match(errors[0] ?? "", /more than 500 characters/);
+});
+
 test("client: attachmentPath joins a plain id to the folder and refuses anything else", () => {
   assert.equal(attachmentPath({ id: "abc-DEF_1.m4a" }, "/data/att"), "/data/att/abc-DEF_1.m4a");
   for (const id of ["../x", "a/b", ".hidden", "", "x".repeat(101)]) assert.throws(() => attachmentPath({ id }, "/data/att"), /plain attachment id/);

@@ -1,4 +1,5 @@
 import { renameSync, statSync } from "node:fs";
+import { redactSecrets } from "./redact.ts";
 import { appendLine, dataPath, readText } from "./state.ts";
 
 // One append-only log for everything the agent does or observes.
@@ -24,7 +25,7 @@ let appends = 0;
 
 export function audit(tool: string, decision: string, source: Source, meta?: Record<string, unknown>): void {
   const entry = { ts: new Date().toISOString(), source, tool, decision, ...(meta ? { meta } : {}) };
-  appendLine(FILE, JSON.stringify(entry));
+  appendLine(FILE, redactSecrets(JSON.stringify(entry))); // an error message or a subject can carry a key; senders and subjects stay readable (phone numbers are not masked here)
   // Keep one previous generation; readers only ever need the recent past.
   if (++appends % 100 === 0 && statSync(dataPath(FILE)).size > MAX_BYTES) {
     renameSync(dataPath(FILE), dataPath(`${FILE}.1`));
@@ -32,10 +33,11 @@ export function audit(tool: string, decision: string, source: Source, meta?: Rec
 }
 
 // Entries matching `keep`, oldest first. A damaged line is skipped, never fatal.
-export function readAudit(keep: (e: AuditEntry) => boolean): AuditEntry[] {
+// `contains`: a substring every wanted line has (e.g. '"tool":"heartbeat_triage"'); other lines are skipped without being parsed.
+export function readAudit(keep: (e: AuditEntry) => boolean, contains?: string): AuditEntry[] {
   const out: AuditEntry[] = [];
   for (const line of (readText(FILE) ?? "").split("\n")) {
-    if (!line) continue;
+    if (!line || (contains && !line.includes(contains))) continue;
     try {
       const e = JSON.parse(line) as AuditEntry;
       if (keep(e)) out.push(e);

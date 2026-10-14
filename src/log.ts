@@ -38,11 +38,24 @@ function stamp(d = new Date()) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
-for (const level of ["log", "error"] as const) {
+// One argument as text; a circular object or a BigInt must not make a log call throw.
+function show(a: unknown): string {
+  if (typeof a === "string") return a;
+  if (a instanceof Error) return a.stack ?? a.message;
+  try {
+    return JSON.stringify(a) ?? String(a);
+  } catch {
+    return String(a);
+  }
+}
+
+// warn, info and debug too: the Signal client's warnings (read receipt failed: <error text>) go through console.warn, and
+// unwrapped they reached stderr (launchd-stderr.log, never rotated) unredacted, and info was lost under launchd.
+for (const level of ["log", "error", "warn", "info", "debug"] as const) {
   const original = console[level].bind(console);
   console[level] = (...args: unknown[]) => {
-    const text = redact(args.map((a) => (typeof a === "string" ? a : a instanceof Error ? (a.stack ?? a.message) : JSON.stringify(a))).join(" "));
-    const line = `${stamp()} ${level === "error" ? "ERR " : ""}${text}`;
+    const text = redact(args.map(show).join(" "));
+    const line = `${stamp()} ${level === "error" ? "ERR " : level === "warn" ? "WARN " : ""}${text}`;
     if (process.stdout.isTTY) original(line); // under launchd the file below is the log
     try {
       appendFileSync(FILE, line + "\n");

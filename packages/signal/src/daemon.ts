@@ -1,6 +1,7 @@
 // Starts `signal-cli daemon` on localhost, so the client has something to connect to.
 import { spawn } from "node:child_process";
 import net from "node:net";
+import { withoutSecrets } from "./internal/exec.ts";
 import { silentLogger, type Logger } from "./logger.ts";
 
 function portOpen(host: string, port: number): Promise<boolean> {
@@ -53,6 +54,7 @@ export async function ensureSignalDaemon(opts: DaemonOptions): Promise<SignalDae
   const out = logFd ?? "ignore";
   const child = spawn("signal-cli", ["-a", account, "daemon", "--tcp", `${host}:${port}`, "--no-receive-stdout"], {
     stdio: ["ignore", out, out],
+    env: withoutSecrets(process.env), // it parses what strangers send; it needs none of the app's keys
   });
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.once("exit", (code, signal) => resolve({ code, signal }));

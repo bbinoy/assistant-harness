@@ -56,7 +56,10 @@ test("judge floor: opening a web page is judged in chat and in the owner's own b
   assert.equal(fetch("https://example.com/a", "handler"), false);
   assert.equal(fetch("https://example.com/a", "group" as never), false);
   // an address can carry data out: nothing but a plain https address on a named public host
-  for (const bad of ["http://example.com/a", "https://user:pw@example.com/a", "https://example.com:8443/a", "https://127.0.0.1/a", "https://192.168.1.5/a", "https://localhost/a", "https://printer.local/a", "https://intranet.internal/a", "https://[::1]/a", "https://example.com/a#frag", `https://example.com/a?d=${"x".repeat(130)}`, `https://example.com/${"a".repeat(300)}`, "not a url", "file:///etc/passwd", "ftp://example.com/a"]) assert.equal(isPlainWebAddress(bad), false, bad);
+  for (const bad of ["http://example.com/a", "https://user:pw@example.com/a", "https://example.com:8443/a", "https://127.0.0.1/a", "https://192.168.1.5/a", "https://localhost/a", "https://printer.local/a", "https://intranet.internal/a", "https://[::1]/a", "https://example.com/a#frag", `https://example.com/a?d=${"x".repeat(130)}`, `https://example.com/${"a".repeat(300)}`, "not a url", "file:///etc/passwd", "ftp://example.com/a",
+    // names that resolve inside this machine or network
+    "https://127.0.0.1.nip.io/a", "https://192-168-1-5.sslip.io/a", "https://10.0.0.1.xip.io/a", "https://app.localtest.me/a", "https://foo.lvh.me/a", "https://nas.localdomain/a", "https://wiki.intranet/a", "https://0x7f.1/a", "https://2130706433/a", "https://127.1/a"]) assert.equal(isPlainWebAddress(bad), false, bad);
+  for (const ok of ["https://example.com/a", "https://en.wikipedia.org/wiki/Tea", "https://docs.github.com/en/actions", "https://news.ycombinator.com/item?id=1"]) assert.equal(isPlainWebAddress(ok), true, ok);
   assert.equal(isPlainWebAddress(undefined), false);
   assert.equal(isJudgeable("WebFetch", {}), false);
 });

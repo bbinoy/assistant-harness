@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { loadSettings } from "../src/settings.ts";
 
 test("settings: Kokoro is the default speech provider, with no fallback", () => {
@@ -10,6 +11,10 @@ test("settings: Kokoro is the default speech provider, with no fallback", () => 
 
 test("settings: remote speech needs its keys and a safe address, or the agent does not start", () => {
   assert.throws(() => loadSettings({ TTS_PROVIDER: "elevenlabs" }), /ELEVENLABS_API_KEY/);
+  // read once into settings, then gone from the environment every child process (Claude Code, MCP servers, ffmpeg) inherits
+  const probe = "import('./src/settings.ts').then(({ settings }) => console.log(JSON.stringify([process.env.ELEVENLABS_API_KEY ?? null, process.env.TTS_HTTP_TOKEN ?? null, settings.tts.provider === 'elevenlabs' && settings.tts.elevenlabs.apiKey])))";
+  const out = execFileSync(process.execPath, ["--conditions=workspace-source", "-e", probe], { encoding: "utf8", env: { PATH: process.env.PATH, TTS_PROVIDER: "elevenlabs", ELEVENLABS_API_KEY: "key-123456", ELEVENLABS_VOICE_ID: "v", TTS_HTTP_TOKEN: "tok-123456", HARNESS_DATA_DIR: process.env.HARNESS_DATA_DIR } });
+  assert.equal(out.trim(), JSON.stringify([null, null, "key-123456"]));
   assert.throws(() => loadSettings({ TTS_PROVIDER: "elevenlabs", ELEVENLABS_API_KEY: "k" }), /ELEVENLABS_VOICE_ID/);
   const e = loadSettings({ TTS_PROVIDER: "elevenlabs", ELEVENLABS_API_KEY: "k", ELEVENLABS_VOICE_ID: "v", TTS_FALLBACK: "kokoro" }).tts;
   assert.ok(e.provider === "elevenlabs" && e.elevenlabs.modelId === "eleven_multilingual_v2" && e.fallback === "kokoro");

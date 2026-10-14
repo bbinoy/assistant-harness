@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { MAX_IMAGE_BYTES } from "@ted-personal-assistant/signal";
 
 // Pictures people send, made ready for the model: checked by their bytes (not the name or the claimed type), shrunk,
 // and wrapped as image content next to the text. The bytes live only in memory for the one turn: never in a log or a note.
@@ -17,6 +18,7 @@ export const MAX_SIDE = 1568; // the model does not look closer at a bigger pict
 const KEEP_BYTES = 1_500_000; // a small enough picture in a supported format goes through untouched
 const MAX_SENT_BYTES = 4_500_000; // the API refuses more than 5 MB per image
 export const MAX_PICTURES = 5; // per turn, newest first
+export const MAX_PIXELS = 150_000_000; // a phone panorama is ~100 MP; a small file can still claim 400 MP and take gigabytes to decode
 
 const run = promisify(execFile);
 
@@ -37,17 +39,24 @@ async function sips(args: string[]): Promise<string> {
 
 // A picture file -> what the model is shown. Throws a sentence the sender can be told. macOS's own `sips` does the
 // resizing and the HEIC conversion (no dependency); without it only a small picture in a supported format works.
-export async function preparePicture(file: string): Promise<Picture> {
+export async function preparePicture(file: string, maxPixels: number = MAX_PIXELS): Promise<Picture> {
+  // The size Signal reported was checked on arrival; check the file itself, which is what is read. A symlink is not what signal-cli writes.
+  const st = lstatSync(file);
+  if (!st.isFile() || st.size > MAX_IMAGE_BYTES) throw new Error("I can't open that picture (too large, or not a plain file).");
   const bytes = readFileSync(file);
   const kind = sniff(bytes);
   if (!kind) throw new Error("I can only look at JPEG, PNG, WebP, GIF or HEIC pictures.");
   let side = Infinity;
+  let pixels = 0;
   try {
     const dims = await sips(["-g", "pixelWidth", "-g", "pixelHeight", file]);
+    const [w, h] = [/pixelWidth: (\d+)/.exec(dims)?.[1], /pixelHeight: (\d+)/.exec(dims)?.[1]].map(Number);
+    pixels = (w ?? 0) * (h ?? 0);
     side = Math.max(...[...dims.matchAll(/pixel(?:Width|Height): (\d+)/g)].map((x) => Number(x[1])));
   } catch {
     // no sips (or it cannot read the file): decided below
   }
+  if (pixels > maxPixels) throw new Error("That picture has too many pixels for me to open. Send a smaller one.");
   if (kind !== "heic" && side <= MAX_SIDE && bytes.length <= KEEP_BYTES) return { mediaType: kind, data: bytes.toString("base64") };
   const dir = mkdtempSync(join(tmpdir(), "picture-"));
   try {

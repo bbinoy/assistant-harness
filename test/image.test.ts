@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
@@ -55,6 +55,20 @@ test("image: a large photo is shrunk before it goes to the model", { skip: proce
   // sips wrote it at no more than MAX_SIDE on the long side: the JPEG's SOF0/SOF2 marker holds the size
   const sof = out.findIndex((v, i) => v === 0xff && (out[i + 1] === 0xc0 || out[i + 1] === 0xc2));
   assert.ok(Math.max(out.readUInt16BE(sof + 5), out.readUInt16BE(sof + 7)) <= MAX_SIDE);
+});
+
+test("image: the file itself is checked: too large, a symlink, or claiming more pixels than the limit is refused with a sentence", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "img-limits-"));
+  const huge = join(dir, "huge");
+  writeFileSync(huge, "");
+  truncateSync(huge, 21_000_000); // a sparse file: over the 20 MB limit whatever Signal said
+  await assert.rejects(preparePicture(huge), /too large, or not a plain file/);
+  const real = join(dir, "real.png");
+  writeFileSync(real, png(8, 8));
+  symlinkSync(real, join(dir, "link"));
+  await assert.rejects(preparePicture(join(dir, "link")), /not a plain file/);
+  await preparePicture(real); // the plain file is fine
+  if (process.platform === "darwin") await assert.rejects(preparePicture(file(png(4000, 3000)), 10_000_000), /too many pixels/); // 12 MP against a 10 MP limit (needs sips for the size)
 });
 
 test("image: with pictures the prompt is one user message of image blocks then the text; without, plain text", async () => {

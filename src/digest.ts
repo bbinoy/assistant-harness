@@ -5,7 +5,7 @@ export type TriageEntry = Pick<AuditEntry, "ts" | "decision"> & {
 };
 
 export function readTriageSince(sinceIso: string): TriageEntry[] {
-  return readAudit((e) => isTriage(e) && e.ts > sinceIso) as TriageEntry[];
+  return readAudit((e) => isTriage(e) && e.ts > sinceIso, '"tool":"heartbeat_triage"') as TriageEntry[];
 }
 
 const LIST_CAP = 40;

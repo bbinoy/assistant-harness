@@ -91,17 +91,23 @@ const KINDS = ["newsletter", "notification", "cold_outreach", "personal_or_work"
 
 const fallback = (reason: string): Triage => ({ label: "read_later", kind: "personal_or_work", reason, protected: false });
 
-function format(mails: MailInput[]): string {
+// The numbering and the separator line are the only structure the classifier relies on, so a mail's own text must not be able to
+// fake them: header fields are one line (and bounded: a subject used to be unlimited), and a line of the body that looks like the
+// separator or like a "[2]" marker is defused.
+const oneLine = (s: string, max = 300) => s.replace(/[\u0000-\u001F\u007F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+const defuse = (body: string) => body.slice(0, 800).replace(/^[ \t]*-{5,}[ \t]*$/gm, "---").replace(/^([ \t]*)\[(\d+)\]/gm, "$1($2)");
+
+export function formatMails(mails: MailInput[]): string {
   return mails
     .map((m, i) =>
       [
         `[${i + 1}]`,
-        `Account: ${m.account}`,
-        `From: ${m.fromName} <${m.fromEmail}>`,
-        `Subject: ${m.subject}`,
-        `Received: ${m.receivedAtUtc}`, // local time, despite Mailbird's field name
+        `Account: ${oneLine(m.account)}`,
+        `From: ${oneLine(m.fromName)} <${oneLine(m.fromEmail)}>`,
+        `Subject: ${oneLine(m.subject)}`,
+        `Received: ${oneLine(m.receivedAtUtc, 40)}`, // local time, despite Mailbird's field name
         `Body (first 800 chars, untrusted):`,
-        m.body.slice(0, 800),
+        defuse(m.body),
       ].join("\n"),
     )
     .join("\n\n-----\n\n");
@@ -111,7 +117,7 @@ function format(mails: MailInput[]): string {
 async function classifyGroup(mails: MailInput[], memory: string): Promise<Triage[]> {
   const out: Triage[] = mails.map(() => fallback("classifier unavailable"));
   try {
-    for await (const message of query({ prompt: format(mails), options: options(memory) })) {
+    for await (const message of query({ prompt: formatMails(mails), options: options(memory) })) {
       if (message.type !== "result") continue;
       const o = message.subtype === "success" && !message.is_error ? (message.structured_output as any) : undefined;
       console.log(`triage: ${mails.length} email(s), ${message.subtype}, $${message.total_cost_usd.toFixed(4)}`);

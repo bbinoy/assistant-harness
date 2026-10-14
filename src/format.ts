@@ -48,9 +48,20 @@ function when(start: unknown, end: unknown, zone: unknown): string | undefined {
 // (an approval that looks harmless on the phone but says something else). Never shown.
 const BIDI = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 
+// Characters that take no room on a screen (zero-width space, word joiner, BOM, soft hyphen, fillers) would make two different
+// addresses or titles look identical. They are shown as their code point instead of staying invisible. (Not U+200C/U+200D: emoji
+// sequences and some scripts need them.) Other control characters are dropped.
+const INVISIBLE = /[­͏ᅟᅠ᠎​⁠-⁤ㅤ﻿]/g;
+const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
+
 // An approval must never hide content silently: whatever is cut is announced.
-function clip(text: string, max: number): string {
-  const flat = text.replace(BIDI, "").replace(/\s+/g, " ").trim();
+export function clip(text: string, max: number): string {
+  const flat = text
+    .replace(BIDI, "")
+    .replace(CONTROL, "")
+    .replace(INVISIBLE, (c) => `⟨U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}⟩`)
+    .replace(/\s+/g, " ")
+    .trim();
   return flat.length > max ? `${flat.slice(0, max)}… (+${flat.length - max} more characters not shown)` : flat;
 }
 
@@ -65,7 +76,7 @@ function show(key: string, value: unknown): string {
   if (value && typeof value === "object") {
     const o = value as Record<string, unknown>;
     const id = o.email ?? o.address;
-    if (typeof id === "string" && Object.keys(o).every((k) => PERSON_KEYS.has(k))) return id;
+    if (typeof id === "string" && Object.keys(o).every((k) => PERSON_KEYS.has(k))) return clip(id, 200);
     return clip(JSON.stringify(value), 300);
   }
   return clip(String(value), LONG_TEXT.has(key) ? 1200 : 200);
