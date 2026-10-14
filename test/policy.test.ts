@@ -48,8 +48,9 @@ test("nothing may reference local files (create_draft takes file:// attachments)
 });
 
 test("outward-facing actions ask", () => {
-  for (const t of [`${M}send_message_now`, `${M}forward_conversation`, `${C}create_event`, `${C}update_event`, `${C}respond_to_event`, "mcp__claude_ai_Google_Drive__share_file", "mcp__claude_ai_Gmail__send_message", `${N}notion-create-comment`])
+  for (const t of [`${M}send_message_now`, `${C}create_event`, `${C}update_event`, `${C}respond_to_event`, "mcp__claude_ai_Google_Drive__share_file", "mcp__claude_ai_Gmail__send_message", `${N}notion-create-comment`])
     assert.equal(chat(t), "ask", t);
+  assert.equal(chat(`${M}forward_conversation`), "allow"); // it only saves a draft; the send is send_message_now
 });
 
 test("destructive actions and trading are denied, for everyone", () => {

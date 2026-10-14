@@ -125,7 +125,7 @@ test("a forward with no recipient yet is never judged; a send whose draft cannot
   let judged = 0;
   const judge = async (): Promise<Verdict> => (judged++, { decision: "auto", reason: "x" });
   const canUse = makeCanUseTool(async () => ({ approved: false }), "chat", undefined, undefined, judge as never);
-  assert.equal((await canUse("mcp__mailbird__forward_conversation", { conversationId: "g", body: "FYI" }, opts))!.behavior, "deny"); // asked, declined
+  assert.equal((await canUse("mcp__mailbird__forward_conversation", { conversationId: "g", body: "FYI" }, opts))!.behavior, "allow"); // only saves a draft: no question, nothing to judge
   assert.equal(judged, 0);
   setDraftReader(async () => undefined);
   const r = await canUse(SEND, { messageId: 9, confirm: true }, opts);

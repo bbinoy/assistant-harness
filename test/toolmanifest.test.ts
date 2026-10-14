@@ -48,7 +48,7 @@ test("manifest: the defaults the owner decided, tool by tool: [chat, handler, br
     [`${MB}select_conversation`]: ["no", "yes", "no"],
     [`${MB}send_self_briefing`]: ["no", "yes", "no"],
     [`${MB}send_message_now`]: ["auto", "yes", "yes"],
-    [`${MB}forward_conversation`]: ["auto", "yes", "yes"],
+    [`${MB}forward_conversation`]: ["no", "yes", "no"],
     [`${CAL}list_events`]: ["no", "no", "no"],
     [`${CAL}create_event`]: ["auto", "auto", "auto"],
     [`${CAL}update_event`]: ["auto", "yes", "yes"],

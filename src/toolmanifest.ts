@@ -57,7 +57,8 @@ export const MANIFEST: readonly ToolEntry[] = [
   ...rows(MB, "mailbird", "reply-draft", { chat: "no", brief: "no", handler: "no" }, "reply_to_conversation reply_all_to_conversation", { view: "mbReply" }),
   ...rows(MB, "mailbird", "send-self", ROUTINE, "send_self_briefing"), // can only ever reach the owner
   ...rows(MB, "mailbird", "send", SEND, "send_message_now", { view: "mbSend" }),
-  ...rows(MB, "mailbird", "forward", SEND, "forward_conversation", { view: "mbForward" }), // Mailbird only saves a draft here; recipients are set later
+  // Mailbird's forward only saves a draft with no recipients (the skill: forward freely, never send_message_now unseen); the real send is send_message_now above.
+  ...rows(MB, "mailbird", "draft", ROUTINE, "forward_conversation", { view: "mbForward" }),
   // --- Gmail connector: data for later, takes effect only when MAIL_PROVIDER=gmail ---
   ...rows(GM, "gmail", "read", "no", "search_threads get_thread get_message get_draft list_drafts list_labels"),
   ...rows(GM, "gmail", "draft", ROUTINE, "create_draft update_draft", { view: "gmDraft" }),

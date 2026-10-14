@@ -74,7 +74,7 @@ test("judge prompt: a background job is judged against its instructions, fenced 
 
 test("judge floor: a send or forward is judged in chat only, and only when its recipients are named", () => {
   const view = { action: "send" as const, to: ["a@example.com"], cc: [], bcc: [], subject: "s", body: "b", hasAttachments: false };
-  for (const t of ["mcp__mailbird__send_message_now", "mcp__mailbird__forward_conversation"]) {
+  for (const t of ["mcp__mailbird__send_message_now"]) { // (Mailbird's forward only saves a draft: no approval, nothing to judge)
     assert.equal(isJudgeable(t, {}, "chat", view), true, t);
     assert.equal(isJudgeable(t, {}, "chat", { ...view, to: [] }), false, `${t}: nobody to send to`);
     assert.equal(isJudgeable(t, {}, "chat"), false, `${t}: no view`);
