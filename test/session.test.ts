@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planSession, type ChatSession } from "../src/session.ts";
+import { freshReason, planSession, type ChatSession } from "../src/session.ts";
 
 const opts = { idleResetHours: 6, compactTokens: 60_000, compactGrowth: 40_000 };
 const now = new Date("2026-10-12T12:00:00Z");
@@ -55,4 +55,40 @@ test("session: compaction counts growth since the first turn, the same for a big
   assert.equal(at(10_000, 50_001), "resume then compact");
   // a session saved before the baseline existed keeps the absolute limit
   assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 60_001 }), now, opts), "resume then compact");
+});
+
+test("session: a dream since the last turn means a new day (fresh); a last turn after the dream resumes; no dream, no effect", () => {
+  const dreamAt = Date.parse(ago(3));
+  const plan = (s: Partial<ChatSession>, d: number | undefined) => planSession(session(s), now, { ...opts, dreamAt: d });
+  assert.equal(plan({ lastTurnAt: ago(5) }, dreamAt), "fresh"); // before the dream, now after it
+  assert.equal(plan({ lastTurnAt: ago(2) }, dreamAt), "resume"); // after the dream
+  assert.equal(plan({ lastTurnAt: ago(3) }, dreamAt), "resume"); // the same instant is not before
+  assert.equal(plan({ lastTurnAt: ago(5) }, undefined), "resume"); // no dream file
+  assert.equal(plan({ lastTurnAt: ago(5) }, now.getTime() + 1000), "resume"); // a dream in the future (clock skew) is not yet
+  assert.equal(plan({}, dreamAt), "resume"); // no last turn: nothing to compare
+  assert.equal(planSession({ costUsd: 0 }, now, { ...opts, dreamAt }), "fresh");
+});
+
+test("session: freshReason tells the two reasons apart", () => {
+  const o = { idleResetHours: 24, dreamAt: Date.parse(ago(3)) };
+  assert.equal(freshReason(session({ lastTurnAt: ago(5) }), now, o), "new-day");
+  assert.equal(freshReason(session({ lastTurnAt: ago(30) }), now, o), "idle");
+  assert.equal(freshReason(session({ lastTurnAt: ago(2) }), now, o), undefined);
+});
+
+test("session: quiet compaction waits for the conversation to be still; urgent needs 1.5 times the growth", () => {
+  const q = { ...opts, quietMinutes: 5 };
+  const at = (mode: "quiet" | "urgent", mins: number, last: number) =>
+    planSession(session({ lastTurnAt: new Date(now.getTime() - mins * 60_000).toISOString(), baseTokens: 10_000, lastContextTokens: last }), now, { ...q, mode });
+  assert.equal(at("quiet", 4.9, 60_000), "resume"); // grown, but written to a moment ago
+  assert.equal(at("quiet", 5, 60_000), "resume then compact");
+  assert.equal(at("quiet", 30, 50_000), "resume"); // exactly the limit (10k + 40k) is not more
+  assert.equal(at("urgent", 0, 70_000), "resume"); // 10k + 1.5 * 40k = 70k is not more
+  assert.equal(at("urgent", 0, 70_001), "resume then compact");
+  assert.equal(at("urgent", 0, 60_000), "resume"); // quiet would compact later
+  assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 90_000 }), now, { ...q, mode: "urgent" }), "resume"); // fallback limit 60k * 1.5
+  assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 90_001 }), now, { ...q, mode: "urgent" }), "resume then compact");
+  assert.equal(planSession(session({ lastTurnAt: ago(1), baseTokens: 1, lastContextTokens: 900_000 }), now, { ...q, mode: "off" }), "resume");
+  // a recent failure backs off in both modes
+  assert.equal(planSession(session({ lastTurnAt: ago(1), baseTokens: 1, lastContextTokens: 900_000, compactFailedAt: ago(0.5) }), now, { ...q, mode: "urgent" }), "resume");
 });

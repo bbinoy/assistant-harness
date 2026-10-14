@@ -1,7 +1,7 @@
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
-import { OWNER_SESSION_FILE, planSession, type ChatSession } from "./session.ts";
+import { OWNER_SESSION_FILE, freshReason, planSession, type ChatSession, type CompactMode } from "./session.ts";
 import { settings } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";
 
@@ -16,16 +16,26 @@ export interface Resume {
   seenAt?: string;
 }
 
-const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens, compactGrowth: settings.chatCompactGrowthTokens });
+const DREAM_STATE = "state/dream.json"; // written by dream.ts
+// When the nightly dream last ran (state/dream.json, the group dreams run in the same pass), for the new-day reset. Unreadable: no effect.
+const dreamTime = (): number | undefined => {
+  const at = Date.parse(readJson<{ lastRunAt?: string }>(DREAM_STATE, {}).lastRunAt ?? "");
+  return Number.isFinite(at) ? at : undefined;
+};
+
+const chatPlanOpts = (mode: CompactMode) => ({ dreamAt: dreamTime(), idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens, compactGrowth: settings.chatCompactGrowthTokens, quietMinutes: settings.compactQuietMinutes, mode });
 
 // A conversation continues its saved session unless session.ts says to start fresh.
 export function chatResume(announce: boolean, file: string = OWNER_SESSION_FILE, source: Source = "chat"): Resume {
   const saved = readJson<ChatSession>(file, { costUsd: 0 });
   // A fresh session starts its cost total at zero, so the previous total must not be subtracted.
-  if (planSession(saved, new Date(), chatPlanOpts()) === "fresh") {
-    if (announce && saved.sessionId) {
-      console.log(`${source}: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
-      audit("chat_session", "idle-reset", source);
+  const now = new Date();
+  const opts = chatPlanOpts("off");
+  if (planSession(saved, now, opts) === "fresh") {
+    const why = freshReason(saved, now, opts);
+    if (announce && why) {
+      console.log(why === "new-day" ? `${source}: the nightly dream has run since the last turn, starting a fresh session` : `${source}: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
+      audit("chat_session", why === "new-day" ? "new-day-reset" : "idle-reset", source);
     }
     return { previousCost: 0 };
   }
@@ -49,14 +59,20 @@ export function compactOptions(sessionId: string | undefined, source: Source, no
   };
 }
 
-// After a turn has been answered (any conversation, `file` is its session): if its context grew past
-// CHAT_COMPACT_TOKENS, compact the session in place by sending the SDK's own /compact command on the resumed
-// session. Called from the conversation's serial queue, so the next message waits. Never throws.
-export async function compactChatIfNeeded(file: string = OWNER_SESSION_FILE, source: Source = "chat", notesDir?: string): Promise<void> {
+// Is a quiet-time compaction due for this session? A cheap read of the session file, for the heartbeat to ask before it queues anything.
+export function compactDue(file: string = OWNER_SESSION_FILE, now: Date = new Date()): boolean {
+  return planSession(readJson<ChatSession>(file, { costUsd: 0 }), now, chatPlanOpts("quiet")) === "resume then compact";
+}
+
+// Compact a conversation's session (`file`) in place by sending the SDK's own /compact command on the resumed session, if
+// session.ts says so for this `mode`: "urgent" right after a reply that left the context far past the limit (the caller waits),
+// "quiet" from the heartbeat once the conversation has been still for COMPACT_QUIET_MINUTES. Always called from the conversation's
+// serial queue, so a message that arrives meanwhile waits behind it and nothing else touches the file. Never throws.
+export async function compactChatIfNeeded(file: string = OWNER_SESSION_FILE, source: Source = "chat", notesDir?: string, mode: "quiet" | "urgent" = "urgent"): Promise<void> {
   try {
     const saved = readJson<ChatSession>(file, { costUsd: 0 });
-    if (planSession(saved, new Date(), chatPlanOpts()) !== "resume then compact") return;
-    console.log(`${source}: context is ${saved.lastContextTokens} tokens, compacting`);
+    if (planSession(saved, new Date(), chatPlanOpts(mode)) !== "resume then compact") return;
+    console.log(`${source}: context is ${saved.lastContextTokens} tokens, compacting (${mode})`);
     let boundary: { pre_tokens: number; post_tokens?: number } | undefined;
     for await (const message of query({ prompt: "/compact", options: compactOptions(saved.sessionId, source, notesDir) })) {
       if (message.type === "system" && message.subtype === "compact_boundary") boundary = message.compact_metadata;
@@ -65,7 +81,7 @@ export async function compactChatIfNeeded(file: string = OWNER_SESSION_FILE, sou
       if (!boundary) throw new Error(`/compact produced no compact_boundary (${message.subtype})`);
       const { compactFailedAt: _cleared, ...rest } = saved;
       writeJson(file, { ...rest, sessionId: message.session_id, costUsd: message.total_cost_usd, lastContextTokens: boundary.post_tokens });
-      console.log(`${source}: compacted ${boundary.pre_tokens} -> ${boundary.post_tokens ?? "?"} tokens`);
+      console.log(`${source}: compacted ${boundary.pre_tokens} -> ${boundary.post_tokens ?? "?"} tokens (${mode})`);
       audit("chat_session", "compacted", source);
       return;
     }

@@ -1,8 +1,10 @@
 // A conversation (the owner's chat, or a group) persists across restarts, but not forever:
-//   - after a long idle gap it starts fresh (continuity comes from memory/notes/ and
+//   - once the nightly dream has run since its last turn (a new day), or as a backstop after a long idle gap, it
+//     starts fresh (continuity comes from memory/notes/ and
 //     memory/last-brief.md, which the chat loads every turn), and
-//   - after a turn whose context grew large it is compacted early, because the SDK only
-//     auto-compacts near the context limit and every turn re-sends the whole history.
+//   - when its context grew large it is compacted early, because the SDK only auto-compacts near the context
+//     limit and every turn re-sends the whole history: in the background once the conversation has been quiet
+//     for a while, or right after a reply if it grew far past the limit.
 // The decision is a pure function so the boundaries are unit-tested.
 
 import { settings } from "./settings.ts";
@@ -24,16 +26,47 @@ const COMPACT_BACKOFF_MS = settings.compactBackoffMinutes * 60_000;
 
 type SessionPlan = "fresh" | "resume" | "resume then compact";
 
+// When a compaction runs. "urgent": right after a reply, only for a conversation that grew far past the limit (a long active
+// chat must not run into the model's context window). "quiet": from the heartbeat, once nobody has written for a while, so
+// nobody waits for it. "off": the caller only wants to know fresh or resume.
+export type CompactMode = "off" | "quiet" | "urgent";
+export const URGENT_FACTOR = 1.5;
+
+export interface PlanOpts {
+  idleResetHours: number;
+  compactTokens: number;
+  compactGrowth: number;
+  dreamAt?: number; // ms time of the last nightly dream (state/dream.json), passed in so this stays pure; unset: no effect
+  quietMinutes?: number; // "quiet": the last turn must be at least this old
+  mode?: CompactMode; // default "quiet"
+}
+
+// Why a session starts fresh (undefined: it does not). "new-day": the nightly dream has run since the last turn, so the
+// notes were just tidied and the conversation starts clean on them (the group dreams run in the same pass: one time serves all).
+// "idle": only a backstop now. Without a last turn there is nothing to compare: no effect.
+export function freshReason(s: ChatSession, now: Date, opts: Pick<PlanOpts, "idleResetHours" | "dreamAt">): "idle" | "new-day" | undefined {
+  if (!s.sessionId) return undefined;
+  const last = s.lastTurnAt ? Date.parse(s.lastTurnAt) : NaN;
+  if (!Number.isFinite(last)) return undefined;
+  if (now.getTime() - last > opts.idleResetHours * 3600_000) return "idle";
+  if (typeof opts.dreamAt === "number" && last < opts.dreamAt && opts.dreamAt <= now.getTime()) return "new-day";
+  return undefined;
+}
+
 // Missing fields (a session.json from before these rules) never trigger anything: resume.
 // The compaction point is the same idea for the owner and every group: the conversation itself (growth since the first turn) has
 // outgrown `compactGrowth`. The owner's tools and skills alone are ~50k and a group's ~10k, so one absolute number would mean
 // very different amounts of conversation; `compactTokens` is only the fallback for a session saved before baseTokens existed.
-export function planSession(s: ChatSession, now: Date, opts: { idleResetHours: number; compactTokens: number; compactGrowth: number }): SessionPlan {
+export function planSession(s: ChatSession, now: Date, opts: PlanOpts): SessionPlan {
   if (!s.sessionId) return "fresh";
+  if (freshReason(s, now, opts)) return "fresh";
   const last = s.lastTurnAt ? Date.parse(s.lastTurnAt) : NaN;
-  if (Number.isFinite(last) && now.getTime() - last > opts.idleResetHours * 3600_000) return "fresh";
-  const limit = typeof s.baseTokens === "number" ? s.baseTokens + opts.compactGrowth : opts.compactTokens;
+  const mode = opts.mode ?? "quiet";
+  if (mode === "off") return "resume";
+  const factor = mode === "urgent" ? URGENT_FACTOR : 1;
+  const limit = typeof s.baseTokens === "number" ? s.baseTokens + opts.compactGrowth * factor : opts.compactTokens * factor;
   if (typeof s.lastContextTokens === "number" && s.lastContextTokens > limit) {
+    if (mode === "quiet" && (!Number.isFinite(last) || now.getTime() - last < (opts.quietMinutes ?? 0) * 60_000)) return "resume"; // still talking: not now
     const failed = s.compactFailedAt ? Date.parse(s.compactFailedAt) : NaN;
     if (Number.isFinite(failed) && now.getTime() - failed < COMPACT_BACKOFF_MS) return "resume"; // it just failed; do not pay for another try yet
     return "resume then compact";

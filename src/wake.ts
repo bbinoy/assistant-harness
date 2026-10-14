@@ -38,6 +38,7 @@ interface WakeDeps {
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group? (a group we cannot vouch for is never woken)
   runProfile: (profile: OwnerProfile, prompt: string, extra?: { onToolSuccess?: (tool: string, input: unknown) => void; judgeContext?: string }) => Promise<{ text: string; costUsd?: number; structured?: unknown }>; // the owner's runs by profile (agent.ts runProfile)
   presets?: { sendBrief: (markdown: string) => Promise<void>; notify: (text: string) => Promise<void>; beforeBrief?: () => Promise<void> }; // what the brief and radar presets need
+  compact?: { due: (conv: Conversation) => boolean; run: (conv: Conversation) => Promise<void> }; // quiet-time compaction (chatsession.ts): `due` is a cheap look at the session file, `run` re-checks inside the queue
   runGroup?: Runner;
   gate?: Gate;
   groups?: () => string[]; // known group ids
@@ -135,6 +136,21 @@ export function createWakeups(deps: WakeDeps) {
   }
   const idle = async (): Promise<string[]> => Promise.all([...running.values()]);
 
+  // A grown conversation that has gone quiet is compacted here, in the background, so the next message does not wait for it.
+  // It takes its place in the conversation's queue (a message that arrives meanwhile waits behind it, and no two runs touch the
+  // session file); the tick does not wait for it, and the tick's guards (paused, over budget) have already passed.
+  function quietCompact(conv: Conversation): void {
+    const key = `compact:${conv.key}`;
+    if (!deps.compact || running.has(key) || !deps.compact.due(conv)) return;
+    const run = deps.compact.run;
+    const job = pipeline.enqueue(conv, () => run(conv)).then(
+      () => "compact-done",
+      (e) => (console.error(`wake: ${conv.kind} compaction failed:`, (e as Error).message), "compact-failed"),
+    );
+    running.set(key, job);
+    void job.finally(() => running.delete(key));
+  }
+
   const briefTask = (): Task => buildTask("owner", { task: "brief" })!;
 
   // The deterministic brief (no model decides): the backstop hour has passed with no brief logged today, or an attempt came
@@ -210,7 +226,9 @@ export function createWakeups(deps: WakeDeps) {
     }
     await Promise.all(
       convs.map(async (conv) => {
-        if (busy.has(conv.key) || paused(clock()) || spent()) return;
+        if (paused(clock()) || spent()) return;
+        quietCompact(conv);
+        if (busy.has(conv.key)) return;
         busy.add(conv.key);
         try {
           await look(conv, clock());
