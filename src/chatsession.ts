@@ -2,7 +2,7 @@ import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
 import { withCeiling } from "./ceiling.ts";
-import { OWNER_SESSION_FILE, idleExpired, planSession, type ChatSession, type CompactMode } from "./session.ts";
+import { OWNER_SESSION_FILE, planSession, type ChatSession, type CompactMode } from "./session.ts";
 import { settings } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";
 
@@ -17,7 +17,7 @@ export interface Resume {
   seenAt?: string;
 }
 
-const chatPlanOpts = (mode: CompactMode) => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens, compactGrowth: settings.chatCompactGrowthTokens, quietMinutes: settings.compactQuietMinutes, mode });
+const chatPlanOpts = (mode: CompactMode) => ({ compactTokens: settings.chatCompactTokens, compactGrowth: settings.chatCompactGrowthTokens, quietMinutes: settings.compactQuietMinutes, mode });
 
 // A conversation continues its saved session unless session.ts says to start fresh.
 export function chatResume(announce: boolean, file: string = OWNER_SESSION_FILE, source: Source = "chat"): Resume {
@@ -25,13 +25,7 @@ export function chatResume(announce: boolean, file: string = OWNER_SESSION_FILE,
   // A fresh session starts its cost total at zero, so the previous total must not be subtracted.
   const now = new Date();
   const opts = chatPlanOpts("off");
-  if (planSession(saved, now, opts) === "fresh") {
-    if (announce && idleExpired(saved, now, opts.idleResetHours)) {
-      console.log(`${source}: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
-      audit("chat_session", "idle-reset", source);
-    }
-    return { previousCost: 0 };
-  }
+  if (planSession(saved, now, opts) === "fresh") return { previousCost: 0 };
   return { resume: saved.sessionId, previousCost: saved.costUsd, seenAt: saved.seenAt };
 }
 
@@ -87,4 +81,16 @@ export async function compactChatIfNeeded(file: string = OWNER_SESSION_FILE, sou
     audit("chat_session", "compact-failed", source);
     writeJson(file, { ...readJson<ChatSession>(file, { costUsd: 0 }), compactFailedAt: new Date().toISOString() });
   }
+}
+
+// A conversation never starts fresh just because time passed: its recent history is kept across days and compaction keeps it small.
+// The one exception is a session the SDK can no longer resume (expired or deleted): forget its id, so the next message starts a fresh
+// one instead of failing the same way for ever. Returns whether it did.
+export function forgetUnresumable(file: string, e: unknown, source: Source): boolean {
+  if (!/no conversation found|session id.*not found|could not (resume|find) (the )?(session|conversation)/i.test((e as Error)?.message ?? "")) return false;
+  const { sessionId: _gone, baseTokens: _base, lastContextTokens: _ctx, ...rest } = readJson<ChatSession>(file, { costUsd: 0 });
+  writeJson(file, { ...rest, costUsd: 0 });
+  console.error(`${source}: the saved session can no longer be resumed, the next message starts a fresh one`);
+  audit("chat_session", "unresumable-reset", source);
+  return true;
 }

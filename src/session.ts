@@ -1,6 +1,5 @@
-// A conversation (the owner's chat, or a group) persists across restarts, but not forever:
-//   - after a long idle gap (CHAT_IDLE_RESET_HOURS) it starts fresh (continuity comes from memory/notes/ and
-//     memory/last-brief.md, which the chat loads every turn); across days it keeps recent history, kept small by compaction, and
+// A conversation (the owner's chat, or a group) persists across restarts and days; time alone never resets it, so Ted always has
+// the recent history. Two things keep it healthy:
 //   - when its context grew large it is compacted early, because the SDK only auto-compacts near the context
 //     limit and every turn re-sends the whole history: in the background once the conversation has been quiet
 //     for a while, or right after a reply if it grew far past the limit.
@@ -32,17 +31,10 @@ export type CompactMode = "off" | "quiet" | "urgent";
 export const URGENT_FACTOR = 1.5;
 
 export interface PlanOpts {
-  idleResetHours: number;
   compactTokens: number;
   compactGrowth: number;
   quietMinutes?: number; // "quiet": the last turn must be at least this old
   mode?: CompactMode; // default "quiet"
-}
-
-// Has the conversation been idle past the reset? Without a last turn there is nothing to compare: no.
-export function idleExpired(s: ChatSession, now: Date, idleResetHours: number): boolean {
-  const last = s.lastTurnAt ? Date.parse(s.lastTurnAt) : NaN;
-  return !!s.sessionId && Number.isFinite(last) && now.getTime() - last > idleResetHours * 3600_000;
 }
 
 // Missing fields (a session.json from before these rules) never trigger anything: resume.
@@ -51,7 +43,6 @@ export function idleExpired(s: ChatSession, now: Date, idleResetHours: number): 
 // very different amounts of conversation; `compactTokens` is only the fallback for a session saved before baseTokens existed.
 export function planSession(s: ChatSession, now: Date, opts: PlanOpts): SessionPlan {
   if (!s.sessionId) return "fresh";
-  if (idleExpired(s, now, opts.idleResetHours)) return "fresh";
   const last = s.lastTurnAt ? Date.parse(s.lastTurnAt) : NaN;
   const mode = opts.mode ?? "quiet";
   if (mode === "off") return "resume";

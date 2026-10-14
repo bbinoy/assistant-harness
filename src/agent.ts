@@ -3,7 +3,7 @@ import { query, startup, type HookCallbackMatcher, type Options, type SDKMessage
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
 import { pausing, RunTimeout, withCeiling, type Ceiling } from "./ceiling.ts";
-import { chatResume, type Resume } from "./chatsession.ts";
+import { chatResume, forgetUnresumable, type Resume } from "./chatsession.ts";
 import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
 import type { Conversation } from "./conversation.ts";
 import { failure } from "./errors.ts";
@@ -186,7 +186,10 @@ async function underCeiling<T>(source: Source, run: (c: Ceiling) => Promise<T>):
 export async function runAgent(prompt: string, approve: Approve, opts: RunOptions, io: { query?: typeof query } = {}): Promise<AgentReply> {
   const { resume, previousCost } = opts.sessionFile ? chatResume(true, opts.sessionFile) : { resume: undefined, previousCost: 0 };
   // A background run is always cold, so the approval it waits on belongs to this run and does not count against its ceiling.
-  return underCeiling(opts.source, (c) => consume((io.query ?? query)({ prompt, options: { ...buildOptions(pausing(c, approve), opts, resume), abortController: c.controller } }), opts, previousCost));
+  return underCeiling(opts.source, (c) => consume((io.query ?? query)({ prompt, options: { ...buildOptions(pausing(c, approve), opts, resume), abortController: c.controller } }), opts, previousCost)).catch((e) => {
+    if (opts.sessionFile) forgetUnresumable(opts.sessionFile, e, opts.source);
+    throw e;
+  });
 }
 
 // --- warm processes for the next message ---
@@ -237,6 +240,7 @@ async function runWarmOrCold(slot: SpareSlot<WarmQuery>, id: string | undefined,
     });
   } catch (e) {
     if (e instanceof RunTimeout && id && slot.holder === id) slot.drop(); // after an abort the conversation gets no spare built meanwhile
+    if (o.sessionFile) forgetUnresumable(o.sessionFile, e, o.source);
     throw e;
   }
 }

@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { idleExpired, planSession, type ChatSession } from "../src/session.ts";
+import { planSession, type ChatSession } from "../src/session.ts";
 
-const opts = { idleResetHours: 6, compactTokens: 60_000, compactGrowth: 40_000 };
+const opts = { compactTokens: 60_000, compactGrowth: 40_000 };
 const now = new Date("2026-10-12T12:00:00Z");
 const ago = (hours: number) => new Date(now.getTime() - hours * 3600_000).toISOString();
 const session = (s: Partial<ChatSession>): ChatSession => ({ sessionId: "s1", costUsd: 1, ...s });
@@ -11,19 +11,9 @@ test("session: no saved session means fresh", () => {
   assert.equal(planSession({ costUsd: 0 }, now, opts), "fresh");
 });
 
-test("session: idle boundary is strictly more than the limit", () => {
-  assert.equal(planSession(session({ lastTurnAt: ago(5.9) }), now, opts), "resume");
-  assert.equal(planSession(session({ lastTurnAt: ago(6) }), now, opts), "resume"); // exactly 6h is not more than 6h
-  assert.equal(planSession(session({ lastTurnAt: ago(6.01) }), now, opts), "fresh");
-});
-
 test("session: token boundary is strictly more than the limit", () => {
   assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 60_000 }), now, opts), "resume");
   assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 60_001 }), now, opts), "resume then compact");
-});
-
-test("session: idle wins over a large context (a fresh session needs no compaction)", () => {
-  assert.equal(planSession(session({ lastTurnAt: ago(48), lastContextTokens: 200_000 }), now, opts), "fresh");
 });
 
 test("session: old session.json without the new fields still resumes", () => {
@@ -33,14 +23,14 @@ test("session: old session.json without the new fields still resumes", () => {
 });
 
 test("session: the thresholds come from settings", () => {
-  const tight = { idleResetHours: 1, compactTokens: 10_000, compactGrowth: 5_000 };
-  assert.equal(planSession(session({ lastTurnAt: ago(2) }), now, tight), "fresh");
+  const tight = { compactTokens: 10_000, compactGrowth: 5_000 };
+  assert.equal(planSession(session({ lastTurnAt: ago(2) }), now, tight), "resume");
   assert.equal(planSession(session({ lastTurnAt: ago(0.5), lastContextTokens: 10_001 }), now, tight), "resume then compact");
 });
 
 test("session: a failed compaction backs off for an hour, then tries again", () => {
   const base = { sessionId: "s", costUsd: 1, lastTurnAt: "2026-10-12T10:00:00Z", lastContextTokens: 90_000 };
-  const opts = { idleResetHours: 6, compactTokens: 60_000, compactGrowth: 40_000 };
+  const opts = { compactTokens: 60_000, compactGrowth: 40_000 };
   const failedAt = "2026-10-12T10:05:00Z";
   assert.equal(planSession({ ...base, compactFailedAt: failedAt }, new Date("2026-10-12T10:30:00Z"), opts), "resume");
   assert.equal(planSession({ ...base, compactFailedAt: failedAt }, new Date("2026-10-12T11:06:00Z"), opts), "resume then compact");
@@ -57,14 +47,9 @@ test("session: compaction counts growth since the first turn, the same for a big
   assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 60_001 }), now, opts), "resume then compact");
 });
 
-test("session: only the idle reset starts fresh; a turn from yesterday resumes", () => {
-  const o = { ...opts, idleResetHours: 168 };
-  assert.equal(planSession(session({ lastTurnAt: ago(30) }), now, o), "resume"); // a day ago: the history is kept
-  assert.equal(planSession(session({ lastTurnAt: ago(169) }), now, o), "fresh");
-  assert.equal(idleExpired(session({ lastTurnAt: ago(169) }), now, 168), true);
-  assert.equal(idleExpired(session({ lastTurnAt: ago(2) }), now, 168), false);
-  assert.equal(idleExpired(session({}), now, 168), false); // no last turn: nothing to compare
-  assert.equal(idleExpired({ costUsd: 0, lastTurnAt: ago(200) }, now, 168), false); // no session to reset
+test("session: time alone never starts a fresh session; a turn from last month still resumes", () => {
+  assert.equal(planSession(session({ lastTurnAt: ago(30) }), now, opts), "resume");
+  assert.equal(planSession(session({ lastTurnAt: ago(24 * 40) }), now, { ...opts, mode: "off" }), "resume");
 });
 
 test("session: quiet compaction waits for the conversation to be still; urgent needs 1.5 times the growth", () => {
@@ -82,4 +67,19 @@ test("session: quiet compaction waits for the conversation to be still; urgent n
   assert.equal(planSession(session({ lastTurnAt: ago(1), baseTokens: 1, lastContextTokens: 900_000 }), now, { ...q, mode: "off" }), "resume");
   // a recent failure backs off in both modes
   assert.equal(planSession(session({ lastTurnAt: ago(1), baseTokens: 1, lastContextTokens: 900_000, compactFailedAt: ago(0.5) }), now, { ...q, mode: "urgent" }), "resume");
+});
+
+test("session: a session the SDK can no longer resume is forgotten, any other error is not", async () => {
+  const { writeFileSync, readFileSync } = await import("node:fs");
+  const { forgetUnresumable } = await import("../src/chatsession.ts");
+  const file = `state/session-${process.pid}.json`; // state files are relative to the data dir (HARNESS_DATA_DIR in tests)
+  const { dataPath } = await import("../src/state.ts");
+  writeFileSync(dataPath(file), JSON.stringify({ sessionId: "s1", costUsd: 3, baseTokens: 50_000, lastContextTokens: 80_000, seenAt: "x" }));
+  assert.equal(forgetUnresumable(file, new Error("network down"), "chat"), false);
+  assert.equal(JSON.parse(readFileSync(dataPath(file), "utf8")).sessionId, "s1");
+  assert.equal(forgetUnresumable(file, new Error("No conversation found with session ID: s1"), "chat"), true);
+  const after = JSON.parse(readFileSync(dataPath(file), "utf8"));
+  assert.equal(after.sessionId, undefined);
+  assert.equal(after.seenAt, "x", "a group keeps what it has been shown");
+  assert.equal(planSession(after, now, opts), "fresh");
 });
