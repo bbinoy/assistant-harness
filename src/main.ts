@@ -4,6 +4,7 @@ import { ask, runProfile, prepareChat } from "./agent.ts";
 import { compactChatIfNeeded, compactDue } from "./chatsession.ts";
 import { setDraftReader, type Approve } from "./permissions.ts";
 import * as approvals from "./approvals.ts";
+import { makeApprove } from "./approvalask.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createDreamer } from "./dream.ts";
@@ -45,10 +46,10 @@ function record(groupId: string | undefined, kind: Kind, ts: number, text: strin
   void compactIfNeeded(summarizeWithHaiku).catch((e) => console.error("messages: compaction failed:", e.message));
 }
 const out = createOutbound(signal, (kind, ts, text, groupId) => record(groupId, kind, ts, text));
-const approve: Approve = (description, call, abort) => approvals.request((t) => out.replyPlain(t, "approval"), description, call, abort);
+const approve: Approve = makeApprove((t) => out.replyPlain(t, "approval"), false);
 // Unattended runs (wake-ups, the brief, the radar, the mail handler) ask the same way, but only an explicit yes / no or a reply
 // to the question answers it: whatever else the owner types meanwhile is a chat message (approvals.ts).
-const approveBackground: Approve = (description, call, abort) => approvals.request((t) => out.replyPlain(t, "approval"), description, call, abort, { background: true });
+const approveBackground: Approve = makeApprove((t) => out.replyPlain(t, "approval"), true);
 // `say` is a plain message to the owner. `notify` is what the assistant sends on its own (mail
 // alerts, handled mail, setup problems) and is also remembered, so the chat knows what a reply
 // like "yes, do that" refers to (messages.ts). Memory announcements and chat answers use `say`.

@@ -129,7 +129,7 @@ interface PipelineDeps {
   picture: (m: IncomingMessage) => Promise<Picture>; // throws a sentence the sender can be told
   transcript: (m: IncomingMessage) => Promise<string>; // throws a sentence the sender can be told
   speech: { ready: () => boolean; synth: (words: string) => Promise<string> }; // spoken replies: local TTS, a file
-  approvals: { answer: (text: string, working: () => void, quote?: { timestamp: number }) => Promise<{ outcome: "none" | "approved" | "modified" | "declined" | "feedback"; changes?: { field: string; value: unknown }[] }>; answerReaction: (emoji: string, ts: number) => string };
+  approvals: { answer: (text: string, working: () => void, quote?: { timestamp: number }) => Promise<{ outcome: "none" | "approved" | "modified" | "declined" | "feedback" | "clarify"; changes?: { field: string; value: unknown }[]; reply?: string; note?: string }>; answerReaction: (emoji: string, ts: number) => string };
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group?
   isOwner: (who: { from: string; fromUuid?: string }) => boolean;
   admitGroup: (conv: Conversation, m: GroupMessage) => Promise<void>; // the participation gate (group.ts)
@@ -445,12 +445,14 @@ export function createPipeline(deps: PipelineDeps) {
     // A spoken "yes" is never an approval, nor is a caption. Nor is an edit: an approval is answered by a new message, a reaction
     // or a quoted reply, so "no" edited into "yes" (or back) changes nothing.
     const target = { author: m.from, timestamp: m.timestamp };
-    const { outcome, changes } = edited || m.voice || m.picture ? { outcome: "none" as const, changes: undefined } : await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote);
+    const { outcome, changes, reply, note } = edited || m.voice || m.picture ? { outcome: "none" as const, changes: undefined, reply: undefined, note: undefined } : await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote);
+    if (outcome === "none" && note) await out.replyPlain(note).catch(() => {}); // soft styles: the judge failed; the approvals stay open and the message goes on as chat
     if (outcome !== "none") {
       answeredApproval(m.timestamp);
       console.log(`approval ${outcome}${changes ? ` (${changes.map((c) => c.field).join(", ")})` : ""}`);
-      void signal.react({ approved: "👍", modified: "👍", declined: "👎", feedback: "💬" }[outcome], target, conv.groupId);
+      void signal.react({ approved: "👍", modified: "👍", declined: "👎", feedback: "💬", clarify: "💬" }[outcome], target, conv.groupId);
       // An edited call runs without a second look, so say exactly what changed.
+      if (outcome === "clarify" && reply) await out.replyPlain(reply); // the approval stays open; this message was the answer to a question, not a request
       if (outcome === "modified" && changes) await out.replyPlain(`Applied your change: ${changes.map((c) => `${c.field} → ${c.value}`).join(", ")}`);
       return;
     }
