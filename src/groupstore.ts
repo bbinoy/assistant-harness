@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Scope } from "./dream.ts";
+import type { Scope } from "./dreamplan.ts";
 import { compactIfNeeded, messagesSince, recordMessage, type Kind, type Sent } from "./messages.ts";
 import { matchLines } from "./logsearch.ts";
 import { MAX_NOTE_CHARS, type Note } from "./notes.ts";

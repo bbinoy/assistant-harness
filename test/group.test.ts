@@ -318,7 +318,9 @@ test("groups: membership comes from the member list, is remembered, and fails cl
 
 // ---- the group's own notes and history (groupstore.ts) ----
 import { readFileSync as readFile, rmSync } from "node:fs";
-import { applyPlan, groupConversation, planOps, undoLatest } from "../src/dream.ts";
+import { applyPlan, undoLatest } from "../src/dreamapply.ts";
+import { groupConversation } from "../src/dream.ts";
+import { planOps } from "../src/dreamplan.ts";
 import { forgetNote } from "../src/notes.ts";
 import { groupContext, groupDir, groupLogFile, groupNotesBlock, groupScope, listGroups, searchGroupHistory } from "../src/groupstore.ts";
 import { readNotes } from "../src/notes.ts";
