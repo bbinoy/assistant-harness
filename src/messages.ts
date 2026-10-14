@@ -26,8 +26,8 @@ const KEEP_AFTER_COMPACTION = 0.7; // compact down to this share of the limit, s
 // a reaction was on) skips them; only search_logs and the gate itself see them.
 export type Kind = "chat" | "notice" | "approval" | "draft" | "brief" | "other" | "owner" | "reaction" | "member" | "action" | "wake";
 
-export const LEDGER_KINDS: ReadonlySet<Kind> = new Set<Kind>(["action", "wake"]);
-export const isLedger = (kind: Kind) => LEDGER_KINDS.has(kind);
+const LEDGER_KINDS: ReadonlySet<Kind> = new Set<Kind>(["action", "wake"]);
+const isLedger = (kind: Kind) => LEDGER_KINDS.has(kind);
 
 export interface Sent {
   ts: number; // Signal timestamp of the message
@@ -36,7 +36,7 @@ export interface Sent {
   text: string;
 }
 
-export interface Summary {
+interface Summary {
   kind: "summary";
   at: string;
   from: string;

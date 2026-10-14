@@ -17,7 +17,7 @@ import { settings } from "./settings.ts";
 //   brief   OWNER ONLY. The daily-brief skill, "brief" profile; after: capture the sent email, post the Signal summary, save
 //           memory/last-brief.md; retries up to BRIEF_MAX_ATTEMPTS a day if incomplete.
 //   radar   OWNER ONLY. The radar skill, "radar" profile; after: post its messages (structured output), capped.
-export type After = "post" | "brief" | "radar";
+type After = "post" | "brief" | "radar";
 export interface Task {
   name: TaskName;
   instructions: string;
@@ -43,14 +43,14 @@ export function buildTask(convKind: "owner" | "group", out: Pick<GateOutput, "ta
 
 // ---- when the brief is owed, in code ----
 
-export const BRIEF_RETRY_GAP_MINUTES = 10;
+const BRIEF_RETRY_GAP_MINUTES = 10;
 const briefCap = () => settings.briefMaxAttempts;
 
 // Is today's brief still to come (not delivered, attempts left, past the start hour)? The radar and the mail alerts wait for it.
 // Only for a bounded window: before the backstop hour (which runs the brief whatever the notes say), or, with the backstop off
 // (hour 24), for BRIEF_PENDING_GRACE_HOURS after the start hour. After that nothing is waiting for a brief, so an urgent mail
 // is alerted and the radar may run, unless an attempt has already started (then it is pending until it is done or given up).
-export const BRIEF_PENDING_GRACE_HOURS = 3;
+const BRIEF_PENDING_GRACE_HOURS = 3;
 export const briefPending = (st: LookState, now: Date): boolean => {
   if (st.briefDone || st.briefAttempts >= briefCap() || now.getHours() < settings.briefStartHour) return false;
   const until = settings.briefBackstopHour < 24 ? settings.briefBackstopHour : settings.briefStartHour + BRIEF_PENDING_GRACE_HOURS;

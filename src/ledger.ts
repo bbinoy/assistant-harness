@@ -16,7 +16,7 @@ export const clampCheck = (minutes: unknown): number => {
   return Number.isFinite(n) ? Math.max(MIN_CHECK_MINUTES, Math.min(MAX_CHECK_MINUTES, Math.round(n))) : DEFAULT_CHECK_MINUTES;
 };
 
-export interface Wake {
+interface Wake {
   next: string; // ISO: the next look
   looked: string; // ISO: when the look that chose it began (anything said after it is news)
 }

@@ -14,7 +14,7 @@ import { triageBatch, type MailInput } from "./triage.ts";
 const SEEN = "state/seen.json";
 const LIVENESS = "state/heartbeat.json"; // last tick, for `npm run doctor`
 const SEEN_TTL_MS = 14 * 24 * 3600_000;
-export const BRIEF_SUBJECT = /^\s*[☀🌙]/u; // our own briefs: never triaged
+const BRIEF_SUBJECT = /^\s*[☀🌙]/u; // our own briefs: never triaged
 const FETCH_CONCURRENCY = 4;
 
 interface Seen {
@@ -30,7 +30,7 @@ interface Row {
   lastMessageId: number;
 }
 
-export interface NewMail {
+interface NewMail {
   accountEmail: string;
   conversationId: string;
   messageId: number;
@@ -39,7 +39,7 @@ export interface NewMail {
   receivedAtUtc: string;
 }
 
-export interface HeartbeatHooks {
+interface HeartbeatHooks {
   alert: (text: string) => Promise<void>; // tell the owner something (plain text)
   handle: (items: HandleItem[]) => void; // queue mail for the handler
   briefDue: () => boolean; // today's brief is still due: it will report urgent mail itself

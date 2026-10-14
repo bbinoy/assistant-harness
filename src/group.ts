@@ -105,7 +105,7 @@ export type Runner = (build: PromptBuilder, ctx: { conv: Conversation; now: Date
 export const realRunner: Runner = async (build, { conv, now, firstOutput }) => (await runGroupTurn(conv, styleLines(now), build, firstOutput)).text.trim();
 
 
-export interface Brain {
+interface Brain {
   pipeline: Pick<Pipeline, "enqueue" | "burst" | "burstQueued" | "wait" | "holdTyping" | "runTurn" | "record" | "canSpeak" | "react">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
   recent: (groupId: string) => string[]; // the tail of that history (for the gate; gate.ts logTail)
   context?: typeof groupContext; // what the run is shown (default: the group's log)
@@ -122,7 +122,7 @@ export interface Brain {
 // as in the private chat; what stays here is the group's own question once the burst has settled: was the assistant
 // addressed (sticky until answered), or does the gate say it should speak.
 // A direct address that could not be answered (paused, over budget) is dropped after this long.
-export const STICKY_MS = 30 * 60_000;
+const STICKY_MS = 30 * 60_000;
 
 export function createGroupBrain(brain: Brain) {
   const { pipeline } = brain;

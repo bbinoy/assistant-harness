@@ -78,11 +78,11 @@ type Held = IncomingMessage & { voice?: boolean; picture?: Picture }; // voice: 
 export type Incoming = { type: "message"; m: IncomingMessage } | { type: "reaction"; r: IncomingReaction };
 
 // What one run needs. The caller (the owner's path here, the group brain in group.ts) builds it.
-export interface RunHooks {
+interface RunHooks {
   firstOutput: () => void; // the model produced its first message (timing only)
 }
 
-export interface Turn {
+interface Turn {
   run: (hooks: RunHooks) => Promise<{ text: string; costUsd?: number }>;
   timing?: Timing; // the burst's timing, logged as one line when the turn ends (timing.ts)
   target?: { author: string; timestamp: number }; // the message to react to (and to show status icons on)
@@ -94,13 +94,13 @@ export interface Turn {
   kind?: Kind; // how the reply is logged (default "chat"); the owner's wake-ups are "notice", which the chat is told about
 }
 
-export interface TurnResult {
+interface TurnResult {
   spoke: boolean; // something was said (words or voice)
   error?: unknown;
   noticed?: boolean; // the failure was explained in the conversation
 }
 
-export interface PipelineDeps {
+interface PipelineDeps {
   signal: {
     separateAccount: boolean;
     react(emoji: string, target: { author: string; timestamp: number }, groupId?: string): Promise<void>;

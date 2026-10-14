@@ -38,7 +38,7 @@ export const RADAR_SCHEMA = {
   },
 };
 
-export const KINDS = ["prep", "clash", "mail", "other"] as const;
+const KINDS = ["prep", "clash", "mail", "other"] as const;
 export type Kind = (typeof KINDS)[number];
 
 export interface Message {
@@ -58,8 +58,8 @@ export const emptyState = (): RadarState => ({ sent: 0, keys: {} });
 // owner's RADAR_MINUTES. Nothing signals an event the owner adds in their calendar app, so the
 // longest wait is the blind spot; a calendar change made by the assistant itself pulls the next
 // run forward (nudge), at most MIN_GAP_MINUTES after the last one.
-export const LEAD_MINUTES = 60;
-export const MIN_MINUTES = 45;
+const LEAD_MINUTES = 60;
+const MIN_MINUTES = 45;
 export const MIN_GAP_MINUTES = 30;
 export const WINDOW_MINUTES = 90; // "about to start" means starting within this long
 

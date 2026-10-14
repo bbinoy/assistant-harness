@@ -12,7 +12,7 @@ export const OFFERED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshoot
 // denied), the system prompt, the skills offered, the turn and budget limits and the output schema. A Task (tasks.ts)
 // names one; the gate can choose a task but never edit a profile. `notes` are the note categories injected as data.
 export type ProfileName = "brief" | "radar" | "background" | "group";
-export interface RunProfile {
+interface RunProfile {
   readonly source: Source;
   readonly maxTurns: number;
   readonly maxBudgetUsd: number;

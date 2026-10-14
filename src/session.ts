@@ -19,7 +19,7 @@ export interface ChatSession {
 
 const COMPACT_BACKOFF_MS = 3600_000;
 
-export type SessionPlan = "fresh" | "resume" | "resume then compact";
+type SessionPlan = "fresh" | "resume" | "resume then compact";
 
 // Missing fields (a session.json from before these rules) never trigger anything: resume.
 export function planSession(s: ChatSession, now: Date, opts: { idleResetHours: number; compactTokens: number }): SessionPlan {

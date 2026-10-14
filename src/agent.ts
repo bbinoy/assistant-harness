@@ -22,13 +22,13 @@ import { readText, writeJson } from "./state.ts";
 import { recordToolsSeen, toolsSeen } from "./toolsseen.ts";
 import { SpareSlot } from "./warmslot.ts";
 
-export interface AgentReply {
+interface AgentReply {
   text: string;
   costUsd: number;
   structured?: unknown; // the run's constrained JSON output, when it asked for one
 }
 
-export interface RunOptions {
+interface RunOptions {
   source: Source; // audit tag: who is acting
   systemPrompt: string;
   sessionFile?: string; // chat and groups: continue + save the conversation here; brief and the rest: fresh every run
@@ -162,7 +162,7 @@ async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOptions, prev
   throw new Error("agent stream ended without a result");
 }
 
-export async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Promise<AgentReply> {
+async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Promise<AgentReply> {
   const { resume, previousCost } = opts.sessionFile ? chatResume(true, opts.sessionFile) : { resume: undefined, previousCost: 0 };
   return consume(query({ prompt, options: buildOptions(approve, opts, resume) }), opts, previousCost);
 }

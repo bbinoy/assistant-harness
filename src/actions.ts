@@ -4,7 +4,7 @@ import type { Triage } from "./triage.ts";
 // Kept free of I/O so every safety rule is unit-tested.
 
 // Only these kinds may ever be archived automatically.
-export const ARCHIVE_KINDS = new Set(["newsletter", "notification", "cold_outreach"]);
+const ARCHIVE_KINDS = new Set(["newsletter", "notification", "cold_outreach"]);
 
 export interface Plan {
   archive: number[]; // indices to archive now
@@ -37,7 +37,7 @@ export function inQuietHours(now: Date, startHour: number, endHour: number): boo
   return startHour <= endHour ? h >= startHour && h < endHour : h >= startHour || h < endHour;
 }
 
-export interface AlertItem {
+interface AlertItem {
   from: string;
   subject: string;
   reason: string;

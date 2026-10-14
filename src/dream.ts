@@ -60,7 +60,7 @@ function buildPrompt(now: Date, kept: string, said: string, notes: readonly Note
   ].join("\n\n");
 }
 
-export const dreamPrompt = (now: Date, notes: readonly NoteFile[], messages: readonly Sent[]): string =>
+const dreamPrompt = (now: Date, notes: readonly NoteFile[], messages: readonly Sent[]): string =>
   buildPrompt(now, `The notes you keep about ${OWNER} right now (one file per fact; MEMORY.md is the index and is updated for you):`, `What ${OWNER} said and did since the last dream, oldest first:`, notes, conversationLines(messages).lines);
 
 // A group's log holds what members wrote ("Eve: ...", kind member) and the assistant's replies (kind chat).

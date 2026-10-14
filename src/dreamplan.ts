@@ -14,7 +14,7 @@ const MIN_EVIDENCE = 12; // characters of the owner's own words a new fact must 
 
 // What the dream may write or delete. setup-* notes are the setup skill's (calendar ids, Notion
 // pages) and voice-* notes come from the owner's sent mail: neither is learned from chat.
-export const DREAM_CATEGORIES: readonly Category[] = ["triage", "people", "scheduling", "context", "brief", "style"];
+const DREAM_CATEGORIES: readonly Category[] = ["triage", "people", "scheduling", "context", "brief", "style"];
 
 // Where a dream works and what it may touch. The owner's own notes are one scope; every group has its own
 // (groupstore.ts), so a group's dream can never read or write anything but that group's notes.
@@ -28,7 +28,7 @@ export interface Scope {
 
 export const OWNER_SCOPE: Scope = { notesDir: NOTES_DIR, backupsDir: join(settings.stateDir, "notes-backup"), categories: DREAM_CATEGORIES, index: true, maxNotes: settings.memoryMaxNotes };
 
-export interface Op {
+interface Op {
   op: "write" | "delete";
   file: string;
   description?: string;
@@ -39,7 +39,7 @@ export interface Op {
   reason?: string;
 }
 
-export type Action =
+type Action =
   | { kind: "add" | "update" | "merge"; file: string; description: string; content: string; merged: string[] }
   | { kind: "delete"; file: string; why: string };
 

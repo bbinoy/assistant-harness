@@ -17,7 +17,7 @@ import { settings } from "./settings.ts";
 
 const reply = (text: string, isError = false) => ({ content: [{ type: "text" as const, text }], ...(isError ? { isError: true } : {}) });
 
-export interface MemoryScope {
+interface MemoryScope {
   notesDir: string;
   groupId?: string; // unset: the owner's
   record: (line: string) => void; // a change made through a tool, for the owner's announcement (a group passes a no-op)

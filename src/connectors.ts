@@ -8,7 +8,7 @@ import { readJson, writeJson } from "./state.ts";
 
 const FILE = "state/connectors.json";
 
-export interface Connectors {
+interface Connectors {
   at: string;
   notion: boolean;
   calendar: boolean;
@@ -21,7 +21,7 @@ export const NAMES: Record<Connector, string> = { notion: "Notion", calendar: "G
 // What the owner loses while a connector is down, in plain words.
 export const SKIPPED: Record<Connector, string> = { notion: "tasks and meeting prep pages", calendar: "the calendar review and the meeting list" };
 
-export interface ServerStatus {
+interface ServerStatus {
   name: string;
   status: string;
 }

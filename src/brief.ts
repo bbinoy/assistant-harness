@@ -69,7 +69,7 @@ export function briefPrompt(now: Date, previous: string | undefined, previousAt:
   ].join("\n\n");
 }
 
-export interface BriefDeps {
+interface BriefDeps {
   approve: Approve;
   sendBrief: (markdown: string) => Promise<void>;
   notify: (text: string) => Promise<void>;
@@ -133,7 +133,7 @@ async function runOnce(deps: BriefDeps, state: BriefState, now: Date, reason: st
 }
 
 export type BriefOutcome = "delivered" | "incomplete" | "failed";
-export interface BriefAttemptDeps {
+interface BriefAttemptDeps {
   run: (prompt: string, onToolSuccess: (tool: string, input: unknown) => void) => Promise<{ text: string; costUsd: number }>; // the "brief" profile (agent.ts), injected for tests
   sendBrief: (markdown: string) => Promise<void>; // the Signal summary
   notify: (text: string) => Promise<void>;

@@ -5,11 +5,11 @@ import { join } from "node:path";
 // Reading a 20 MB audit log with a file reader is slow and token-hungry; this returns only the
 // matching lines, newest last, each cut to a sane length.
 
-export const MAX_LINES = 100;
+const MAX_LINES = 100;
 const MAX_LINE_CHARS = 500;
 const MAX_FILE_BYTES = 40 * 1024 * 1024;
 
-export interface Search {
+interface Search {
   file?: string; // a log's name, like "audit.jsonl" or "voice"; empty = all logs
   query?: string; // every word must appear (case-insensitive)
   sinceHours?: number; // only lines stamped within this many hours (lines without a date stamp are kept)

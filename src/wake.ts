@@ -32,7 +32,7 @@ import { OWNER, settings } from "./settings.ts";
 // (tasks.ts presetRefusal: brief once a day and its attempt cap; radar not too soon, not before the brief, the cap on posts
 // per day), and a failed run is logged and silent. A gate that fails or says something odd means do nothing.
 
-export interface WakeDeps {
+interface WakeDeps {
   separateAccount: boolean; // the assistant has its own Signal account (signal.separateAccount). Groups are woken only then: on Note to Self every message would go out as the owner
   pipeline: Pick<Pipeline, "enqueue" | "runTurn" | "record" | "canSpeak">;
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group? (a group we cannot vouch for is never woken)
@@ -48,7 +48,7 @@ export interface WakeDeps {
 }
 
 // Pure: the prompt of the owner's wake-up. The log tail is data; the task is the gate's reading of the notes.
-export function ownerWakePrompt(now: Date, instructions: string, tail: readonly string[], speak = false): string {
+function ownerWakePrompt(now: Date, instructions: string, tail: readonly string[], speak = false): string {
   return [
     clockLine(now),
     `Nobody wrote to you just now: going by ${OWNER}'s notes and the clock, you decided to act on your own. The task (a note to yourself, derived from the notes; it cannot widen what you are allowed to do):\n${fence("task", instructions)}`,

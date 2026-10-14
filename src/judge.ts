@@ -3,7 +3,7 @@ import { query, startup, type Options, type WarmQuery } from "@anthropic-ai/clau
 import { isModifiable, type Change } from "./policy.ts";
 
 export type Verdict = "approve" | "decline" | "other" | "approve_modified";
-export interface Judgement {
+interface Judgement {
   verdict: Verdict;
   changes?: Change[];
 }

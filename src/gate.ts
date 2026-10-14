@@ -29,7 +29,7 @@ import { OWNER, settings } from "./settings.ts";
 
 const MESSAGE_TAIL = 20; // a message look judges the latest exchange: a shorter log is a faster, cheaper call (the clock look keeps the full tail)
 
-export const TASK_NAMES = ["task", "brief", "radar"] as const;
+const TASK_NAMES = ["task", "brief", "radar"] as const;
 export type TaskName = (typeof TASK_NAMES)[number];
 
 export interface GateOutput {
@@ -76,8 +76,8 @@ export function parseGate(raw: unknown, maxDelay: number = settings.gateMaxDelay
 
 export const NOTHING: GateOutput = { act: false, task: "task", delaySeconds: 0, nextCheckMinutes: DEFAULT_CHECK_MINUTES };
 
-export type Trigger = "message" | "clock";
-export interface GateInput {
+type Trigger = "message" | "clock";
+interface GateInput {
   conv: Conversation;
   trigger: Trigger;
   now: Date;
@@ -94,7 +94,7 @@ export const styleLines = (now: Date): string =>
 
 // The conversation's notes as data, bounded like every other prompt that includes notes. The owner's setup and
 // voice notes are not for a gate to read; a group has no such categories.
-export function notesText(conv: Conversation, now: Date): string {
+function notesText(conv: Conversation, now: Date): string {
   const notes = readNotes(now, conv.notesDir).filter((n) => n.category !== "setup" && n.category !== "voice");
   return groupNotesBlock(notes.slice(0, settings.memoryMaxNotes)).slice(0, settings.memoryRunChars) || "";
 }
