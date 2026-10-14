@@ -58,13 +58,13 @@ test("session: compaction counts growth since the first turn, the same for a big
 });
 
 test("session: only the idle reset starts fresh; a turn from yesterday resumes", () => {
-  const o = { ...opts, idleResetHours: 72 };
+  const o = { ...opts, idleResetHours: 168 };
   assert.equal(planSession(session({ lastTurnAt: ago(30) }), now, o), "resume"); // a day ago: the history is kept
-  assert.equal(planSession(session({ lastTurnAt: ago(73) }), now, o), "fresh");
-  assert.equal(idleExpired(session({ lastTurnAt: ago(73) }), now, 72), true);
-  assert.equal(idleExpired(session({ lastTurnAt: ago(2) }), now, 72), false);
-  assert.equal(idleExpired(session({}), now, 72), false); // no last turn: nothing to compare
-  assert.equal(idleExpired({ costUsd: 0, lastTurnAt: ago(100) }, now, 72), false); // no session to reset
+  assert.equal(planSession(session({ lastTurnAt: ago(169) }), now, o), "fresh");
+  assert.equal(idleExpired(session({ lastTurnAt: ago(169) }), now, 168), true);
+  assert.equal(idleExpired(session({ lastTurnAt: ago(2) }), now, 168), false);
+  assert.equal(idleExpired(session({}), now, 168), false); // no last turn: nothing to compare
+  assert.equal(idleExpired({ costUsd: 0, lastTurnAt: ago(200) }, now, 168), false); // no session to reset
 });
 
 test("session: quiet compaction waits for the conversation to be still; urgent needs 1.5 times the growth", () => {
