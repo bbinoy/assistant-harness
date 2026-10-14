@@ -1,6 +1,7 @@
-import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { recordCost } from "./budget.ts";
 import { fence } from "./fence.ts";
+import { JudgeSpare } from "./judgespare.ts";
 import { OWNER } from "./settings.ts";
 import type { Source } from "./audit.ts";
 
@@ -120,8 +121,14 @@ export function parseVerdict(out: unknown): Verdict {
 
 type Runner = (prompt: string) => Promise<unknown>;
 
+// Its own warm Haiku (judgespare.ts): the first judgement of a busy stretch starts cold, then a spare is rebuilt after each use,
+// so a run that judges several actions skips the ~3 s start-up. It is dropped after WARM_IDLE_MINUTES unused; WARM=off: always cold.
+const spare = new JudgeSpare("autojudge", OPTIONS);
+
 const realRunner: Runner = async (prompt) => {
-  for await (const m of query({ prompt, options: OPTIONS })) {
+  const { messages } = await spare.run(prompt);
+  setImmediate(() => spare.prepare());
+  for await (const m of messages) {
     if (m.type !== "result") continue;
     recordCost(m.total_cost_usd);
     return m.subtype === "success" && !m.is_error ? m.structured_output : undefined;

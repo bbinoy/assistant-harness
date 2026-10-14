@@ -1,5 +1,6 @@
-import { query, startup, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 
+import { JudgeSpare, type JudgeIO } from "./judgespare.ts";
 import { isModifiable, type Change } from "./policy.ts";
 
 export type Verdict = "approve" | "decline" | "other" | "approve_modified";
@@ -48,30 +49,17 @@ const OPTIONS: Options = {
   },
 };
 
-// A spawned Claude Code process takes ~5s to start. We start one in the
-// background the moment an approval question goes out, so by the time the
-// reply arrives only the model call is left. Each warm process serves one query.
-let spare: Promise<WarmQuery> | undefined;
-
-export function prepareJudge(): void {
-  if (spare) return;
-  spare = startup({ options: OPTIONS });
-  spare.catch((e) => {
-    console.error("judge warm-up failed:", (e as Error).message);
-    spare = undefined;
-  });
-}
-
-export function discardJudge(): void {
-  const s = spare;
-  spare = undefined;
-  s?.then((w) => w.close()).catch(() => {});
-}
+// A spawned Claude Code process takes ~5s to start. We start one in the background the moment an approval question goes out,
+// so by the time the reply arrives only the model call is left. Each warm process serves one query; WARM=off starts cold.
+const judge = new JudgeSpare("judge", OPTIONS);
+export const prepareJudge = (io?: JudgeIO): void => judge.prepare(io);
+export const discardJudge = (): void => judge.discard();
 
 // Fails closed: errors, timeouts and anything but an exact enum value are "other".
 export async function judgeReply(
   reply: string,
   action: { label: string; tool: string; input: Record<string, unknown> },
+  io: JudgeIO = {},
 ): Promise<Judgement> {
   // Long messages are new requests, not answers. Don't spend a call on them.
   if (reply.length > 200) return { verdict: "other" };
@@ -82,19 +70,9 @@ export async function judgeReply(
     : "";
   const prompt = `Action asked about: ${action.label}${args}\nUser reply (JSON string): ${JSON.stringify(reply)}`;
   try {
-    let stream;
-    const warm = spare;
-    spare = undefined; // a warm process is single-use
-    if (warm) {
-      try {
-        stream = (await warm).query(prompt);
-      } catch {
-        stream = undefined;
-      }
-    }
-    stream ??= query({ prompt, options: OPTIONS });
+    const { messages, warm } = await judge.run(prompt, io);
 
-    for await (const message of stream) {
+    for await (const message of messages) {
       if (message.type !== "result") continue;
       const out = message.subtype === "success" && !message.is_error ? message.structured_output : undefined;
       const o = out as { verdict?: unknown; changes?: unknown } | undefined;
