@@ -1,4 +1,5 @@
-import { runHandlerTurn, type Approve } from "./agent.ts";
+import { runHandlerTurn } from "./agent.ts";
+import type { Approve } from "./permissions.ts";
 import { audit } from "./audit.ts";
 import { draftCollector } from "./propose.ts";
 import { overBudget } from "./budget.ts";

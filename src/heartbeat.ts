@@ -14,7 +14,7 @@ import { triageBatch, type MailInput } from "./triage.ts";
 const SEEN = "state/seen.json";
 const LIVENESS = "state/heartbeat.json"; // last tick, for `npm run doctor`
 const SEEN_TTL_MS = 14 * 24 * 3600_000;
-export const BRIEF_SUBJECT = /^\s*[☀🌙]/u; // our own briefs: never triaged
+const BRIEF_SUBJECT = /^\s*[☀🌙]/u; // our own briefs: never triaged
 const FETCH_CONCURRENCY = 4;
 
 interface Seen {
@@ -30,7 +30,7 @@ interface Row {
   lastMessageId: number;
 }
 
-export interface NewMail {
+interface NewMail {
   accountEmail: string;
   conversationId: string;
   messageId: number;
@@ -39,7 +39,7 @@ export interface NewMail {
   receivedAtUtc: string;
 }
 
-export interface HeartbeatHooks {
+interface HeartbeatHooks {
   alert: (text: string) => Promise<void>; // tell the owner something (plain text)
   handle: (items: HandleItem[]) => void; // queue mail for the handler
   briefDue: () => boolean; // today's brief is still due: it will report urgent mail itself
@@ -60,6 +60,15 @@ export function startJobs(jobs: Record<string, () => unknown>): void {
     }
   }
 }
+
+const newMail = (inbox: { email: string }, row: Row): NewMail => ({
+  accountEmail: inbox.email,
+  conversationId: row.conversationId,
+  messageId: row.lastMessageId,
+  from: row.lastSender,
+  subject: row.subject,
+  receivedAtUtc: row.receivedAtUtc,
+});
 
 const seenKey = (m: { conversationId: string; lastMessageId?: number; messageId?: number }) =>
   `${m.conversationId}:${m.lastMessageId ?? m.messageId}`;
@@ -86,14 +95,7 @@ async function checkMail(mb: MailSource) {
       if (seen.keys[key]) continue;
       seen.keys[key] = now;
       if (seeding || BRIEF_SUBJECT.test(row.subject)) continue;
-      fresh.push({
-        accountEmail: inbox.email,
-        conversationId: row.conversationId,
-        messageId: row.lastMessageId,
-        from: row.lastSender,
-        subject: row.subject,
-        receivedAtUtc: row.receivedAtUtc,
-      });
+      fresh.push(newMail(inbox, row));
     }
   }
   for (const [key, ts] of Object.entries(seen.keys)) if (now - ts > SEEN_TTL_MS) delete seen.keys[key];
@@ -285,7 +287,7 @@ export async function triageCheck(mb: MailSource, count: number) {
     const rows = await mb.call<Row[]>("list_conversations", { folderId: inbox.folderId, limit: count });
     for (const r of rows) {
       if (BRIEF_SUBJECT.test(r.subject)) continue;
-      mails.push({ accountEmail: inbox.email, conversationId: r.conversationId, messageId: r.lastMessageId, from: r.lastSender, subject: r.subject, receivedAtUtc: r.receivedAtUtc });
+      mails.push(newMail(inbox, r));
     }
   }
   mails.sort((a, b) => b.receivedAtUtc.localeCompare(a.receivedAtUtc)).splice(count);

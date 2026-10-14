@@ -1,5 +1,5 @@
 import { FILE as OWNER_LOG, recordMessage, ledgerEntries } from "./messages.ts";
-import { ledger } from "./gate.ts";
+import { ledger } from "./ledger.ts";
 import { emptyState, MIN_GAP_MINUTES, nudge, type RadarState } from "./radar-rules.ts";
 import { settings } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";

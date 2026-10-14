@@ -1,6 +1,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { SignalClient, attachmentPath } from "../src/client.ts";
+import { SignalClient } from "../src/client.ts";
+import { attachmentPath } from "../src/envelope.ts";
 import { FakeSignalDaemon, FakeRpcError, type FakeRequest } from "../src/testing.ts";
 
 type Req = FakeRequest;

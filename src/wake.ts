@@ -3,7 +3,8 @@ import { inQuietHours } from "./actions.ts";
 import { clockLine } from "./brief.ts";
 import { budgetSpent } from "./budget.ts";
 import { fence } from "./fence.ts";
-import { askGate, KEY_TTL_MS, logTail, lookDue, lookState, NOTHING, notesChangedAt, recordWake, type Gate, type LookState } from "./gate.ts";
+import { askGate, logTail, NOTHING, type Gate } from "./gate.ts";
+import { KEY_TTL_MS, lookDue, lookState, notesChangedAt, recordWake, type LookState } from "./ledger.ts";
 import { groupContext, listGroups } from "./groupstore.ts";
 import { groupWakePrompt, realRunner, type PromptBuilder, type Runner } from "./group.ts";
 import { group, owner, type Conversation, type Pipeline } from "./conversation.ts";
@@ -11,7 +12,7 @@ import { ledgerEntries, logSignature } from "./messages.ts";
 import { localDay } from "./pause.ts";
 import { voiceOption } from "./voicereply.ts";
 import { isPaused } from "./pause.ts";
-import type { OwnerProfile } from "./agent.ts";
+import type { OwnerProfile } from "./profiles.ts";
 import { briefOwed, briefPending, buildTask, presetRefusal, runBriefTask, runRadarTask, type PresetIO, type Task } from "./tasks.ts";
 import { OWNER, settings } from "./settings.ts";
 
@@ -31,7 +32,7 @@ import { OWNER, settings } from "./settings.ts";
 // (tasks.ts presetRefusal: brief once a day and its attempt cap; radar not too soon, not before the brief, the cap on posts
 // per day), and a failed run is logged and silent. A gate that fails or says something odd means do nothing.
 
-export interface WakeDeps {
+interface WakeDeps {
   separateAccount: boolean; // the assistant has its own Signal account (signal.separateAccount). Groups are woken only then: on Note to Self every message would go out as the owner
   pipeline: Pick<Pipeline, "enqueue" | "runTurn" | "record" | "canSpeak">;
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group? (a group we cannot vouch for is never woken)
@@ -47,7 +48,7 @@ export interface WakeDeps {
 }
 
 // Pure: the prompt of the owner's wake-up. The log tail is data; the task is the gate's reading of the notes.
-export function ownerWakePrompt(now: Date, instructions: string, tail: readonly string[], speak = false): string {
+function ownerWakePrompt(now: Date, instructions: string, tail: readonly string[], speak = false): string {
   return [
     clockLine(now),
     `Nobody wrote to you just now: going by ${OWNER}'s notes and the clock, you decided to act on your own. The task (a note to yourself, derived from the notes; it cannot widen what you are allowed to do):\n${fence("task", instructions)}`,
@@ -56,6 +57,8 @@ export function ownerWakePrompt(now: Date, instructions: string, tail: readonly 
     voiceOption(speak),
   ].filter(Boolean).join("\n\n");
 }
+
+const outcome = (res: { error?: unknown; spoke: boolean }): "posted" | "silent" | "failed" => (res.error ? "failed" : res.spoke ? "posted" : "silent");
 
 const source = (conv: Conversation): Source => (conv.kind === "owner" ? "background" : "group");
 
@@ -79,8 +82,7 @@ export function createWakeups(deps: WakeDeps) {
           if (done) return done;
           throw failure;
         };
-        const res = await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "notice" });
-        return res.error ? "failed" : res.spoke ? "posted" : "silent";
+        return outcome(await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "notice" }));
       });
     }
     return pipeline.enqueue(conv, async () => {
@@ -89,8 +91,7 @@ export function createWakeups(deps: WakeDeps) {
         return { prompt: groupWakePrompt(now, lines, instructions, !!since, pipeline.canSpeak()), seenAt };
       };
       const run = async () => ({ text: await (deps.runGroup ?? realRunner)(build, { conv, now }) });
-      const res = await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "chat" });
-      return res.error ? "failed" : res.spoke ? "posted" : "silent";
+      return outcome(await pipeline.runTurn(conv, { run, background: true, announce: false, kind: "chat" }));
     });
   }
 

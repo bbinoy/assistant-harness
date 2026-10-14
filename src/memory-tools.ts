@@ -1,6 +1,7 @@
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { audit } from "./audit.ts";
+import { undoLatest } from "./dreamapply.ts";
 import { searchLogs } from "./logsearch.ts";
 import { forgetNote } from "./notes.ts";
 import { settings } from "./settings.ts";
@@ -16,7 +17,7 @@ import { settings } from "./settings.ts";
 
 const reply = (text: string, isError = false) => ({ content: [{ type: "text" as const, text }], ...(isError ? { isError: true } : {}) });
 
-export interface MemoryScope {
+interface MemoryScope {
   notesDir: string;
   groupId?: string; // unset: the owner's
   record: (line: string) => void; // a change made through a tool, for the owner's announcement (a group passes a no-op)
@@ -50,7 +51,6 @@ export function createMemoryServer(scope: MemoryScope) {
           : "Put the memory notes back as they were before the latest nightly dream (which merges, adds and drops notes). Only when the OWNER asked to undo it. For a group's notes, pass the group's name. Say in your reply what came back.",
         groupId ? {} : { group: z.string().optional().describe("The group's name, to undo that group's latest dream instead of your own notes") },
         async (args: { group?: string }) => {
-          const { undoLatest } = await import("./dream.ts"); // lazy: dream.ts reaches agent.ts, which imports this file
           const { groupScope, listGroups } = await import("./groupstore.ts");
           let target;
           if (groupId) target = groupScope(groupId);

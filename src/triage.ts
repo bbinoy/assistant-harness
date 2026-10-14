@@ -3,7 +3,7 @@ import { recordCost } from "./budget.ts";
 import { memoryFor } from "./notes.ts";
 import { OWNER } from "./settings.ts";
 
-export type Label = "act_now" | "handle" | "read_later" | "archive";
+type Label = "act_now" | "handle" | "read_later" | "archive";
 export type Kind = "newsletter" | "notification" | "cold_outreach" | "personal_or_work";
 
 export interface Triage {

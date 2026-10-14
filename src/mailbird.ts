@@ -16,7 +16,7 @@ function connectionDetails(): { url: string; headerName: string; headerValue: st
   return { url, headerName: headerName!, headerValue: rest.join(": ") };
 }
 
-export interface Inbox {
+interface Inbox {
   accountId: number;
   email: string;
   senderName: string;

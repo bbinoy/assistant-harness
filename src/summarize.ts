@@ -20,7 +20,7 @@ const OPTIONS: Options = {
 // A fold is ~30% of the log (messages.ts): at 1 MB about 750 messages. This keeps all of them in view (~75k tokens, well inside Haiku's window).
 const MAX_INPUT_CHARS = 300_000;
 
-export const summaryPrompt = (previous: string | undefined, old: readonly Sent[], words: number): string =>
+const summaryPrompt = (previous: string | undefined, old: readonly Sent[], words: number): string =>
   [
     `Summarize in at most ${words} words. ${OWNER} is the owner.`,
     previous ? `Previous summary:\n${fence("previous_summary", previous)}` : "",

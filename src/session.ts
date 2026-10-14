@@ -5,6 +5,9 @@
 //     auto-compacts near the context limit and every turn re-sends the whole history.
 // The decision is a pure function so the boundaries are unit-tested.
 
+// The owner's session pointer; a group's is session.json in its own folder (groupstore.ts).
+export const OWNER_SESSION_FILE = "state/session.json";
+
 export interface ChatSession {
   sessionId?: string;
   costUsd: number; // total_cost_usd is cumulative across a resumed session, so we keep the running total
@@ -16,7 +19,7 @@ export interface ChatSession {
 
 const COMPACT_BACKOFF_MS = 3600_000;
 
-export type SessionPlan = "fresh" | "resume" | "resume then compact";
+type SessionPlan = "fresh" | "resume" | "resume then compact";
 
 // Missing fields (a session.json from before these rules) never trigger anything: resume.
 export function planSession(s: ChatSession, now: Date, opts: { idleResetHours: number; compactTokens: number }): SessionPlan {

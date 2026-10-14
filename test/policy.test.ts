@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { settings } from "../src/settings.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { idsOf } from "../src/agent.ts";
+import { idsOf } from "../src/permissions.ts";
 import { NOTES_DIR } from "../src/notes.ts";
 import { applyChanges, classify, hiddenTools, isReadTool } from "../src/policy.ts";
 

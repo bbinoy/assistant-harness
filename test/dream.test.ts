@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { applyPlan, conversationLines, createDreamer, describePlan, noteContent, planOps, undoLatest, type NoteFile } from "../src/dream.ts";
+import { conversationLines, createDreamer, describePlan } from "../src/dream.ts";
+import { applyPlan, undoLatest } from "../src/dreamapply.ts";
+import { noteContent, planOps, type NoteFile } from "../src/dreamplan.ts";
 import { NOTES_DIR, parseNote } from "../src/notes.ts";
 import { dataPath } from "../src/state.ts";
 import type { Sent } from "../src/messages.ts";

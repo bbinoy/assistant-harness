@@ -15,7 +15,7 @@ import type { Source } from "./audit.ts";
 // we learn how well it agrees with the owner), chat (may auto-approve in chat), broad (also
 // background runs).
 
-export type Mode = "off" | "shadow" | "chat" | "broad";
+type Mode = "off" | "shadow" | "chat" | "broad";
 export type Decision = "auto" | "ask";
 export interface Verdict {
   decision: Decision;
@@ -69,7 +69,7 @@ const OPTIONS: Options = {
   },
 };
 
-export interface JudgeInput {
+interface JudgeInput {
   source: Source;
   description: string; // the action in plain words, built by code from the exact arguments
   ownerMessage?: string; // chat: what the owner just said

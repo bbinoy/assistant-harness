@@ -5,13 +5,13 @@
 // JavaScript string indices). So we strip the markers and record where the
 // styled text ended up.
 
-export type StyleName = "BOLD" | "ITALIC" | "STRIKETHROUGH" | "MONOSPACE";
+type StyleName = "BOLD" | "ITALIC" | "STRIKETHROUGH" | "MONOSPACE";
 export interface Style {
   start: number;
   length: number;
   style: StyleName;
 }
-export interface Rendered {
+interface Rendered {
   text: string;
   styles: Style[];
 }

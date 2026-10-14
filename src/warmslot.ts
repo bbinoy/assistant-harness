@@ -5,11 +5,11 @@
 // A spare is built from ONE conversation's options, so it is handed out only for the same id and the same key (session,
 // prompt, memory index), and never to another conversation.
 
-export interface Closeable {
+interface Closeable {
   close(): void;
 }
 
-export interface SlotOptions {
+interface SlotOptions {
   maxAgeMs: number; // older than this when asked for: not used
   idleMs?: () => number; // dropped this long after it was last put in (0 or unset: kept until replaced or too old)
   now?: () => number;

@@ -10,7 +10,8 @@ import { RateLimitError } from "../src/errors.ts";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildOptions, compactOptions, groupRunOptions } from "../src/agent.ts";
+import { buildOptions, groupRunOptions } from "../src/agent.ts";
+import { compactOptions } from "../src/chatsession.ts";
 import { owner } from "../src/conversation.ts";
 import { NOTES_DIR } from "../src/notes.ts";
 import { GROUPS_DIR, groupKey } from "../src/groupstore.ts";
@@ -317,7 +318,9 @@ test("groups: membership comes from the member list, is remembered, and fails cl
 
 // ---- the group's own notes and history (groupstore.ts) ----
 import { readFileSync as readFile, rmSync } from "node:fs";
-import { applyPlan, groupConversation, planOps, undoLatest } from "../src/dream.ts";
+import { applyPlan, undoLatest } from "../src/dreamapply.ts";
+import { groupConversation } from "../src/dream.ts";
+import { planOps } from "../src/dreamplan.ts";
 import { forgetNote } from "../src/notes.ts";
 import { groupContext, groupDir, groupLogFile, groupNotesBlock, groupScope, listGroups, searchGroupHistory } from "../src/groupstore.ts";
 import { readNotes } from "../src/notes.ts";

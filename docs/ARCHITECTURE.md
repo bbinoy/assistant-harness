@@ -128,7 +128,12 @@ packages/signal/     @ted-personal-assistant/signal: signal-cli JSON-RPC client,
 src/markdown.ts      Markdown → Signal text styles (UTF-16 offsets)
 src/outbound.ts      sending, chunking, echo guard
 src/guards.ts        owner allowlist (pure, tested)
-src/agent.ts         Agent SDK runs: chat / brief / handler, permission callback
+src/agent.ts         Agent SDK runs: chat / group / brief / handler, the options of a run, the warm processes
+src/profiles.ts      the run profiles (brief, radar, background, group) and the skills offered
+src/permissions.ts   the permission callback (policy, judge, approval) and its hooks to main
+src/chatsession.ts   when a conversation's session resumes, and compacting it in place
+src/memorynotice.ts  the note changes of a chat turn and the one notice about them
+src/toolsseen.ts    tool names runs have seen (so unused ones are hidden)
 src/policy.ts        allow / ask / deny + edit-and-approve rules (pure, tested)
 src/approvals.ts     open approvals: words, judge, reactions
 src/judge.ts         constrained Haiku judge for free-text approval replies
@@ -154,12 +159,15 @@ src/summarize.ts     the small model that writes that summary
 src/conversation.ts  the one pipeline for the private chat and every group: read receipt, voice in/out, record, run, [[react]]/[[voice]]/[[silent]], quote threading, typing, error notice, a serial queue per conversation. A conversation is data made only by owner() and group(id)
 src/timing.ts        the per-turn timing line (durations only)
 src/warmslot.ts      the slot that holds one warm model process (the owner's, and one for the group that spoke last)
-src/gate.ts          the one gate (message or clock): prompt, strict parsing, the wake/action ledger in the log
+src/gate.ts          the one gate (message or clock): prompt, strict parsing
+src/ledger.ts        the wake/action ledger in the log: look state, when a look is due, the clamped next look
 src/wake.ts          the clock side: on each tick wake the conversations that are due, with the code guards
 src/group.ts         group chats: a participant with no private data; a cheap gate judges every message and reaction, always answers when addressed; its prompt (unseen messages prepended to a resumed session)
 src/groupstore.ts    a group's own notes folder and history, in the same formats as the owner's but in separate folders; what a run is shown of the log
 src/voicereply.ts    the [[voice]] marker and the voice option offered with every prompt when speech is set up: the model chooses to answer by voice and is told to write the words for the ear (short sentences, numbers, dates and symbols spelled out as spoken, never any emoji: done by the model's instructions, never by rewriting code). The speech engine is chosen by `TTS_PROVIDER` (packages/signal/src/tts-provider.ts): Kokoro (tts.ts, local, the default) or an optional remote one, each a small file with plain `fetch` and a timeout: tts-elevenlabs.ts, tts-http.ts (contract in docs/REMOTE-TTS.md), sharing tts-remote.ts (https check, audio sniffing, the same ffmpeg step); any failure throws and the reply goes out as text, unless `TTS_FALLBACK=kokoro`; `TTS_VOICE` picks the Kokoro voice, `TTS_SPEED` the pace
-src/dream.ts         the nightly dream: proposals as JSON, what code applies, snapshots and undo (pure core, tested)
+src/dream.ts         the nightly dream: prompts, the model run, the daily run
+src/dreamplan.ts     which proposals may be applied (pure, tested)
+src/dreamapply.ts    snapshots, applying a plan, undo
 src/connectors.ts    which connectors (Notion, Calendar, mail) the last run could see
 src/notes.ts         the owner's notes: how background runs read them, path guard, forget (pure core, tested)
 src/memory-tools.ts  `forget_note`, `search_logs`, `undo_dream`: one in-process MCP server per conversation, scoped to it
@@ -174,7 +182,8 @@ src/config.ts        required secrets and the owner's number, read from .env
 src/log.ts           redacting, rotating agent.log; first-start migration and permissions
 src/pause.ts         the pause switch and local-day helper
 src/redact.ts        keeps phone numbers and credentials out of logs
-src/cli.ts           doctor / report / restore / triage-check
+src/cli.ts           report / restore / triage-check
+src/doctor.ts        `npm run doctor`
 plugin/skills/       the skills the agent works with (daily-brief, mailbird, calendar, notion-tasks, meeting-prep, setup...), loaded straight from here
 test/                unit tests (node:test)
 scripts/             launchd install, secrets scanner, voice-samples.ts (renders one text in several voice variants, sent to the owner's private chat only)

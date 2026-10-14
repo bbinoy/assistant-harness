@@ -1,93 +1,34 @@
-import { AuthError, failure, RateLimitError } from "./errors.ts";
-import { sendApprovalText, type DraftView } from "./proposals.ts";
-import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
-import { RADAR_SCHEMA } from "./radar-rules.ts";
-import { basename } from "node:path";
-import { isJudgeable, judgeAction, mayAutoApprove, type Verdict } from "./autojudge.ts";
 import { readFileSync } from "node:fs";
-import type { Conversation } from "./conversation.ts";
-import { userInput, type Picture } from "./image.ts";
-import { query, startup, type CanUseTool, type HookCallbackMatcher, type Options, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
-import type { Decision } from "./approvals.ts";
-import { audit, type Source } from "./audit.ts";
+import { query, startup, type HookCallbackMatcher, type Options, type SDKMessage, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
+import type { Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
-import { describeCall } from "./format.ts";
+import { chatResume, type Resume } from "./chatsession.ts";
 import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
-import { isIndex, isNotePath, type Category, LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, parseNote, readNotes } from "./notes.ts";
+import type { Conversation } from "./conversation.ts";
+import { failure } from "./errors.ts";
+import { userInput, type Picture } from "./image.ts";
 import { createMemoryServer } from "./memory-tools.ts";
+import { announceMemoryChanges, noteWritten, recordMemoryChange } from "./memorynotice.ts";
+import { LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, readNotes } from "./notes.ts";
+import { DENY_ALL, makeCanUseTool, setChatOwnerMessage, type Approve } from "./permissions.ts";
 import { backgroundSystem, briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem } from "./persona.ts";
-import { classify, hiddenTools, isReadTool } from "./policy.ts";
+import { hiddenTools } from "./policy.ts";
+import { OFFERED_SKILLS, PROFILES, type OwnerProfile } from "./profiles.ts";
+import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
 import { recentNotices } from "./messages.ts";
-import { splitReaction } from "./reaction.ts";
-import { OWNER, settings } from "./settings.ts";
-import { planSession, type ChatSession } from "./session.ts";
-import { readJson, readText, writeJson } from "./state.ts";
+import { OWNER_SESSION_FILE, type ChatSession } from "./session.ts";
+import { settings } from "./settings.ts";
+import { readText, writeJson } from "./state.ts";
+import { recordToolsSeen, toolsSeen } from "./toolsseen.ts";
 import { SpareSlot } from "./warmslot.ts";
 
-// Thrown when the credential is rejected, so the caller can tell the owner how to fix it
-// instead of showing a generic failure.
-export { AuthError, RateLimitError };
-
-// Pulls id-like fields (id, conversationId, messageId...) out of tool input for the audit log.
-export function idsOf(input: Record<string, unknown>): Record<string, unknown> | undefined {
-  const ids = Object.fromEntries(
-    Object.entries(input).filter(([k, v]) => /(^id$|Id$)/.test(k) && (typeof v === "string" || typeof v === "number")),
-  );
-  return Object.keys(ids).length ? { ids } : undefined;
-}
-
-export interface AgentReply {
+interface AgentReply {
   text: string;
   costUsd: number;
   structured?: unknown; // the run's constrained JSON output, when it asked for one
 }
 
-export type Approve = (
-  description: string,
-  call: { tool: string; input: Record<string, unknown> },
-  signal: AbortSignal,
-) => Promise<Decision>;
-
-// Every conversation (the owner's chat, each group) persists across restarts, with the hygiene rules in
-// session.ts (fresh after idle, compacted when large). total_cost_usd is cumulative across a resumed
-// session, so we keep the running total and report each turn's delta. The owner's session pointer is
-// state/session.json; a group's is session.json in its own folder (conversation.ts).
-const SESSION_FILE = "state/session.json";
-
-// Note changes made during the current chat turn. They are announced ONCE, as one short
-// message when the turn ends (consume), not one per tool call. Chat is serial, so a
-// module-level list is safe.
-const memoryChanges: string[] = [];
-
-// Pure: true when the reply has no words of its own, so a memory change would otherwise go unmentioned.
-export const needsMemoryNotice = (reply: string) => splitReaction(reply).text.trim() === "";
-
-// Tool names runs have seen, so policy.hiddenTools() can hide the unused ones by name.
-// Seeded with Notion's and Mailbird's current tools, so even the very first run is trimmed.
-const TOOLS_SEEN = "state/tools-seen.json";
-const NOTION_NAMES = "ai-search check-mcp-next-steps convert-page-to-skill create-attachment create-comment create-database create-file-upload create-folder create-view download-attachment download-skill duplicate-page get-async-task get-comments get-session-status get-teams get-tool-access get-users list-favorite-pages list-private-pages list-recent-pages list-session-events list-shared-pages move-pages query-data-sources query-meeting-notes query-multiple-data-sources query-sessions read-session-event search-agents search-sessions send-message-to-session show-advanced-analysis-next-steps spawn-session stop-session update-data-source update-folder update-view upload-skill wait-session"
-  .split(" ")
-  .map((t) => `mcp__claude_ai_Notion__notion-${t}`);
-const MAILBIRD_NAMES = "archive_conversation copy_conversation create_draft delete_conversation_permanently discard_draft forward_conversation get_attachment_content get_conversation get_help get_message get_send_status get_ui_state list_accounts list_attachments list_conversations list_folders mark_all_as_read move_conversation move_conversation_to_inbox reply_all_to_conversation reply_to_conversation search_conversations select_conversation send_message_now send_self_briefing set_conversation_important set_conversation_read set_conversation_spam set_conversation_starred set_sender_blocked show_notification snooze_conversation summarize_all_inboxes trash_conversation unsubscribe_from_newsletter update_draft"
-  .split(" ")
-  .map((t) => `mcp__mailbird__${t}`);
-const SEED = [...NOTION_NAMES, ...MAILBIRD_NAMES];
-const toolsSeen = () => readJson<string[]>(TOOLS_SEEN, SEED);
-function recordToolsSeen(tools: readonly string[]) {
-  const known = toolsSeen();
-  const added = tools.filter((t) => t.startsWith("mcp__") && !known.includes(t));
-  if (added.length) writeJson(TOOLS_SEEN, [...known, ...added]);
-}
-
-// What the owner just said in chat, for the approval judge. A module-level value because the warm
-// chat process is built before the message arrives; chat turns run one at a time.
-let chatOwnerMessage: string | undefined;
-
-// Where "done without asking" notices go (set by main).
-let autoApprovedNotice: ((text: string) => Promise<void>) | undefined;
-export const setAutoApprovedNotice = (fn: (text: string) => Promise<void>) => void (autoApprovedNotice = fn);
-
-export interface RunOptions {
+interface RunOptions {
   source: Source; // audit tag: who is acting
   systemPrompt: string;
   sessionFile?: string; // chat and groups: continue + save the conversation here; brief and the rest: fresh every run
@@ -108,39 +49,8 @@ export interface RunOptions {
 const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }) =>
   (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
 
-const chatPlanOpts = () => ({ idleResetHours: settings.chatIdleResetHours, compactTokens: settings.chatCompactTokens });
-
 const down = () => disconnected(readConnectors());
-// The only skills the model can load. The SDK enforces this list (anything else is refused with
-// "not in this session's skills allowlist"); Skill calls never reach canUseTool.
-const OFFERED_SKILLS = ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].map((s) => `ted-personal-assistant:${s}`);
 
-// ---- run profiles ----
-// HOW a run is allowed to work, fixed in code and named: the policy source (policy.ts: which tools are allowed, asked,
-// denied), the system prompt, the skills offered, the turn and budget limits and the output schema. A Task (tasks.ts)
-// names one; the gate can choose a task but never edit a profile. `notes` are the note categories injected as data.
-export type ProfileName = "brief" | "radar" | "background" | "group";
-export interface RunProfile {
-  readonly source: Source;
-  readonly maxTurns: number;
-  readonly maxBudgetUsd: number;
-  readonly skills: readonly string[];
-  readonly outputSchema?: Options["outputFormat"];
-  readonly notes: readonly Category[];
-}
-export const PROFILES: Readonly<Record<ProfileName, RunProfile>> = {
-  // Unattended daily brief: a fresh session each run, a bigger budget, no banter.
-  brief: { source: "brief", maxTurns: 120, maxBudgetUsd: 5.0, skills: OFFERED_SKILLS, notes: ["triage", "people", "scheduling", "context", "brief", "style", "setup", "voice"] },
-  // The proactive radar: a fresh session each time; it answers with constrained JSON.
-  radar: { source: "radar", maxTurns: 30, maxBudgetUsd: 1.0, skills: OFFERED_SKILLS, outputSchema: RADAR_SCHEMA, notes: ["people", "scheduling", "context", "style", "brief", "setup", "voice"] },
-  // An unprompted free-form run in the owner's chat (a wake-up): the radar's rights (reads; anything else asks on the phone),
-  // web search allowed (page fetches ask), no memory tools (policy.ts, source "background").
-  background: { source: "background", maxTurns: 20, maxBudgetUsd: 1.0, skills: OFFERED_SKILLS, notes: ["people", "scheduling", "context", "style", "brief", "setup", "voice"] },
-  // A group's run: its own resumed session, its own notes folder as memory, nothing of the owner's (policy source "group").
-  group: { source: "group", maxTurns: 8, maxBudgetUsd: 0.5, skills: OFFERED_SKILLS, notes: [] },
-};
-
-export type OwnerProfile = Exclude<ProfileName, "group">;
 function profileSystem(name: OwnerProfile): string {
   const notes = memoryFor(PROFILES[name].notes);
   const missing = missingSetup(readNotes(), down());
@@ -148,7 +58,7 @@ function profileSystem(name: OwnerProfile): string {
 }
 
 // The options of an owner profile's run (a fresh session).
-export function profileOptions(name: OwnerProfile, extra: { onToolSuccess?: RunOptions["onToolSuccess"] } = {}): RunOptions {
+function profileOptions(name: OwnerProfile, extra: { onToolSuccess?: RunOptions["onToolSuccess"] } = {}): RunOptions {
   const p = PROFILES[name];
   return { source: p.source, systemPrompt: profileSystem(name), skills: p.skills, maxTurns: p.maxTurns, maxBudgetUsd: p.maxBudgetUsd, outputFormat: p.outputSchema, onToolSuccess: extra.onToolSuccess };
 }
@@ -157,99 +67,11 @@ export function profileOptions(name: OwnerProfile, extra: { onToolSuccess?: RunO
 export const runProfile = (name: OwnerProfile, prompt: string, approve: Approve, extra: { onToolSuccess?: RunOptions["onToolSuccess"] } = {}): Promise<AgentReply> =>
   runAgent(prompt, approve, profileOptions(name, extra));
 
-interface Resume {
-  resume?: string; // session to continue (chat only)
-  previousCost: number; // total_cost_usd is cumulative across a resumed session
-  seenAt?: string;
-}
-
-// A conversation continues its saved session unless session.ts says to start fresh.
-function chatResume(announce: boolean, file: string = SESSION_FILE, source: Source = "chat"): Resume {
-  const saved = readJson<ChatSession>(file, { costUsd: 0 });
-  // A fresh session starts its cost total at zero, so the previous total must not be subtracted.
-  if (planSession(saved, new Date(), chatPlanOpts()) === "fresh") {
-    if (announce && saved.sessionId) {
-      console.log(`${source}: idle for more than ${settings.chatIdleResetHours}h, starting a fresh session`);
-      audit("chat_session", "idle-reset", source);
-    }
-    return { previousCost: 0 };
-  }
-  return { resume: saved.sessionId, previousCost: saved.costUsd, seenAt: saved.seenAt };
-}
-
-const SEND_DRAFT = "mcp__mailbird__send_message_now";
-let draftReader: ((messageId: number) => Promise<DraftView | undefined>) | undefined;
-// Set by main.ts: reads a draft back from Mailbird, for the approval of a send.
-export const setDraftReader = (fn: typeof draftReader) => void (draftReader = fn);
-
 export function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
-  // Permissions as code: policy.ts decides allow / ask / deny; "ask" goes to the owner's phone.
-  const canUseTool: CanUseTool = async (tool, input, { signal }) => {
-    const verdict = classify(tool, input, opts.source, opts.memory?.dir);
-    if (verdict === "allow") {
-      // Reads log tool + decision only. Writes also log the ids they touch (ids, never
-      // content), so "what did it archive?" can always be answered from the audit log.
-      audit(tool, "allow", opts.source, isReadTool(tool) ? undefined : idsOf(input));
-      return { behavior: "allow", updatedInput: input };
-    }
-    if (verdict === "deny") {
-      audit(tool, "deny-policy", opts.source);
-      return { behavior: "deny", message: `${tool} is blocked by policy (or its input is) and cannot be used.` };
-    }
-    // A small model's second opinion, only for what code puts on the floor (autojudge.ts). In shadow
-    // mode it only logs; the owner is asked either way.
-    let description = describeCall(tool, input);
-    if (tool === SEND_DRAFT) {
-      // Show what Mailbird holds right now, not what the model says it is sending. If that cannot
-      // be read, the owner would be approving blind, so the send does not happen.
-      const id = Number((input as { messageId?: unknown }).messageId);
-      const view = draftReader && Number.isFinite(id) ? await draftReader(id).catch(() => undefined) : undefined;
-      if (!view || view.to.length === 0) {
-        audit(tool, "deny-unreadable-draft", opts.source);
-        return { behavior: "deny", message: "That draft could not be read back from Mailbird, so it cannot be shown for approval and was not sent." };
-      }
-      description = sendApprovalText(view);
-    }
-    let judged: Verdict | undefined;
-    if (settings.autoApprove !== "off" && isJudgeable(tool, input, opts.source)) {
-      judged = await judgeAction({ source: opts.source, description, ownerMessage: opts.source === "chat" ? chatOwnerMessage : undefined });
-      audit(tool, `judge-${judged.decision}`, opts.source, { reason: judged.reason, mode: settings.autoApprove });
-      if (mayAutoApprove(settings.autoApprove, opts.source, judged)) {
-        audit(tool, "auto-approved", opts.source, { reason: judged.reason });
-        void autoApprovedNotice?.(`✅ Done without asking: ${description.replace(/\n+/g, " | ").slice(0, 300)}`).catch(() => {});
-        return { behavior: "allow", updatedInput: input };
-      }
-    }
-    audit(tool, "ask-sent", opts.source); // logged before the wait, so a stuck approval is visible
-    const d = await approve(description, { tool, input }, signal);
-    if (judged) audit(tool, "judge-vs-owner", opts.source, { judge: judged.decision, ownerApproved: d.approved });
-    audit(
-      tool,
-      d.approved ? (d.updatedInput ? "ask-approved-modified" : "ask-approved") : d.feedback ? "ask-feedback" : "ask-declined",
-      opts.source,
-    );
-    if (d.approved) return { behavior: "allow", updatedInput: d.updatedInput ?? input };
-    return {
-      behavior: "deny",
-      message: d.feedback
-        ? `${OWNER} did NOT approve this call. Instead they replied: ${JSON.stringify(d.feedback)}. Act on that reply. If it changes the request, propose the adjusted call; do not repeat the original unchanged.`
-        : `${OWNER} declined, or did not answer in time. Do not retry.`,
-    };
-  };
-
   // After a successful tool call: announce a note change on the phone (chat), and report the
   // call to whoever asked (the brief captures what it sent).
   const afterTool = async (tool: string, input: Record<string, unknown>, response?: unknown) => {
-    if (opts.memory?.notify && (tool === "Write" || tool === "Edit") && isNotePath(input.file_path) && !isIndex(input.file_path)) {
-      const file = basename(input.file_path);
-      const written = String((tool === "Write" ? input.content : input.new_string) ?? "");
-      const body = parseNote(file, written)?.text ?? written.trim();
-      audit("memory_note", tool === "Write" ? "written" : "edited", "chat");
-      // The note's own description says what it is; fall back to its first line.
-      const described = /^description:\s*["']?(.+?)["']?\s*$/m.exec(written.split(/\n---\n/)[0] ?? "")?.[1];
-      const gist = (described ?? body.split("\n")[0]!).slice(0, 160);
-      memoryChanges.push(`${tool === "Write" ? "➕ saved" : "✏️ updated"} ${file}: ${gist}`);
-    }
+    if (opts.memory?.notify) noteWritten(tool, input);
     if (changesCalendar(tool)) nudgeRadar();
     opts.onToolSuccess?.(tool, input, response);
   };
@@ -286,7 +108,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
       ? { type: "preset", preset: "claude_code", append: opts.systemPrompt, snapshot: false }
       : { type: "custom", prompt: opts.systemPrompt, snapshot: false },
     settings: opts.memory ? { autoMemoryEnabled: true, autoMemoryDirectory: opts.memory.dir } : { autoMemoryEnabled: false },
-    mcpServers: opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? (line) => memoryChanges.push(line) : () => {} }) } : undefined,
+    mcpServers: opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : undefined,
     strictMcpConfig: isolated || undefined, // nothing private is even loaded
     resume,
     // Built-ins: Skill, and for chat Read / Write / Edit (confined to the notes folder by
@@ -302,7 +124,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     plugins: isolated ? undefined : [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
     skills: isolated ? undefined : (opts.skills ? [...opts.skills] : OFFERED_SKILLS),
     disallowedTools: isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
-    canUseTool,
+    canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir),
     hooks,
     maxTurns: opts.maxTurns,
     maxBudgetUsd: opts.maxBudgetUsd,
@@ -311,7 +133,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
 
 // The stream yields many message types (system, assistant, tool use...).
 // The one we want is the single "result" message that ends the turn.
-async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-sdk").SDKMessage>, opts: RunOptions, previousCost: number): Promise<AgentReply> {
+async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOptions, previousCost: number): Promise<AgentReply> {
   let lastError: string | undefined;
   let first = false;
   let lastContext: number | undefined; // the last model call of the main loop shows how big the context is
@@ -326,15 +148,7 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
       if (!message.parent_tool_use_id) lastContext = contextTokens(message.message.usage);
     }
     if (message.type !== "result") continue;
-    if (opts.memory?.notify && memoryChanges.length) {
-      const lines = memoryChanges.splice(0);
-      // The assistant's own reply says what it saved or forgot, and that is the one message. Only if
-      // it answered with no words (a bare reaction, or nothing) is a short notice sent instead, so a
-      // change never goes unmentioned.
-      if (needsMemoryNotice(message.subtype === "success" ? message.result : "")) {
-        void opts.memory.notify(`🧠 Memory\n${lines.join("\n")}\nWrong? Tell me to undo it.`).catch(() => {});
-      }
-    }
+    if (opts.memory?.notify) announceMemoryChanges(opts.memory.notify, message.subtype === "success" ? message.result : "");
     if (opts.sessionFile) {
       const next: ChatSession = { sessionId: message.session_id, costUsd: message.total_cost_usd, lastTurnAt: new Date().toISOString(), lastContextTokens: lastContext, ...(opts.seenAt ? { seenAt: opts.seenAt } : {}) };
       writeJson(opts.sessionFile, next);
@@ -348,32 +162,9 @@ async function consume(stream: AsyncIterable<import("@anthropic-ai/claude-agent-
   throw new Error("agent stream ended without a result");
 }
 
-export async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Promise<AgentReply> {
+async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Promise<AgentReply> {
   const { resume, previousCost } = opts.sessionFile ? chatResume(true, opts.sessionFile) : { resume: undefined, previousCost: 0 };
   return consume(query({ prompt, options: buildOptions(approve, opts, resume) }), opts, previousCost);
-}
-
-// A group turn: the group's own resumed session, memory (its notes folder) and tools. `build` makes the prompt
-// once it is known whether the session resumes: a resumed one is told only what it has not seen (group.ts).
-// Groups are bursty and many, so there is no warm process per group: one is kept for the group that spoke last (below).
-export const groupRunOptions = (conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, systemPrompt: string): RunOptions => ({
-  source: PROFILES.group.source,
-  systemPrompt,
-  sessionFile: conv.sessionFile,
-  memory: { dir: conv.notesDir, groupId: conv.groupId },
-  skills: PROFILES.group.skills,
-  maxTurns: PROFILES.group.maxTurns,
-  maxBudgetUsd: PROFILES.group.maxBudgetUsd,
-});
-
-export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}): Promise<AgentReply> {
-  const r = chatResume(true, conv.sessionFile, "group");
-  const { prompt, seenAt, pictures } = build(r.resume ? r.seenAt : undefined);
-  const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
-  // The group's own warm process, if it is the one kept and nothing it was built from has changed (same group, session, prompt, notes index).
-  const warm = conv.groupId ? await groupSpare.take(conv.groupId, spareKey(conv.groupId, o, r))?.catch((e: Error) => console.error("group: warm process unavailable, starting normally:", e.message)) : undefined;
-  if (warm) return consume(warm.query(userInput(prompt, pictures)), o, r.previousCost);
-  return consume((io.query ?? query)({ prompt: userInput(prompt, pictures), options: buildOptions(DENY_ALL, o, r.resume) }), o, r.previousCost);
 }
 
 // --- warm processes for the next message ---
@@ -385,7 +176,6 @@ export async function runGroupTurn(conv: Pick<Conversation, "notesDir" | "sessio
 const SPARE_MAX_AGE_MS = 30 * 60_000;
 const spare = new SpareSlot<WarmQuery>({ maxAgeMs: SPARE_MAX_AGE_MS });
 const groupSpare = new SpareSlot<WarmQuery>({ maxAgeMs: SPARE_MAX_AGE_MS, idleMs: () => settings.groupWarmIdleMinutes * 60_000 });
-const DENY_ALL: Approve = async () => ({ approved: false }); // a group run never asks the owner for anything
 
 const memoryIndex = (dir: string) => {
   try {
@@ -396,48 +186,81 @@ const memoryIndex = (dir: string) => {
 };
 const spareKey = (id: string, o: RunOptions, r: Resume) => JSON.stringify([id, r.resume ?? "", o.systemPrompt, o.memory?.dir ?? "", memoryIndex(o.memory?.dir ?? NOTES_DIR)]);
 
-export function prepareChat(approve: Approve, notify: (text: string) => Promise<void>): void {
-  const o = chatOptions(notify);
-  const r = chatResume(false);
-  const warm = startup({ options: buildOptions(approve, o, r.resume) });
-  warm.catch((e) => console.error("chat warm-up failed:", (e as Error).message));
-  spare.put("owner", spareKey("owner", o, r), warm); // replaces (and closes) the previous one
+// Starts the next process for a conversation and keeps it as the slot's spare (replacing, and closing, the previous one).
+function warmUp(slot: SpareSlot<WarmQuery>, id: string, o: RunOptions, r: Resume, label: string, approve: Approve, start: typeof startup = startup): void {
+  const warm = start({ options: buildOptions(approve, o, r.resume) });
+  warm.catch((e) => console.error(`${label} warm-up failed:`, (e as Error).message));
+  slot.put(id, spareKey(id, o, r), warm);
 }
 
-// Keep ONE warm process for the group that spoke last, replacing another group's. Called when a message arrives for a
-// group that may be answered (not if it already holds a fresh one), and after each of its turns (`force`: the session moved on).
-// Nothing happens with GROUP_WARM=off.
-export function prepareGroupChat(conv: Pick<Conversation, "notesDir" | "sessionFile" | "groupId">, style: () => string, opts: { force?: boolean; start?: typeof startup } = {}): void {
-  const id = conv.groupId;
-  if (!settings.groupWarm || !id) return;
-  if (!opts.force && groupSpare.has(id)) return void groupSpare.touch(id); // active group, already warm: keep it so
-  const o = groupRunOptions(conv, groupSystem({ style: style() }));
-  const r = chatResume(false, conv.sessionFile, "group");
-  const warm = (opts.start ?? startup)({ options: buildOptions(DENY_ALL, o, r.resume) });
-  warm.catch((e) => console.error("group warm-up failed:", (e as Error).message));
-  groupSpare.put(id, spareKey(id, o, r), warm);
+// One turn: on the slot's warm process when it still fits, else a cold start. A warm process serves one query; one that no
+// longer fits is closed. Fall back only if it never came up: once the turn has started, an error is the turn's error, and
+// running it again could repeat what it already did.
+async function runWarmOrCold(slot: SpareSlot<WarmQuery>, id: string | undefined, o: RunOptions, r: Resume, label: string, input: ReturnType<typeof userInput>, cold: () => AsyncIterable<SDKMessage>): Promise<AgentReply> {
+  const warm = id ? await slot.take(id, spareKey(id, o, r))?.catch((e: Error) => console.error(`${label}: warm process unavailable, starting normally:`, e.message)) : undefined;
+  return consume(warm ? warm.query(input) : cold(), o, r.previousCost);
 }
+
+// ---- the owner's chat ----
 
 const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
   source: "chat",
   systemPrompt: chatSystem(readText(LAST_BRIEF), new Date(), missingSetup(readNotes(), down()), down(), recentNotices()),
-  sessionFile: SESSION_FILE,
+  sessionFile: OWNER_SESSION_FILE,
   memory: { dir: NOTES_DIR, notify },
   maxTurns: 40,
   maxBudgetUsd: 2.0, // a cold prompt cache alone can cost most of a dollar
 });
 
+export function prepareChat(approve: Approve, notify: (text: string) => Promise<void>): void {
+  warmUp(spare, "owner", chatOptions(notify), chatResume(false), "chat", approve);
+}
+
 // Interactive chat: resumes the persistent conversation, on the warm process when it fits.
 export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void }): Promise<AgentReply> {
-  chatOwnerMessage = ownerMessage ?? prompt;
+  setChatOwnerMessage(ownerMessage ?? prompt);
   const o = { ...chatOptions(notify), onFirstOutput: hooks?.firstOutput };
   const r = chatResume(true);
-  // A warm process serves one query; one that no longer fits is closed. Fall back only if it never came up: once the turn
-  // has started, an error is the turn's error, and running it again could repeat what it already did.
-  const warm = await spare.take("owner", spareKey("owner", o, r))?.catch((e: Error) => console.error("chat: warm process unavailable, starting normally:", e.message));
-  if (warm) return consume(warm.query(userInput(prompt, pictures)), o, r.previousCost);
-  return consume(query({ prompt: userInput(prompt, pictures), options: buildOptions(approve, o, r.resume) }), o, r.previousCost);
+  const input = userInput(prompt, pictures);
+  return runWarmOrCold(spare, "owner", o, r, "chat", input, () => query({ prompt: input, options: buildOptions(approve, o, r.resume) }));
 }
+
+// ---- a group's chat ----
+
+// A group turn: the group's own resumed session, memory (its notes folder) and tools.
+// Groups are bursty and many, so there is no warm process per group: one is kept for the group that spoke last (above).
+type GroupConv = Pick<Conversation, "notesDir" | "sessionFile" | "groupId">;
+export const groupRunOptions = (conv: GroupConv, systemPrompt: string): RunOptions => ({
+  source: PROFILES.group.source,
+  systemPrompt,
+  sessionFile: conv.sessionFile,
+  memory: { dir: conv.notesDir, groupId: conv.groupId },
+  skills: PROFILES.group.skills,
+  maxTurns: PROFILES.group.maxTurns,
+  maxBudgetUsd: PROFILES.group.maxBudgetUsd,
+});
+
+// `build` makes the prompt once it is known whether the session resumes: a resumed one is told only what it has not seen (group.ts).
+export async function runGroupTurn(conv: GroupConv, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}): Promise<AgentReply> {
+  const r = chatResume(true, conv.sessionFile, "group");
+  const { prompt, seenAt, pictures } = build(r.resume ? r.seenAt : undefined);
+  const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
+  const input = userInput(prompt, pictures);
+  // The group's own warm process, if it is the one kept and nothing it was built from has changed (same group, session, prompt, notes index).
+  return runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, () => (io.query ?? query)({ prompt: input, options: buildOptions(DENY_ALL, o, r.resume) }));
+}
+
+// Keep ONE warm process for the group that spoke last, replacing another group's. Called when a message arrives for a
+// group that may be answered (not if it already holds a fresh one), and after each of its turns (`force`: the session moved on).
+// Nothing happens with GROUP_WARM=off.
+export function prepareGroupChat(conv: GroupConv, style: () => string, opts: { force?: boolean; start?: typeof startup } = {}): void {
+  const id = conv.groupId;
+  if (!settings.groupWarm || !id) return;
+  if (!opts.force && groupSpare.has(id)) return void groupSpare.touch(id); // active group, already warm: keep it so
+  warmUp(groupSpare, id, groupRunOptions(conv, groupSystem({ style: style() })), chatResume(false, conv.sessionFile, "group"), "group", DENY_ALL, opts.start);
+}
+
+// ---- the other owner runs ----
 
 // The owner profiles, as before (the legacy scheduler and the gate's presets both go through runProfile).
 export const runBriefTurn = (prompt: string, approve: Approve, onToolSuccess: (tool: string, input: unknown) => void): Promise<AgentReply> => runProfile("brief", prompt, approve, { onToolSuccess });
@@ -452,49 +275,4 @@ export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?:
     maxBudgetUsd: 2.0,
     onToolSuccess,
   });
-}
-
-// The options of the /compact run. A group's session was built under the group's isolation (buildOptions: no user settings,
-// no connectors, no skills or plugins, auto-memory = its own notes folder), and its compaction must load nothing more than
-// that: it is the same session, resumed. The owner's compaction is unchanged.
-export function compactOptions(sessionId: string | undefined, source: Source, notesDir?: string): Options {
-  const isolated = source === "group";
-  return {
-    model: settings.model,
-    resume: sessionId,
-    tools: [],
-    settingSources: [],
-    ...(isolated ? { strictMcpConfig: true, settings: notesDir ? { autoMemoryEnabled: true, autoMemoryDirectory: notesDir } : { autoMemoryEnabled: false } } : {}),
-    maxTurns: 2,
-    maxBudgetUsd: 1.0,
-    canUseTool: async () => ({ behavior: "deny", message: "No tools during compaction." }),
-  };
-}
-
-// After a turn has been answered (any conversation, `file` is its session): if its context grew past
-// CHAT_COMPACT_TOKENS, compact the session in place by sending the SDK's own /compact command on the resumed
-// session. Called from the conversation's serial queue, so the next message waits. Never throws.
-export async function compactChatIfNeeded(file: string = SESSION_FILE, source: Source = "chat", notesDir?: string): Promise<void> {
-  try {
-    const saved = readJson<ChatSession>(file, { costUsd: 0 });
-    if (planSession(saved, new Date(), chatPlanOpts()) !== "resume then compact") return;
-    console.log(`${source}: context is ${saved.lastContextTokens} tokens, compacting`);
-    let boundary: { pre_tokens: number; post_tokens?: number } | undefined;
-    for await (const message of query({ prompt: "/compact", options: compactOptions(saved.sessionId, source, notesDir) })) {
-      if (message.type === "system" && message.subtype === "compact_boundary") boundary = message.compact_metadata;
-      if (message.type !== "result") continue;
-      recordCost(message.total_cost_usd - saved.costUsd);
-      if (!boundary) throw new Error(`/compact produced no compact_boundary (${message.subtype})`);
-      const { compactFailedAt: _cleared, ...rest } = saved;
-      writeJson(file, { ...rest, sessionId: message.session_id, costUsd: message.total_cost_usd, lastContextTokens: boundary.post_tokens });
-      console.log(`${source}: compacted ${boundary.pre_tokens} -> ${boundary.post_tokens ?? "?"} tokens`);
-      audit("chat_session", "compacted", source);
-      return;
-    }
-    throw new Error("compaction stream ended without a result");
-  } catch (e) {
-    console.error(`${source}: compaction failed:`, (e as Error).message);
-    audit("chat_session", "compact-failed", source);
-    writeJson(file, { ...readJson<ChatSession>(file, { costUsd: 0 }), compactFailedAt: new Date().toISOString() });
-  }
 }

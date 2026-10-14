@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Scope } from "./dream.ts";
+import type { Scope } from "./dreamplan.ts";
 import { compactIfNeeded, messagesSince, recordMessage, type Kind, type Sent } from "./messages.ts";
 import { matchLines } from "./logsearch.ts";
 import { MAX_NOTE_CHARS, type Note } from "./notes.ts";
@@ -20,7 +20,7 @@ import { summarizeWithHaiku } from "./summarize.ts";
 // The owner's chat can read all of it (read-only); nothing flows the other way.
 
 export const GROUPS_DIR = join(settings.memoryDir, "groups");
-export const GROUP_CATEGORIES = ["people", "context", "scheduling", "style"] as const;
+const GROUP_CATEGORIES = ["people", "context", "scheduling", "style"] as const;
 
 export const groupKey = (groupId: string): string => createHash("sha256").update(groupId).digest("hex").slice(0, 12);
 export const groupLogFile = (groupId: string): string => `logs/group-${groupKey(groupId)}.jsonl`;
@@ -44,7 +44,7 @@ export const groupScope = (groupId: string): Scope => {
   return { notesDir: join(dir, "notes"), backupsDir: join(dir, "backup"), categories: GROUP_CATEGORIES, index: true, maxNotes: settings.memoryMaxNotes };
 };
 
-export interface KnownGroup {
+interface KnownGroup {
   id: string;
   name: string;
   dir: string;
