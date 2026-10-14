@@ -4,7 +4,6 @@ import { ask, runProfile, prepareChat } from "./agent.ts";
 import { compactChatIfNeeded } from "./chatsession.ts";
 import { setDraftReader, setAutoApprovedNotice, type Approve } from "./permissions.ts";
 import * as approvals from "./approvals.ts";
-import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";
 import { acceptOwner } from "./guards.ts";
 import { createDreamer } from "./dream.ts";
@@ -20,7 +19,6 @@ import { compactIfNeeded, recordMessage, type Kind } from "./messages.ts";
 import { summarizeWithHaiku } from "./summarize.ts";
 import { Mailbird } from "./mailbird.ts";
 import { createProposer } from "./propose.ts";
-import { createRadar } from "./radar.ts";
 import { preparePicture } from "./image.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
@@ -160,9 +158,8 @@ const groupDreamer = createGroupDreamer();
 // The dream tidies the notes the brief then reads; it runs at most once a day, only when you said something new, and a
 // failure just moves on.
 const dream = () => dreamer.run().then(() => groupDreamer.run()).catch(() => {});
-// The clock half of the gate: every tick, each conversation whose next look has come may be woken (wake.ts). With
-// SCHEDULER=gate (default) the owner's gate also decides when the brief and the radar run, with a deterministic backstop
-// for the brief; SCHEDULER=legacy keeps the old fixed schedulers (src/brief.ts, src/radar.ts).
+// The clock half of the gate: every tick, each conversation whose next look has come may be woken (wake.ts). The owner's
+// gate also decides when the brief and the radar run, with a deterministic backstop for the brief.
 const wakeups = createWakeups({
   pipeline,
   separateAccount: signal.separateAccount,
@@ -170,24 +167,16 @@ const wakeups = createWakeups({
   runProfile: (profile, prompt, extra) => runProfile(profile, prompt, approveBackground, extra),
   presets: { sendBrief: out.sendBriefSummary, notify: say, beforeBrief: dream },
 });
-const radar = createRadar({ approve: approveBackground, notify: say, briefDue: isBriefDue });
-const legacy = settings.scheduler === "legacy";
-const briefDue = () => (legacy ? isBriefDue() : wakeups.briefPending());
 
 // Independent jobs: each starts on every tick in its own try/catch and none waits for another (startJobs, heartbeat.ts; the
-// dream runs before the brief: in legacy mode as the brief's first step, with the gate scheduler inside the brief preset).
+// dream runs inside the brief preset, before the brief).
 startHeartbeat({
   alert: notify,
   handle: handler.enqueue,
-  briefDue,
+  briefDue: () => wakeups.briefPending(),
   onTick: () => {
     startJobs({
       wake: () => wakeups.tick(),
-      // the gate scheduler: the brief and the radar are started by the wake-ups' look at the owner's chat
-      ...(legacy && {
-        brief: () => (isBriefDue() ? dream() : Promise.resolve()).then(() => maybeRunBrief({ approve: approveBackground, sendBrief: out.sendBriefSummary, notify })),
-        radar: () => radar(),
-      }),
     });
   },
 });

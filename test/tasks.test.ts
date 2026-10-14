@@ -90,38 +90,29 @@ test("profiles: named in code; brief, radar and background are owner runs with t
 });
 
 test("tasks: the gate names a task; presets are owner-only and fail closed", () => {
-  const brief = buildTask("owner", { task: "brief" }, { scheduler: "gate" })!;
+  const brief = buildTask("owner", { task: "brief" })!;
   assert.deepEqual([brief.name, brief.profile, brief.after, brief.retries], ["brief", "brief", "brief", settings.briefMaxAttempts - 1]);
   assert.match(brief.instructions, /daily-brief/);
-  const radar = buildTask("owner", { task: "radar" }, { scheduler: "gate", radar: true })!;
+  const radar = buildTask("owner", { task: "radar" }, { radar: true })!;
   assert.deepEqual([radar.profile, radar.after], ["radar", "radar"]);
   assert.match(radar.instructions, /radar/);
   assert.equal(buildTask("owner", { task: "task", instructions: " do it " })!.profile, "background");
   // groups never get a preset: the plain group task if there are instructions, else nothing
   for (const name of ["brief", "radar"] as const) {
-    assert.deepEqual(buildTask("group", { task: name, instructions: "say hi" }, { scheduler: "gate", radar: true }), { name: "task", instructions: "say hi", profile: "group", after: "post" });
-    assert.equal(buildTask("group", { task: name }, { scheduler: "gate", radar: true }), undefined);
+    assert.deepEqual(buildTask("group", { task: name, instructions: "say hi" }, { radar: true }), { name: "task", instructions: "say hi", profile: "group", after: "post" });
+    assert.equal(buildTask("group", { task: name }, { radar: true }), undefined);
   }
   // an unknown name is the plain task
   assert.equal(parseGate({ act: true, task: "format-disk", instructions: "x" }).task, "task");
   assert.equal(parseGate({ act: true, task: "brief" }).task, "brief");
-  // legacy scheduler or radar off: no preset
-  assert.equal(buildTask("owner", { task: "brief" }, { scheduler: "legacy" }), undefined);
-  assert.equal(buildTask("owner", { task: "radar", instructions: "look" }, { scheduler: "gate", radar: false })!.name, "task");
+  // radar off: no radar preset
+  assert.equal(buildTask("owner", { task: "radar", instructions: "look" }, { radar: false })!.name, "task");
 });
 
-test("gate prompt: the owner's gate offers the presets only with the gate scheduler", () => {
+test("gate prompt: the owner's gate offers the presets, a group's does not", () => {
   assert.match(gateSystem({ kind: "owner" }, "clock", ""), /task "brief"/);
   assert.match(gateSystem({ kind: "owner" }, "clock", ""), /task "radar"/);
   assert.doesNotMatch(gateSystem({ kind: "group" }, "clock", ""), /"brief"/);
-  const was = s.scheduler;
-  s.scheduler = "legacy";
-  try {
-    assert.match(gateSystem({ kind: "owner" }, "clock", ""), /leave them alone/);
-    assert.doesNotMatch(gateSystem({ kind: "owner" }, "clock", ""), /task "brief"/);
-  } finally {
-    s.scheduler = was;
-  }
 });
 
 test("gate picks brief: the brief profile runs after the dream, the email is captured, the Signal summary goes out, the ledger says so", async () => {
@@ -177,15 +168,6 @@ test("brief backstop: no brief logged by the backstop hour runs it anyway, witho
     recordMessage("brief", 1, "Focus today", T0, done.conv.logFile); // a brief is logged today
     assert.notEqual(await done.w.look(done.conv, T0), "brief-delivered");
     assert.deepEqual(done.r.profiles, []);
-  });
-  // legacy mode: no backstop here (the old scheduler owns the brief)
-  await withSettings({ briefBackstopHour: 9, scheduler: "legacy" }, async () => {
-    const l = rig({ gate: () => ({ act: false, nextCheckMinutes: 60 }) });
-    await l.w.look(l.conv, T0);
-    assert.deepEqual(l.r.profiles, []);
-    const asked = rig({ gate: () => ({ act: true, task: "brief", nextCheckMinutes: 30 }) });
-    assert.equal(await asked.w.look(asked.conv, T0), "no-instructions"); // legacy: a "brief" with no instructions is nothing
-    assert.deepEqual(asked.r.profiles, []);
   });
 });
 

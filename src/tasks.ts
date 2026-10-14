@@ -26,13 +26,11 @@ export interface Task {
   retries?: number; // brief: extra attempts after an incomplete one, same day
 }
 
-// Pure. The gate's output as a task, or nothing. Fails closed: a preset is only for the owner's chat (and only when the gate
-// scheduler is on, and the radar when it is enabled); a group that asks for one, or an unknown name, gets the plain task if
+// Pure. The gate's output as a task, or nothing. Fails closed: a preset is only for the owner's chat (and the radar only when it is enabled); a group that asks for one, or an unknown name, gets the plain task if
 // the gate wrote instructions, else nothing.
-export function buildTask(convKind: "owner" | "group", out: Pick<GateOutput, "task" | "instructions">, o: { scheduler?: "gate" | "legacy"; radar?: boolean } = {}): Task | undefined {
-  const scheduler = o.scheduler ?? settings.scheduler;
+export function buildTask(convKind: "owner" | "group", out: Pick<GateOutput, "task" | "instructions">, o: { radar?: boolean } = {}): Task | undefined {
   const radar = o.radar ?? settings.proactive;
-  if (convKind === "owner" && scheduler === "gate") {
+  if (convKind === "owner") {
     if (out.task === "brief") return { name: "brief", instructions: BRIEF_INSTRUCTIONS, profile: "brief", after: "brief", retries: settings.briefMaxAttempts - 1 };
     if (out.task === "radar" && radar) return { name: "radar", instructions: radarInstructions(WINDOW_MINUTES), profile: "radar", after: "radar" };
   }

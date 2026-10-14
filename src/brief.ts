@@ -1,17 +1,12 @@
 import { AuthError } from "./errors.ts";
-import { runBriefTurn } from "./agent.ts";
-import type { Approve } from "./permissions.ts";
 import { audit } from "./audit.ts";
-import { overBudget } from "./budget.ts";
 import { buildDigest, readTriageSince } from "./digest.ts";
 import { fence } from "./fence.ts";
 import { LAST_BRIEF } from "./notes.ts";
-import { isPaused, localDay } from "./pause.ts";
-import { settings } from "./settings.ts";
+import { localDay } from "./pause.ts";
 import { readJson, readText, writeJson, writeText } from "./state.ts";
 
-// The daily brief: once per local day, on the first heartbeat tick at or after the start
-// hour (late is fine), retried on later ticks up to a daily cap. Its memory is local: the
+// The daily brief's HOW (when it runs is the gate's and the backstop's, wake.ts). Its memory is local: the
 // last brief (memory/last-brief.md) and what the heartbeat did since (the audit log).
 
 const STATE = "state/brief.json";
@@ -23,22 +18,6 @@ export interface BriefState {
   attemptDay?: string;
   attempts: number; // attempts made on attemptDay
   lastBriefAt?: string; // ISO time the last brief was delivered
-  notifiedGaveUp?: string; // day we already told the owner we gave up
-}
-
-// The whole "when does the brief run" policy, as a pure function.
-export function shouldRun(
-  state: BriefState,
-  now: Date,
-  opts: { startHour: number; maxAttempts: number; paused: boolean },
-): { run: boolean; reason: string } {
-  const today = localDay(now);
-  if (opts.paused) return { run: false, reason: "paused" };
-  if (state.doneDay === today) return { run: false, reason: "already done today" };
-  if (now.getHours() < opts.startHour) return { run: false, reason: "before start hour" };
-  const attempts = state.attemptDay === today ? state.attempts : 0;
-  if (attempts >= opts.maxAttempts) return { run: false, reason: "attempt cap reached" };
-  return { run: true, reason: attempts === 0 ? "first run today" : `retry ${attempts + 1}` };
 }
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -69,48 +48,7 @@ export function briefPrompt(now: Date, previous: string | undefined, previousAt:
   ].join("\n\n");
 }
 
-interface BriefDeps {
-  approve: Approve;
-  sendBrief: (markdown: string) => Promise<void>;
-  notify: (text: string) => Promise<void>;
-}
-
-let running = false;
 const loadState = () => readJson<BriefState>(STATE, { attempts: 0 });
-const runOpts = (now: Date) => ({ startHour: settings.briefStartHour, maxAttempts: settings.briefMaxAttempts, paused: isPaused(now) });
-
-// True while today's brief is running or still due.
-export function isBriefDue(now = new Date()): boolean {
-  return running || shouldRun(loadState(), now, runOpts(now)).run;
-}
-
-// Called on every heartbeat tick. Cheap when there is nothing to do.
-export async function maybeRunBrief(deps: BriefDeps): Promise<void> {
-  if (running) return;
-  running = true; // claimed synchronously: two ticks can never start two briefs
-  try {
-    const state = loadState();
-    const now = new Date();
-    const decision = shouldRun(state, now, runOpts(now));
-    if (!decision.run) {
-      if (decision.reason === "attempt cap reached" && state.notifiedGaveUp !== localDay(now)) {
-        writeJson(STATE, { ...state, notifiedGaveUp: localDay(now) });
-        await deps.notify(`The daily brief failed ${settings.briefMaxAttempts} times today, so I'm giving up until tomorrow. Check logs/agent.log.`);
-      }
-      return;
-    }
-    const budget = overBudget();
-    if (budget.over) {
-      if (budget.firstTime) await deps.notify(`Daily spend guard: about $${budget.usd.toFixed(0)} used today (limit $${settings.dailyBudgetUsd}), so background work is paused until tomorrow. Chat still works.`);
-      return;
-    }
-    await runOnce(deps, state, now, decision.reason);
-  } catch (e) {
-    console.error("brief: unexpected error:", (e as Error).message);
-  } finally {
-    running = false;
-  }
-}
 
 // The prompt of today's brief: without a previous brief (fresh install) it looks back 24h rather than the whole log.
 export function currentBriefPrompt(now: Date, state: BriefState = loadState(), instructions: string = BRIEF_INSTRUCTIONS): string {
@@ -118,18 +56,9 @@ export function currentBriefPrompt(now: Date, state: BriefState = loadState(), i
   return briefPrompt(now, readText(LAST_BRIEF), state.lastBriefAt, buildDigest(readTriageSince(since), since), instructions);
 }
 
-// The brief is done for today (state/brief.json keeps the digest's "since" and lets the legacy scheduler take over cleanly).
+// The brief is done for today (state/brief.json keeps the digest's "since").
 export function markBriefDone(now: Date, attempt: number): void {
   writeJson(STATE, { ...loadState(), attemptDay: localDay(now), attempts: attempt, doneDay: localDay(now), lastBriefAt: new Date().toISOString() });
-}
-
-async function runOnce(deps: BriefDeps, state: BriefState, now: Date, reason: string) {
-  // Count the attempt before starting: a crash mid-run must not allow endless retries.
-  const attempt = state.attemptDay === localDay(now) ? state.attempts + 1 : 1;
-  writeJson(STATE, { ...state, attemptDay: localDay(now), attempts: attempt });
-  console.log(`brief: starting (${reason}, attempt ${attempt}/${settings.briefMaxAttempts})`);
-  // An incomplete or failed attempt is retried on a later tick, up to the cap.
-  await runBriefAttempt({ run: (p, cb) => runBriefTurn(p, deps.approve, cb), sendBrief: deps.sendBrief, notify: deps.notify }, currentBriefPrompt(now, state), attempt, () => markBriefDone(now, attempt));
 }
 
 export type BriefOutcome = "delivered" | "incomplete" | "failed";
@@ -139,7 +68,7 @@ interface BriefAttemptDeps {
   notify: (text: string) => Promise<void>;
 }
 
-// The HOW of the brief, shared by the legacy scheduler and the gate's preset (wake.ts): one run, the sent email
+// The HOW of the brief, run by the gate's preset (wake.ts): one run, the sent email
 // captured, last-brief.md saved, the Signal summary posted. `onComplete` runs after the brief is saved and BEFORE the
 // summary goes out, so a failing Signal send cannot cause a second brief.
 export async function runBriefAttempt(deps: BriefAttemptDeps, prompt: string, attempt: number, onComplete: () => void): Promise<BriefOutcome> {

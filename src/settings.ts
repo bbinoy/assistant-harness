@@ -95,13 +95,11 @@ export function loadSettings(env: Env) {
     // and logs, you still decide; off: never.
     autoApprove: oneOf(env, "AUTO_APPROVE", "broad", ["off", "shadow", "chat", "broad"] as const),
 
-    briefStartHour: num(env, "BRIEF_START_HOUR", 7, 0, 23), // legacy scheduler: when the brief starts. Gate scheduler: only what the gate's default rules say ("from this hour")
+    briefStartHour: num(env, "BRIEF_START_HOUR", 7, 0, 23), // only what the gate's default rules say ("from this hour")
     briefMaxAttempts: num(env, "BRIEF_MAX_ATTEMPTS", 3, 1, 10),
-    // Who decides WHEN the brief and the radar run. "gate": the owner's gate (src/gate.ts, wake.ts) chooses, by its default rules
-    // and the notes; code keeps the HOW and a deterministic backstop for the brief. "legacy": the old fixed schedulers (src/brief.ts
-    // shouldRun, src/radar-rules.ts isDue). One env change switches back.
-    scheduler: oneOf(env, "SCHEDULER", "gate", ["gate", "legacy"] as const),
-    briefBackstopHour: num(env, "BRIEF_BACKSTOP_HOUR", 9, 0, 24), // gate scheduler: no brief logged today by this hour (local): run it anyway. 24: never
+    // The owner's gate (src/gate.ts, wake.ts) decides WHEN the brief and the radar run, by its default rules and the notes; code
+    // keeps the HOW and a deterministic backstop for the brief.
+    briefBackstopHour: num(env, "BRIEF_BACKSTOP_HOUR", 9, 0, 24), // no brief logged today by this hour (local): run it anyway. 24: never
 
     // What the model can see (policy.ts, hiddenTools): every tool it sees is re-sent on every
     // model call, so hide what your skills never use. A skill that needs a hidden tool will
@@ -191,5 +189,7 @@ export function loadSettings(env: Env) {
 }
 
 export const settings = loadSettings(process.env);
+// SCHEDULER=legacy was retired: the gate is the only scheduler. A stale value in .env is ignored, with one line to say so.
+if (process.env.SCHEDULER === "legacy") console.warn("settings: SCHEDULER=legacy is no longer supported and is ignored (the gate scheduler is the only one); remove it from .env");
 export const OWNER = settings.owner;
 export const ASSISTANT = settings.assistant;
