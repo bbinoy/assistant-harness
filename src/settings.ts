@@ -93,6 +93,7 @@ export function loadSettings(env: Env) {
     // The longest one model run may take on the wall clock (src/ceiling.ts), so a hung turn cannot block its conversation until a
     // restart. Chat: the owner's chat and every group. Background: gate tasks, brief, radar, mail handler; the time a background run
     // spends waiting for an approval is not counted, so BACKGROUND_APPROVAL_TIMEOUT_MINUTES never cuts into it.
+    compactMaxMinutes: num(env, "COMPACT_MAX_MINUTES", 10, 1, 120), // a compaction that takes longer is abandoned (chatsession.ts); the failure backoff applies
     runMaxMinutesChat: num(env, "RUN_MAX_MINUTES_CHAT", 40, 1, 1440),
     runMaxMinutesBackground: num(env, "RUN_MAX_MINUTES_BACKGROUND", 180, 1, 2880),
 
@@ -195,7 +196,7 @@ export function loadSettings(env: Env) {
 
     // Chat session hygiene: the SDK only compacts near the context limit, so a long-lived
     // session would re-send an ever-growing history on every turn.
-    chatIdleResetHours: num(env, "CHAT_IDLE_RESET_HOURS", 72, 1, 168), // idle this long: start a fresh session. Across days the conversation continues and compaction keeps it small (chatsession.ts)
+    chatIdleResetHours: num(env, "CHAT_IDLE_RESET_HOURS", 168, 1, 720), // idle this long: start a fresh session. Across days the conversation continues and compaction keeps it small (chatsession.ts)
     chatCompactGrowthTokens: num(env, "CHAT_COMPACT_GROWTH_TOKENS", 100_000, 5_000, 400_000), // the conversation itself (context minus tools, skills and prompts) this big: compact afterwards, owner and groups alike
     chatCompactTokens: num(env, "CHAT_COMPACT_TOKENS", 150_000, 10_000, 500_000), // fallback for a session saved before the baseline was recorded: a turn this big: compact afterwards (tools and skills alone are ~50k)
 
