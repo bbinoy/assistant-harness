@@ -137,3 +137,10 @@ Not found: a dead function. `tsc --noUnusedLocals` was clean throughout, and aft
 was still clean, so nothing became unused.
 `npm run check:isolation` calls a live model; it failed once on the first run after the dream split and passed on
 the immediate rerun and at baseline-equivalent code paths, so treat a single failure there as model noise and rerun.
+
+## Follow-up (refactor-cleanup-2): the four approved decisions
+
+- Intake: `ownerMessage` / `groupMessage` became one `intake()` in conversation.ts, driven by the Conversation flags `vouch`, `attention` and `optionalPictures` (set only by `owner()` / `group(id)`). Log wording: `agent replied` / `group replied` is now `owner replied` / `group replied`; `agent failed:` / `group: run failed:` is now `owner: run failed:` / `group: run failed:`.
+- `SCHEDULER=legacy` is retired (brief.ts, radar.ts, radar-rules.ts lost their fixed schedulers; a stale value in .env is ignored with one warning). `BRIEF_BACKSTOP_HOUR` is unchanged.
+- Timing constants moved to settings.ts with the old values as defaults (see the "Timing constants" block of .env.example).
+- Policy source names: `SOURCES` in audit.ts is the one list; policy.ts keys derive from its type; test/policy.test.ts pins both.
