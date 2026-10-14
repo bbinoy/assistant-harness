@@ -16,7 +16,7 @@ This is a personal project that runs daily for its author. It works, its safety-
 ## Install
 
 ```bash
-git clone https://github.com/<you>/ted-personal-assistant && cd ted-personal-assistant
+git clone https://github.com/bbinoy/ted-personal-assistant && cd ted-personal-assistant
 npm install
 
 # 1. Link Signal (scan the QR code in Signal → Settings → Linked devices)
