@@ -161,7 +161,7 @@ npm run install:launchd                     # starts it now and at every login
 
 Then message the assistant "set up" in Signal: it finds your calendars and Notion pages, learns how you write from your sent mail (if you allow it), and saves what it learns as notes. No files to edit.
 
-You also need [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) (logged in), [signal-cli](https://github.com/AsamK/signal-cli) linked to your Signal account, and a mail client with an MCP server. Step by step: [docs/SETUP.md](docs/SETUP.md).
+You also need [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) (logged in), [signal-cli](https://github.com/AsamK/signal-cli) linked to your Signal account, and, for the inbox parts, a mail client with an MCP server. **Mail is optional:** with `MAIL_PROVIDER=none` the assistant runs chat only (Signal chat, memory, wake-ups, the calendar radar, and a daily brief of your calendar and tasks), with no mail client at all ([chat-only setup](docs/SETUP.md#chat-only-no-mail)). Step by step: [docs/SETUP.md](docs/SETUP.md).
 
 **Keep it running while you're away.** The agent lives on your Mac, so it only works while the Mac is awake. If it stays plugged in, open *System Settings > Battery > Options* (on a desktop Mac: *Energy*) and turn on *Prevent automatic sleeping on power adapter when the display is off* (or set *Turn display off* and sleep to Never). The screen can still turn off. On a laptop, keep the lid open (a closed lid sleeps the Mac unless an external display is connected). The heartbeat then keeps checking your mail all day, and a message from your phone always gets an answer. If the Mac does sleep, nothing breaks: the agent picks up where it left off when it wakes.
 
