@@ -56,7 +56,7 @@ const say = async (text: string) => void (await out.replyPlain(text, "notice"));
 const warmChat = () => prepareChat(approve, say);
 const notify = async (text: string) => {
   await say(text);
-  warmChat(); // the chat prompt carries recent pings, so the warm process is stale now
+  prepareChat(approve, say, { refresh: true }); // the chat prompt carries recent pings, so the warm process is stale now (a renewal, not activity)
 };
 
 // A voice message's words, from the local speech model; the transcript is logged (logs/voice.jsonl) to inspect a
@@ -150,7 +150,7 @@ console.log(`connected to signal-cli (${signal.separateAccount ? "own account" :
 warmChat();
 // A warm process is used only while fresh (agent.ts); keep one ready so a message after a
 // quiet hour is still quick. Local work only, no model call.
-setInterval(warmChat, 25 * 60_000).unref();
+setInterval(() => prepareChat(approve, say, { refresh: true }), 25 * 60_000).unref();
 
 const handler = createHandler({ approve: approveBackground, notify, propose: proposer.show });
 handler.resume();

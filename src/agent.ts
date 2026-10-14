@@ -20,7 +20,7 @@ import { OWNER_SESSION_FILE, type ChatSession } from "./session.ts";
 import { settings } from "./settings.ts";
 import { readText, writeJson } from "./state.ts";
 import { recordToolsSeen, toolsSeen } from "./toolsseen.ts";
-import { SpareSlot } from "./warmslot.ts";
+import { firstWarm, SpareSlot } from "./warmslot.ts";
 
 interface AgentReply {
   text: string;
@@ -171,11 +171,15 @@ async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Pro
 // Starting Claude Code (process, config, skills, connectors) takes ~3s before the model is even asked. After a reply the
 // next process is started in the background, so the next message only waits for the model. It is used only if nothing it
 // was built from has changed (session, prompt, memory index), and only while fresh; otherwise a normal start.
-// At most two exist (a SpareSlot holds one each): the owner's chat, and the group that spoke last. A group's is built from
-// that group's own options only (its notes folder, session, memory server, no connectors) and is handed to nobody else.
-const SPARE_MAX_AGE_MS = 30 * 60_000;
-const spare = new SpareSlot<WarmQuery>({ maxAgeMs: SPARE_MAX_AGE_MS });
-const groupSpare = new SpareSlot<WarmQuery>({ maxAgeMs: SPARE_MAX_AGE_MS, idleMs: () => settings.groupWarmIdleMinutes * 60_000 });
+// One mechanism (SpareSlot, warmslot.ts), one idle setting (WARM_IDLE_MINUTES), one switch (WARM): a slot each for the owner's
+// chat and the group that spoke last, and the gate's Haiku spare (gate.ts), so at most three processes. A group's is built from
+// that group's own options only (its notes folder, session, memory server, no connectors) and is handed to nobody else; the
+// owner's has the owner's connectors and is never handed to a group. Options (system prompt, tools, MCP servers, output schema)
+// are fixed when a process starts, which is why a slot is keyed by them.
+const idleMs = () => settings.warmIdleMinutes * 60_000;
+const slotOptions = { maxAgeMs: idleMs(), idleMs }; // fresh while not idle-expired: a process that died meanwhile is detected on use (firstWarm) and replaced
+const spare = new SpareSlot<WarmQuery>(slotOptions);
+const groupSpare = new SpareSlot<WarmQuery>(slotOptions);
 
 const memoryIndex = (dir: string) => {
   try {
@@ -187,18 +191,19 @@ const memoryIndex = (dir: string) => {
 const spareKey = (id: string, o: RunOptions, r: Resume) => JSON.stringify([id, r.resume ?? "", o.systemPrompt, o.memory?.dir ?? "", memoryIndex(o.memory?.dir ?? NOTES_DIR)]);
 
 // Starts the next process for a conversation and keeps it as the slot's spare (replacing, and closing, the previous one).
-function warmUp(slot: SpareSlot<WarmQuery>, id: string, o: RunOptions, r: Resume, label: string, approve: Approve, start: typeof startup = startup): void {
+function warmUp(slot: SpareSlot<WarmQuery>, id: string, o: RunOptions, r: Resume, label: string, approve: Approve, start: typeof startup = startup, refresh = false): void {
+  if (!settings.warm) return;
   const warm = start({ options: buildOptions(approve, o, r.resume) });
   warm.catch((e) => console.error(`${label} warm-up failed:`, (e as Error).message));
-  slot.put(id, spareKey(id, o, r), warm);
+  slot.put(id, spareKey(id, o, r), warm, { refresh });
 }
 
 // One turn: on the slot's warm process when it still fits, else a cold start. A warm process serves one query; one that no
-// longer fits is closed. Fall back only if it never came up: once the turn has started, an error is the turn's error, and
-// running it again could repeat what it already did.
+// longer fits is closed. Fall back to a cold start if the warm process is dead or never came up (an idle process can die
+// silently): once the turn has produced a message, an error is the turn's error, and running it again could repeat what it did.
 async function runWarmOrCold(slot: SpareSlot<WarmQuery>, id: string | undefined, o: RunOptions, r: Resume, label: string, input: ReturnType<typeof userInput>, cold: () => AsyncIterable<SDKMessage>): Promise<AgentReply> {
   const warm = id ? await slot.take(id, spareKey(id, o, r))?.catch((e: Error) => console.error(`${label}: warm process unavailable, starting normally:`, e.message)) : undefined;
-  return consume(warm ? warm.query(input) : cold(), o, r.previousCost);
+  return consume(warm ? firstWarm(() => warm.query(input), cold, (e) => console.error(`${label}: warm process failed, starting normally:`, e.message)) : cold(), o, r.previousCost);
 }
 
 // ---- the owner's chat ----
@@ -212,13 +217,15 @@ const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
   maxBudgetUsd: 2.0, // a cold prompt cache alone can cost most of a dollar
 });
 
-export function prepareChat(approve: Approve, notify: (text: string) => Promise<void>): void {
-  warmUp(spare, "owner", chatOptions(notify), chatResume(false), "chat", approve);
+export function prepareChat(approve: Approve, notify: (text: string) => Promise<void>, o: { refresh?: boolean } = {}): void {
+  if (o.refresh && !spare.wants("owner")) return; // the timer renews a process in use; it does not keep an idle one alive
+  warmUp(spare, "owner", chatOptions(notify), chatResume(false), "chat", approve, startup, o.refresh);
 }
 
 // Interactive chat: resumes the persistent conversation, on the warm process when it fits.
 export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void }): Promise<AgentReply> {
   setChatOwnerMessage(ownerMessage ?? prompt);
+  spare.touch("owner"); // in use: the idle period starts over
   const o = { ...chatOptions(notify), onFirstOutput: hooks?.firstOutput };
   const r = chatResume(true);
   const input = userInput(prompt, pictures);
@@ -252,10 +259,10 @@ export async function runGroupTurn(conv: GroupConv, style: string, build: (since
 
 // Keep ONE warm process for the group that spoke last, replacing another group's. Called when a message arrives for a
 // group that may be answered (not if it already holds a fresh one), and after each of its turns (`force`: the session moved on).
-// Nothing happens with GROUP_WARM=off.
+// Nothing happens with WARM=off.
 export function prepareGroupChat(conv: GroupConv, style: () => string, opts: { force?: boolean; start?: typeof startup } = {}): void {
   const id = conv.groupId;
-  if (!settings.groupWarm || !id) return;
+  if (!settings.warm || !id) return;
   if (!opts.force && groupSpare.has(id)) return void groupSpare.touch(id); // active group, already warm: keep it so
   warmUp(groupSpare, id, groupRunOptions(conv, groupSystem({ style: style() })), chatResume(false, conv.sessionFile, "group"), "group", DENY_ALL, opts.start);
 }

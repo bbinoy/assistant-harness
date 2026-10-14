@@ -2,7 +2,7 @@ import { clockLine } from "./brief.ts";
 import { budgetSpent } from "./budget.ts";
 import { fence } from "./fence.ts";
 import { prepareGroupChat, runGroupTurn } from "./agent.ts";
-import { askGate, styleLines, type Gate } from "./gate.ts";
+import { askGate, prepareGate, styleLines, type Gate } from "./gate.ts";
 import { recordWake } from "./ledger.ts";
 import { groupContext } from "./groupstore.ts";
 import { isPaused } from "./pause.ts";
@@ -128,7 +128,10 @@ export function createGroupBrain(brain: Brain) {
   const { pipeline } = brain;
   type Asked = { line: string; quote: Quote; incoming?: Quote; voice: boolean; picture?: Picture; at: number };
   const state = new Map<string, { addressed?: Asked; lastSpoke?: number; running?: boolean }>();
-  const warm = brain.warm ?? (brain.run ? undefined : (conv: Conversation, afterTurn: boolean) => prepareGroupChat(conv, () => styleLines(new Date()), { force: afterTurn }));
+  const warm = brain.warm ?? (brain.run ? undefined : (conv: Conversation, afterTurn: boolean) => {
+    prepareGroupChat(conv, () => styleLines(new Date()), { force: afterTurn });
+    prepareGate(); // the gate's spare belongs to no group, so it is not tied to this one
+  });
 
   return async function onMessage(m: GroupMessage, now = new Date()): Promise<void> {
     const conv = group(m.groupId);

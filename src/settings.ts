@@ -162,10 +162,12 @@ export function loadSettings(env: Env) {
     // it as one turn. SETTLE_SECONDS; the old name GROUP_DEBOUNCE_SECONDS still works when the new one is not set.
     settleSeconds: num(env, "SETTLE_SECONDS", num(env, "GROUP_DEBOUNCE_SECONDS", 2, 0, 60), 0, 60),
     settleMaxSeconds: num(env, "SETTLE_MAX_SECONDS", 10, 1, 120), // the longest a burst waits since its first message, so continuous chatter cannot postpone the answer forever
-    // One warm model process for the group that spoke last (src/agent.ts): its next turn skips the ~3 s start-up. The owner's
-    // chat keeps its own, so at most two exist. It costs a resident process, no tokens. Dropped after this many idle minutes.
-    groupWarm: oneOf(env, "GROUP_WARM", "on", ["on", "off"] as const) === "on",
-    groupWarmIdleMinutes: num(env, "GROUP_WARM_IDLE_MINUTES", 10, 1, 120),
+    // Warm model processes (src/agent.ts, src/gate.ts): a process started ahead of the next message skips the ~3 s start-up. At most
+    // three exist: the owner's chat, the group that spoke last, and one small Haiku process for the participation gate. Each costs
+    // about 150 to 200 MB resident and no tokens, and is dropped after WARM_IDLE_MINUTES without use. WARM=off: every turn starts cold.
+    // GROUP_WARM and GROUP_WARM_IDLE_MINUTES are the deprecated names of these two (they were group-only); they still work when the new ones are unset.
+    warm: oneOf(env, "WARM", oneOf(env, "GROUP_WARM", "on", ["on", "off"] as const), ["on", "off"] as const) === "on",
+    warmIdleMinutes: num(env, "WARM_IDLE_MINUTES", num(env, "GROUP_WARM_IDLE_MINUTES", 60, 1, 1440), 1, 1440),
     // The participation gate may ask for a pause before answering an untagged message, to seem natural. "typing…" shows meanwhile,
     // so a long pause only makes the answer late: whatever the gate asks for is cut to this many seconds (0: never wait).
     gateMaxDelaySeconds: num(env, "GATE_MAX_DELAY_SECONDS", 4, 0, 120),

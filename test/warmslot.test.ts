@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SpareSlot } from "../src/warmslot.ts";
+import { firstWarm, SpareSlot } from "../src/warmslot.ts";
+import { askGateWith, prepareGate } from "../src/gate.ts";
 import { prepareGroupChat, runGroupTurn } from "../src/agent.ts";
 import { group, owner } from "../src/conversation.ts";
 import { createGroupBrain } from "../src/group.ts";
 import { loadSettings, settings } from "../src/settings.ts";
 import { writeJson } from "../src/state.ts";
 
+const T0 = new Date(2026, 9, 14, 9, 0, 0);
 const tick = () => new Promise((res) => setTimeout(res, 5));
 
 // ---- the slot ----
@@ -98,8 +100,8 @@ let n = 0;
 const gid = () => `warm-${++n}-0123456789abcdef`;
 
 test("group warm: built from that group's own options only, exactly like a normal group run", () => {
-  const was = settings.groupWarm;
-  (settings as { groupWarm: boolean }).groupWarm = true;
+  const was = settings.warm;
+  (settings as { warm: boolean }).warm = true;
   try {
     const rig = startRig();
     const conv = group(gid());
@@ -112,13 +114,13 @@ test("group warm: built from that group's own options only, exactly like a norma
     assert.deepEqual(o.tools, ["Read", "Write", "Edit", "WebSearch"]);
     assert.match(JSON.stringify(o.systemPrompt), /be warm/);
   } finally {
-    (settings as { groupWarm: boolean }).groupWarm = was;
+    (settings as { warm: boolean }).warm = was;
   }
 });
 
 test("group warm: one process for the latest group; another group replaces it; each group only ever gets its own", async () => {
-  const was = settings.groupWarm;
-  (settings as { groupWarm: boolean }).groupWarm = true;
+  const was = settings.warm;
+  (settings as { warm: boolean }).warm = true;
   try {
     const rig = startRig();
     const a = group(gid());
@@ -140,13 +142,13 @@ test("group warm: one process for the latest group; another group replaces it; e
     assert.deepEqual(rig.used, ["warm2"]);
     assert.deepEqual(log, ["cold"]);
   } finally {
-    (settings as { groupWarm: boolean }).groupWarm = was;
+    (settings as { warm: boolean }).warm = was;
   }
 });
 
 test("group warm: a process built before the session moved on is not used", async () => {
-  const was = settings.groupWarm;
-  (settings as { groupWarm: boolean }).groupWarm = true;
+  const was = settings.warm;
+  (settings as { warm: boolean }).warm = true;
   try {
     const rig = startRig();
     const conv = group(gid());
@@ -159,25 +161,31 @@ test("group warm: a process built before the session moved on is not used", asyn
     await tick();
     assert.deepEqual(rig.closed, ["warm1"]);
   } finally {
-    (settings as { groupWarm: boolean }).groupWarm = was;
+    (settings as { warm: boolean }).warm = was;
   }
 });
 
-test("group warm: GROUP_WARM=off starts nothing, and the setting is validated", async () => {
-  assert.equal(loadSettings({}).groupWarm, true);
-  assert.equal(loadSettings({ GROUP_WARM: "off" }).groupWarm, false);
-  assert.throws(() => loadSettings({ GROUP_WARM: "maybe" }), /GROUP_WARM/);
-  assert.equal(loadSettings({}).groupWarmIdleMinutes, 10);
-  assert.throws(() => loadSettings({ GROUP_WARM_IDLE_MINUTES: "0" }), /GROUP_WARM_IDLE_MINUTES/);
-  const was = settings.groupWarm;
-  (settings as { groupWarm: boolean }).groupWarm = false;
+test("warm: WARM=off starts nothing; WARM and WARM_IDLE_MINUTES are validated; the old GROUP_WARM names still work", async () => {
+  assert.equal(loadSettings({}).warm, true);
+  assert.equal(loadSettings({ WARM: "off" }).warm, false);
+  assert.throws(() => loadSettings({ WARM: "maybe" }), /WARM/);
+  assert.equal(loadSettings({}).warmIdleMinutes, 60);
+  assert.throws(() => loadSettings({ WARM_IDLE_MINUTES: "0" }), /WARM_IDLE_MINUTES/);
+  assert.equal(loadSettings({ WARM_IDLE_MINUTES: "90" }).warmIdleMinutes, 90);
+  // deprecated aliases, used only when the new name is unset
+  assert.equal(loadSettings({ GROUP_WARM: "off" }).warm, false);
+  assert.equal(loadSettings({ GROUP_WARM: "off", WARM: "on" }).warm, true);
+  assert.equal(loadSettings({ GROUP_WARM_IDLE_MINUTES: "15" }).warmIdleMinutes, 15);
+  assert.equal(loadSettings({ GROUP_WARM_IDLE_MINUTES: "15", WARM_IDLE_MINUTES: "30" }).warmIdleMinutes, 30);
+  const was = settings.warm;
+  (settings as { warm: boolean }).warm = false;
   try {
     const rig = startRig();
     prepareGroupChat(group(gid()), () => "", { start: rig.start });
     prepareGroupChat(group(gid()), () => "", { start: rig.start, force: true });
     assert.equal(rig.started.length, 0);
   } finally {
-    (settings as { groupWarm: boolean }).groupWarm = was;
+    (settings as { warm: boolean }).warm = was;
   }
 });
 
@@ -226,5 +234,96 @@ test("group warm: asked when a message arrives and after a turn, not while the g
     assert.deepEqual(calls, []); // nothing will be answered: no process for it
   } finally {
     (settings as { groupParticipation: string }).groupParticipation = was;
+  }
+});
+
+// ---- one mechanism for every slot ----
+
+test("warm slot: a refresh renews the process but not the idle period, and builds nothing for an expired one", async () => {
+  let t = 0;
+  const closed: string[] = [];
+  const timers: { fn: () => void; ms: number; live: boolean }[] = [];
+  const slot = new SpareSlot<{ name: string; close(): void }>({
+    maxAgeMs: 10_000,
+    idleMs: () => 1000,
+    now: () => t,
+    schedule: (fn, ms) => {
+      const x = { fn, ms, live: true };
+      timers.push(x);
+      return () => void (x.live = false);
+    },
+  });
+  assert.equal(slot.wants("a"), false);
+  slot.put("a", "k", fakeWarm("A", closed));
+  t = 600;
+  slot.put("a", "k", fakeWarm("A2", closed), { refresh: true }); // a timer renewed it
+  await tick();
+  assert.deepEqual(closed, ["A"]);
+  assert.equal(timers.filter((x) => x.live).at(-1)!.ms, 400); // still counts from the last real use
+  t = 900;
+  slot.touch("a"); // real use: the full period again
+  assert.equal(timers.filter((x) => x.live).at(-1)!.ms, 1000);
+  timers.find((x) => x.live)!.fn();
+  await tick();
+  assert.equal(slot.wants("a"), false);
+  slot.put("a", "k", fakeWarm("A3", closed), { refresh: true }); // nothing is warm for it any more: the renewal is discarded
+  await tick();
+  assert.equal(slot.holder, undefined);
+  assert.deepEqual(closed, ["A", "A2", "A3"]);
+});
+
+test("warm slot: a key is part of has(), so a spare built for other options is not 'already warm'", () => {
+  const slot = new SpareSlot<{ close(): void }>({ maxAgeMs: 1000 });
+  slot.put("gate", "sys-1", Promise.resolve({ close() {} }));
+  assert.equal(slot.has("gate", "sys-1"), true);
+  assert.equal(slot.has("gate", "sys-2"), false);
+});
+
+test("warm: a warm process that died while idle falls back to a cold start; an error after output is not retried", async () => {
+  const out = async (g: AsyncIterable<number>) => { const r: number[] = []; for await (const x of g) r.push(x); return r; };
+  const dead = () => (async function* (): AsyncGenerator<number> { throw new Error("ProcessTransport is not ready for writing"); })();
+  const cold = () => (async function* () { yield 7; })();
+  const seen: string[] = [];
+  assert.deepEqual(await out(firstWarm(dead, cold, (e) => seen.push(e.message))), [7]);
+  assert.deepEqual(seen, ["ProcessTransport is not ready for writing"]);
+  const half = () => (async function* (): AsyncGenerator<number> { yield 1; throw new Error("mid-turn"); })();
+  await assert.rejects(out(firstWarm(half, cold)), /mid-turn/);
+  const throwsAtOnce = () => { throw new Error("closed"); };
+  assert.deepEqual(await out(firstWarm(throwsAtOnce as never, cold)), [7]);
+});
+
+test("gate spare: serves one group message look whatever the group, only for the exact system prompt, and replaces itself", async () => {
+  const was = settings.warm;
+  (settings as { warm: boolean }).warm = true;
+  try {
+    const started: any[] = [];
+    const used: string[] = [];
+    const qs = (log: string[], name: string) => Object.assign(stream(log, name), { close() {} }); // a Query can be closed
+    const start = ((o: any) => (started.push(o.options), Promise.resolve({ query: (p: string) => (used.push(p), qs([], "warm")), close() {}, [Symbol.asyncDispose]: async () => {} }))) as any;
+    prepareGate(T0, start);
+    prepareGate(T0, start); // already warm for these options
+    assert.equal(started.length, 1);
+    assert.deepEqual([started[0].tools, started[0].mcpServers, started[0].settingSources, started[0].model], [[], {}, [], "haiku"]);
+    assert.doesNotMatch(String(started[0].systemPrompt), /conversation_log|<notes>|CURRENT TIME/); // nothing of any conversation is in the options
+    const cold: string[] = [];
+    const io = { start, query: (() => qs(cold, "cold")) as any };
+    const a = group(gid());
+    const b = group(gid());
+    await askGateWith({ conv: a, trigger: "message", now: T0, tail: ["x"] }, io);
+    assert.equal(used.length, 1);
+    assert.match(used[0]!, /CURRENT TIME/); // the conversation is in the prompt
+    await tick();
+    assert.equal(started.length, 2); // the next spare is on its way
+    await askGateWith({ conv: b, trigger: "message", now: T0, tail: ["y"] }, io); // another group takes it
+    assert.equal(used.length, 2);
+    assert.deepEqual(cold, []);
+    // different options (the clock look, the owner) never take it
+    await tick();
+    await askGateWith({ conv: a, trigger: "clock", now: T0, tail: [] }, io);
+    await askGateWith({ conv: owner(), trigger: "message", now: T0, tail: [] }, io);
+    assert.equal(used.length, 2);
+    assert.deepEqual(cold, ["cold", "cold"]);
+  } finally {
+    (settings as { warm: boolean }).warm = was;
   }
 });

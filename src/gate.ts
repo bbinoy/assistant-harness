@@ -1,4 +1,4 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, startup, type Options, type Query, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import { clockLine } from "./brief.ts";
 import { recordCost } from "./budget.ts";
 import { fence } from "./fence.ts";
@@ -12,6 +12,7 @@ import { isOneEmoji } from "./reaction.ts";
 import { GATE_DEFAULTS, ownerGateDefaults } from "./persona.ts";
 import { MIN_GAP_MINUTES } from "./radar-rules.ts";
 import { OWNER, settings } from "./settings.ts";
+import { firstWarm, SpareSlot } from "./warmslot.ts";
 
 // The one gate. "Should I do something in this conversation now?" is asked in two situations and answered by the
 // same small model (Haiku, no tools) with the same input: the clock, the conversation's notes, the tail of its log
@@ -150,23 +151,56 @@ export function gatePrompt(input: Pick<GateInput, "trigger" | "now" | "tail" | "
   ].join("\n\n");
 }
 
-// The real gate: Haiku, no tools, no connectors, no memory, one JSON answer.
+// ---- the real gate ----
+
+// Haiku, no tools, no connectors, no memory, one JSON answer.
+const gateOptions = (system: string): Options => ({ model: "haiku", systemPrompt: system, tools: [], settingSources: [], strictMcpConfig: true, mcpServers: {}, settings: { autoMemoryEnabled: false }, maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false });
+
+// A spare Haiku process for the look that has to be fast: an untagged group message. A process is built from its options
+// alone (the system prompt: fixed per kind of look, plus the owner's style notes, which every group is shown anyway), and
+// everything about one conversation (notes, log, clock) goes in the prompt sent at query time. So the spare belongs to no
+// conversation and any group's look may take it, provided the system prompt is exactly the one it was built with (the
+// key). A look of another kind (the clock tick, the owner's chat) just starts a process, as before.
+const SPARE_ID = "gate";
+export const gateSpare = new SpareSlot<WarmQuery>({ maxAgeMs: settings.warmIdleMinutes * 60_000, idleMs: () => settings.warmIdleMinutes * 60_000 });
+const spareSystem = (now: Date) => gateSystem({ kind: "group" }, "message", styleLines(now));
+const usesSpare = (input: Pick<GateInput, "conv" | "trigger">) => input.trigger === "message" && input.conv.kind === "group";
+
+export function prepareGate(now: Date = new Date(), start: typeof startup = startup): void {
+  const system = spareSystem(now);
+  if (!settings.warm) return;
+  if (gateSpare.has(SPARE_ID, system)) return void gateSpare.touch(SPARE_ID); // a group is active: keep it
+  const warm = start({ options: gateOptions(system) });
+  warm.catch((e) => console.error("gate warm-up failed:", (e as Error).message));
+  gateSpare.put(SPARE_ID, system, warm);
+}
+
+export interface GateIO {
+  query?: typeof query;
+  start?: typeof startup;
+}
+
 // One console line of phases per call (sizes in chars and durations in ms, never message content), to see where the time goes:
-//   init   call -> the first message (the process ready and the model started on the prompt)
-//   result call -> the result message (init..result is the model)
-//   api    the model time the SDK itself reports
-export const askGate: Gate = async (input) => {
+//   warm|cold  the call took the spare process, or started one
+//   init       call -> the first message (process ready and the model started on the prompt)
+//   result     call -> the result message (init..result is the model)
+//   api        the model time the SDK itself reports
+export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<GateOutput> {
   const prompt = gatePrompt(input, notesText(input.conv, input.now));
   const system = gateSystem(input.conv, input.trigger, styleLines(input.now));
   const t0 = Date.now();
   const at: Record<string, number> = {};
   const mark = (k: string) => void (k in at || (at[k] = Date.now() - t0));
+  const spare = usesSpare(input) ? await gateSpare.take(SPARE_ID, system)?.catch((e: Error) => console.error("gate: warm process unavailable, starting normally:", e.message)) : undefined;
+  if (usesSpare(input)) setImmediate(() => prepareGate(input.now, io.start)); // a spare serves one look: the next is already on its way
+  const started: Query[] = [];
+  const track = (q: Query): Query => (started.push(q), q);
+  const cold = () => track((io.query ?? query)({ prompt, options: gateOptions(system) }));
   let api: number | undefined;
   let out = NOTHING;
   try {
-    const q = query({ prompt, options: { model: "haiku", systemPrompt: system, tools: [], settingSources: [], strictMcpConfig: true, mcpServers: {}, settings: { autoMemoryEnabled: false }, maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false } });
-    const it = q[Symbol.asyncIterator]();
     // Not `for await ... break`: leaving that loop waits ~0.8 s for the process to wind down, on the critical path.
+    const it = (spare ? firstWarm(() => track(spare.query(prompt)), cold, (e) => console.error("gate: warm process failed, starting normally:", e.message)) : cold())[Symbol.asyncIterator]();
     for (let n = await it.next(); !n.done; n = await it.next()) {
       const m = n.value;
       mark("init");
@@ -177,11 +211,13 @@ export const askGate: Gate = async (input) => {
       const p0 = Date.now();
       out = m.subtype === "success" && !m.is_error ? parseGate(m.structured_output) : NOTHING;
       at.parse = Date.now() - p0;
-      q.close(); // the answer is in
       break;
     }
   } finally {
-    console.log(`timing gate ${input.trigger} prompt=${prompt.length} system=${system.length} ${Object.entries(at).map(([k, v]) => `${k}=${v}`).join(" ")}${api === undefined ? "" : ` api=${api}`} total=${Date.now() - t0}`);
+    for (const q of started) q.close(); // the answer is in, or it failed
+    console.log(`timing gate ${input.trigger} ${spare ? "warm" : "cold"} prompt=${prompt.length} system=${system.length} ${Object.entries(at).map(([k, v]) => `${k}=${v}`).join(" ")}${api === undefined ? "" : ` api=${api}`} total=${Date.now() - t0}`);
   }
   return out;
-};
+}
+
+export const askGate: Gate = (input) => askGateWith(input);
