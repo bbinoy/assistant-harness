@@ -37,7 +37,10 @@ const PEOPLE_FIELD = /^(attendees?|guests?|invitees?|recipients?)$/i;
 // local name), a short address and a short query, no fragment. Whether the page is related to the request is the
 // judge's call; whether the address is safe to even consider is code's.
 const WEB_SOURCES: ReadonlySet<Source> = new Set<Source>(["chat", "background", "brief", "radar"]);
-const LOCAL_HOST = /(^|\.)(localhost|local|internal|lan|home|corp|test|invalid)$/i;
+const LOCAL_HOST = /(^|\.)(localhost|local|internal|lan|home|corp|test|invalid|example|localdomain|intranet|private)$/i;
+// Public names that resolve to a private or loopback address anyway (127.0.0.1.nip.io, 192-168-1-5.sslip.io, localtest.me), so a
+// "named public host" can still point inside this machine's network.
+const REBINDING_HOST = /(^|\.)(nip\.io|sslip\.io|xip\.io|localtest\.me|lvh\.me|vcap\.me|lacolhost\.com|traefik\.me)$|(^|[.-])\d{1,3}([.-])\d{1,3}\2\d{1,3}\2\d{1,3}($|[.-])/i;
 export function isPlainWebAddress(raw: unknown): boolean {
   if (typeof raw !== "string" || raw.length > 300) return false;
   let u: URL;
@@ -49,7 +52,7 @@ export function isPlainWebAddress(raw: unknown): boolean {
   const host = u.hostname;
   return (
     u.protocol === "https:" && !u.username && !u.password && !u.port && !u.hash &&
-    u.search.length <= 120 && host.includes(".") && !LOCAL_HOST.test(host) && !/^[\d.]+$/.test(host) && !host.includes(":") && !host.startsWith("[")
+    u.search.length <= 120 && host.includes(".") && !LOCAL_HOST.test(host) && !REBINDING_HOST.test(host) && !/^[\d.]+$/.test(host) && !host.includes(":") && !host.startsWith("[")
   );
 }
 
@@ -128,11 +131,13 @@ const realRunner: Runner = async (prompt) => {
 
 // Fails closed: an error or a slow answer is "ask".
 export async function judgeAction(i: JudgeInput, run: Runner = realRunner, timeoutMs = 20_000): Promise<Verdict> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const out = await Promise.race([run(judgePrompt(i)), new Promise<undefined>((r) => setTimeout(() => r(undefined), timeoutMs))]);
-    return parseVerdict(out);
+    return parseVerdict(await Promise.race([run(judgePrompt(i)), new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), timeoutMs)))]));
   } catch {
     return { decision: "ask", reason: "judge failed" };
+  } finally {
+    clearTimeout(timer); // an answer that comes in time must not leave a 20 s timer behind
   }
 }
 
