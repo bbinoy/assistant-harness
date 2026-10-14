@@ -25,7 +25,7 @@ test("settings: three folders under HARNESS_DATA_DIR, default is the repo root",
 
 test("settings: chat session rules are validated", () => {
   const d = loadSettings({});
-  assert.deepEqual([d.chatIdleResetHours, d.chatCompactTokens], [6, 110_000]);
+  assert.deepEqual([d.chatIdleResetHours, d.chatCompactTokens], [6, 150_000]);
   assert.throws(() => loadSettings({ CHAT_IDLE_RESET_HOURS: "0" }), /CHAT_IDLE_RESET_HOURS/);
   assert.throws(() => loadSettings({ CHAT_IDLE_RESET_HOURS: "169" }), /CHAT_IDLE_RESET_HOURS/);
   assert.throws(() => loadSettings({ CHAT_COMPACT_TOKENS: "9999" }), /CHAT_COMPACT_TOKENS/);

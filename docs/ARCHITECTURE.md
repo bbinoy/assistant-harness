@@ -36,7 +36,7 @@ Agent memory is usually described in layers. Here is where each one lives:
 
 | Pattern | What it is here |
 |---|---|
-| **Working memory** | The chat conversation. It resumes between messages, starts fresh after a long idle gap (`CHAT_IDLE_RESET_HOURS`, 6 by default, so effectively each morning), and is compacted in place with the SDK's own `/compact` once a turn's context passes `CHAT_COMPACT_TOKENS` (110,000 by default; tools and skills alone are about 50k). Compaction runs after the reply is sent, never delays it, and backs off for an hour if it fails. |
+| **Working memory** | The chat conversation. It resumes between messages, starts fresh after a long idle gap (`CHAT_IDLE_RESET_HOURS`, 6 by default, so effectively each morning), and is compacted in place with the SDK's own `/compact` once a turn's context passes `CHAT_COMPACT_TOKENS` (150,000 by default; tools and skills alone are about 50k). Compaction runs after the reply is sent, never delays it, and backs off for an hour if it fails. |
 | **Episodic memory** | What happened: `logs/audit.jsonl` (every decision), and the heartbeat digest the daily brief is built from. |
 | **Summary memory** | `memory/last-brief.md`: yesterday's brief, so today's builds on it instead of starting over. |
 | **Semantic memory** | `memory/notes/`: what you have told it, one markdown note per fact, kept by the SDK's auto-memory with an index (`MEMORY.md`). Plus your own skills and `CLAUDE.md`. |

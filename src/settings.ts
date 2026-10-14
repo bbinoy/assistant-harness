@@ -188,8 +188,8 @@ export function loadSettings(env: Env) {
     // Chat session hygiene: the SDK only compacts near the context limit, so a long-lived
     // session would re-send an ever-growing history on every turn.
     chatIdleResetHours: num(env, "CHAT_IDLE_RESET_HOURS", 6, 1, 168), // idle this long: start a fresh session
-    chatCompactGrowthTokens: num(env, "CHAT_COMPACT_GROWTH_TOKENS", 60_000, 5_000, 400_000), // the conversation itself (context minus tools, skills and prompts) this big: compact afterwards, owner and groups alike
-    chatCompactTokens: num(env, "CHAT_COMPACT_TOKENS", 110_000, 10_000, 500_000), // fallback for a session saved before the baseline was recorded: a turn this big: compact afterwards (tools and skills alone are ~50k)
+    chatCompactGrowthTokens: num(env, "CHAT_COMPACT_GROWTH_TOKENS", 100_000, 5_000, 400_000), // the conversation itself (context minus tools, skills and prompts) this big: compact afterwards, owner and groups alike
+    chatCompactTokens: num(env, "CHAT_COMPACT_TOKENS", 150_000, 10_000, 500_000), // fallback for a session saved before the baseline was recorded: a turn this big: compact afterwards (tools and skills alone are ~50k)
 
     // The bundled skills (plugin/skills) are loaded straight from the repo: nothing to install.
     pluginDir: resolve(fileURLToPath(new URL("../plugin", import.meta.url))),
