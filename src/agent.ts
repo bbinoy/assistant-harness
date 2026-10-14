@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { query, startup, type HookCallbackMatcher, type Options, type SDKMessage, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
-import type { Source } from "./audit.ts";
+import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
+import { pausing, RunTimeout, withCeiling, type Ceiling } from "./ceiling.ts";
 import { chatResume, type Resume } from "./chatsession.ts";
 import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
 import type { Conversation } from "./conversation.ts";
@@ -166,9 +167,26 @@ async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOptions, prev
   throw new Error("agent stream ended without a result");
 }
 
-async function runAgent(prompt: string, approve: Approve, opts: RunOptions): Promise<AgentReply> {
+// The one place every run passes: chat, groups, wake-ups, brief, radar, the mail handler. On the ceiling the query is aborted, the
+// timeout is logged and audited, and the rejection takes the usual error path (a notice, rate-limited in groups; the queue moves on).
+// A chat run (the owner's chat and groups alike) and a background run have their own limits (settings.ts).
+async function underCeiling<T>(source: Source, run: (c: Ceiling) => Promise<T>): Promise<T> {
+  const chat = source === "chat" || source === "group";
+  try {
+    return await withCeiling((chat ? settings.runMaxMinutesChat : settings.runMaxMinutesBackground) * 60_000, run);
+  } catch (e) {
+    if (e instanceof RunTimeout) {
+      console.error(`run: timed out after ${e.minutes} minutes (${source})`);
+      audit("run", "timeout", source, { minutes: e.minutes });
+    }
+    throw e;
+  }
+}
+
+export async function runAgent(prompt: string, approve: Approve, opts: RunOptions, io: { query?: typeof query } = {}): Promise<AgentReply> {
   const { resume, previousCost } = opts.sessionFile ? chatResume(true, opts.sessionFile) : { resume: undefined, previousCost: 0 };
-  return consume(query({ prompt, options: buildOptions(approve, opts, resume) }), opts, previousCost);
+  // A background run is always cold, so the approval it waits on belongs to this run and does not count against its ceiling.
+  return underCeiling(opts.source, (c) => consume((io.query ?? query)({ prompt, options: { ...buildOptions(pausing(c, approve), opts, resume), abortController: c.controller } }), opts, previousCost));
 }
 
 // --- warm processes for the next message ---
@@ -205,9 +223,22 @@ function warmUp(slot: SpareSlot<WarmQuery>, id: string, o: RunOptions, r: Resume
 // One turn: on the slot's warm process when it still fits, else a cold start. A warm process serves one query; one that no
 // longer fits is closed. Fall back to a cold start if the warm process is dead or never came up (an idle process can die
 // silently): once the turn has produced a message, an error is the turn's error, and running it again could repeat what it did.
-async function runWarmOrCold(slot: SpareSlot<WarmQuery>, id: string | undefined, o: RunOptions, r: Resume, label: string, input: ReturnType<typeof userInput>, cold: () => AsyncIterable<SDKMessage>): Promise<AgentReply> {
-  const warm = id ? await slot.take(id, spareKey(id, o, r))?.catch((e: Error) => console.error(`${label}: warm process unavailable, starting normally:`, e.message)) : undefined;
-  return consume(warm ? firstWarm(() => warm.query(input), cold, (e) => console.error(`${label}: warm process failed, starting normally:`, e.message)) : cold(), o, r.previousCost);
+async function runWarmOrCold(slot: SpareSlot<WarmQuery>, id: string | undefined, o: RunOptions, r: Resume, label: string, input: ReturnType<typeof userInput>, cold: (abort: AbortController) => AsyncIterable<SDKMessage>): Promise<AgentReply> {
+  try {
+    return await underCeiling(o.source, async (c) => {
+      const warm = id ? await slot.take(id, spareKey(id, o, r))?.catch((e: Error) => console.error(`${label}: warm process unavailable, starting normally:`, e.message)) : undefined;
+      // A warm process is stopped through its query: its abort controller was fixed when it started.
+      const onWarm = () => {
+        const q = warm!.query(input);
+        c.signal.addEventListener("abort", () => q.close(), { once: true });
+        return q;
+      };
+      return consume(warm ? firstWarm(onWarm, () => cold(c.controller), (e) => console.error(`${label}: warm process failed, starting normally:`, e.message)) : cold(c.controller), o, r.previousCost);
+    });
+  } catch (e) {
+    if (e instanceof RunTimeout && id && slot.holder === id) slot.drop(); // after an abort the conversation gets no spare built meanwhile
+    throw e;
+  }
 }
 
 // ---- the owner's chat ----
@@ -233,7 +264,7 @@ export async function ask(prompt: string, approve: Approve, notify: (text: strin
   const o = { ...chatOptions(notify), onFirstOutput: hooks?.firstOutput };
   const r = chatResume(true);
   const input = userInput(prompt, pictures);
-  return runWarmOrCold(spare, "owner", o, r, "chat", input, () => query({ prompt: input, options: buildOptions(approve, o, r.resume) }));
+  return runWarmOrCold(spare, "owner", o, r, "chat", input, (abortController) => query({ prompt: input, options: { ...buildOptions(approve, o, r.resume), abortController } }));
 }
 
 // ---- a group's chat ----
@@ -258,7 +289,7 @@ export async function runGroupTurn(conv: GroupConv, style: string, build: (since
   const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
   const input = userInput(prompt, pictures);
   // The group's own warm process, if it is the one kept and nothing it was built from has changed (same group, session, prompt, notes index).
-  return runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, () => (io.query ?? query)({ prompt: input, options: buildOptions(DENY_ALL, o, r.resume) }));
+  return runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, (abortController) => (io.query ?? query)({ prompt: input, options: { ...buildOptions(DENY_ALL, o, r.resume), abortController } }));
 }
 
 // Keep ONE warm process for the group that spoke last, replacing another group's. Called when a message arrives for a

@@ -90,6 +90,12 @@ export function loadSettings(env: Env) {
     approvalTimeoutMinutes: num(env, "APPROVAL_TIMEOUT_MINUTES", 15, 1, 1440),
     backgroundApprovalTimeoutMinutes: num(env, "BACKGROUND_APPROVAL_TIMEOUT_MINUTES", 120, 1, 2880),
 
+    // The longest one model run may take on the wall clock (src/ceiling.ts), so a hung turn cannot block its conversation until a
+    // restart. Chat: the owner's chat and every group. Background: gate tasks, brief, radar, mail handler; the time a background run
+    // spends waiting for an approval is not counted, so BACKGROUND_APPROVAL_TIMEOUT_MINUTES never cuts into it.
+    runMaxMinutesChat: num(env, "RUN_MAX_MINUTES_CHAT", 40, 1, 1440),
+    runMaxMinutesBackground: num(env, "RUN_MAX_MINUTES_BACKGROUND", 180, 1, 2880),
+
     // A small model's second opinion on approvals (src/autojudge.ts). It may skip the question for
     // calendar events that only touch you (broad: any source, chat: only in chat); shadow: it judges
     // and logs, you still decide; off: never.
