@@ -131,7 +131,7 @@ interface PipelineDeps {
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group?
   isOwner: (who: { from: string; fromUuid?: string }) => boolean;
   admitGroup: (conv: Conversation, m: GroupMessage) => Promise<void>; // the participation gate (group.ts)
-  compact?: (conv: Conversation) => Promise<void>; // after an answer is out; the next message waits for it. Every conversation
+  compact?: (conv: Conversation, mode: "urgent") => Promise<void>; // after an answer is out, only if the conversation grew far past the limit; the next message waits for it. Every conversation (quiet-time compaction is the heartbeat's, wake.ts)
   afterTurn?: (conv: Conversation) => void; // after any turn, success or not (the owner: warm up the process for the next message)
   now?: () => number;
   wait?: (ms: number) => Promise<void>; // the settling pause (tests)
@@ -291,7 +291,7 @@ export function createPipeline(deps: PipelineDeps) {
       turn.timing?.mark("total");
       turn.timing?.report(); // before compaction: that runs after the reply and is not part of the wait
       if (conv.kind === "group") audit("group_reply", sent.spoke || sent.reacted ? "sent" : "silent", "group");
-      if (!turn.reaction) await deps.compact?.(conv);
+      if (!turn.reaction) await deps.compact?.(conv, "urgent");
       return { spoke: sent.spoke };
     } catch (e) {
       turn.timing?.mark("total");

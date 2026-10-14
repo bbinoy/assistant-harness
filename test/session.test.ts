@@ -56,3 +56,20 @@ test("session: compaction counts growth since the first turn, the same for a big
   // a session saved before the baseline existed keeps the absolute limit
   assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 60_001 }), now, opts), "resume then compact");
 });
+
+test("session: quiet compaction waits for the conversation to be still; urgent needs 1.5 times the growth", () => {
+  const q = { ...opts, quietMinutes: 5 };
+  const at = (mode: "quiet" | "urgent", mins: number, last: number) =>
+    planSession(session({ lastTurnAt: new Date(now.getTime() - mins * 60_000).toISOString(), baseTokens: 10_000, lastContextTokens: last }), now, { ...q, mode });
+  assert.equal(at("quiet", 4.9, 60_000), "resume"); // grown, but written to a moment ago
+  assert.equal(at("quiet", 5, 60_000), "resume then compact");
+  assert.equal(at("quiet", 30, 50_000), "resume"); // exactly the limit (10k + 40k) is not more
+  assert.equal(at("urgent", 0, 70_000), "resume"); // 10k + 1.5 * 40k = 70k is not more
+  assert.equal(at("urgent", 0, 70_001), "resume then compact");
+  assert.equal(at("urgent", 0, 60_000), "resume"); // quiet would compact later
+  assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 90_000 }), now, { ...q, mode: "urgent" }), "resume"); // fallback limit 60k * 1.5
+  assert.equal(planSession(session({ lastTurnAt: ago(1), lastContextTokens: 90_001 }), now, { ...q, mode: "urgent" }), "resume then compact");
+  assert.equal(planSession(session({ lastTurnAt: ago(1), baseTokens: 1, lastContextTokens: 900_000 }), now, { ...q, mode: "off" }), "resume");
+  // a recent failure backs off in both modes
+  assert.equal(planSession(session({ lastTurnAt: ago(1), baseTokens: 1, lastContextTokens: 900_000, compactFailedAt: ago(0.5) }), now, { ...q, mode: "urgent" }), "resume");
+});

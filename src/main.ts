@@ -1,7 +1,7 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { createPipeline, group, owner, type Pipeline } from "./conversation.ts";
 import { ask, runProfile, prepareChat } from "./agent.ts";
-import { compactChatIfNeeded } from "./chatsession.ts";
+import { compactChatIfNeeded, compactDue } from "./chatsession.ts";
 import { setDraftReader, type Approve } from "./permissions.ts";
 import * as approvals from "./approvals.ts";
 import { config, mask } from "./config.ts";
@@ -99,7 +99,7 @@ const pipeline: Pipeline = createPipeline({
   vouch,
   isOwner: fromOwner,
   admitGroup: (_conv, m) => groupBrain(m),
-  compact: (conv) => compactChatIfNeeded(conv.sessionFile, conv.source, conv.notesDir), // every conversation, after the reply is out; the next message waits for it
+  compact: (conv, mode) => compactChatIfNeeded(conv.sessionFile, conv.source, conv.notesDir, mode), // every conversation, after the reply is out and only when it grew far past the limit (urgent); the next message waits for it
   // Warm process: one, for the owner's chat. Groups have none (bursty, many; a cold start per group turn is the price).
   afterTurn: (conv) => void (conv.kind === "owner" && warmChat()),
 });
@@ -165,6 +165,7 @@ const wakeups = createWakeups({
   vouch,
   runProfile: (profile, prompt, extra) => runProfile(profile, prompt, approveBackground, extra),
   presets: { sendBrief: out.sendBriefSummary, notify: say, beforeBrief: dream },
+  compact: { due: (conv) => compactDue(conv.sessionFile), run: (conv) => compactChatIfNeeded(conv.sessionFile, conv.source, conv.notesDir, "quiet") },
 });
 
 // Independent jobs: each starts on every tick in its own try/catch and none waits for another (startJobs, heartbeat.ts; the
