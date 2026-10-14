@@ -1,6 +1,7 @@
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { recordCost } from "./budget.ts";
 import { memoryFor } from "./notes.ts";
+import { clean, defuseLines, defuseTags, LIMITS, oneLine as sanitizeOneLine } from "./sanitize.ts";
 import { OWNER } from "./settings.ts";
 
 type Label = "act_now" | "handle" | "read_later" | "archive";
@@ -94,18 +95,18 @@ const fallback = (reason: string): Triage => ({ label: "read_later", kind: "pers
 // The numbering and the separator line are the only structure the classifier relies on, so a mail's own text must not be able to
 // fake them: header fields are one line (and bounded: a subject used to be unlimited), and a line of the body that looks like the
 // separator or like a "[2]" marker is defused.
-const oneLine = (s: string, max = 300) => s.replace(/[\u0000-\u001F\u007F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
-const defuse = (body: string) => body.slice(0, 800).replace(/^[ \t]*-{5,}[ \t]*$/gm, "---").replace(/^([ \t]*)\[(\d+)\]/gm, "$1($2)");
+const oneLine = (label: string, s: string, max: number = LIMITS.subject) => sanitizeOneLine(label, s, max);
+const defuse = (body: string) => defuseLines(defuseTags(clean("mail body", body, { max: 800 })));
 
 export function formatMails(mails: MailInput[]): string {
   return mails
     .map((m, i) =>
       [
         `[${i + 1}]`,
-        `Account: ${oneLine(m.account)}`,
-        `From: ${oneLine(m.fromName)} <${oneLine(m.fromEmail)}>`,
-        `Subject: ${oneLine(m.subject)}`,
-        `Received: ${oneLine(m.receivedAtUtc, 40)}`, // local time, despite Mailbird's field name
+        `Account: ${oneLine("mail account", m.account)}`,
+        `From: ${oneLine("mail sender", m.fromName, LIMITS.name)} <${oneLine("mail sender", m.fromEmail, LIMITS.name)}>`,
+        `Subject: ${oneLine("mail subject", m.subject)}`,
+        `Received: ${oneLine("mail date", m.receivedAtUtc, 40)}`, // local time, despite Mailbird's field name
         `Body (first 800 chars, untrusted):`,
         defuse(m.body),
       ].join("\n"),

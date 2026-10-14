@@ -1,3 +1,4 @@
+import { oneLine } from "./sanitize.ts";
 import { isTriage, readAudit, type AuditEntry } from "./audit.ts";
 
 export type TriageEntry = Pick<AuditEntry, "ts" | "decision"> & {
@@ -9,7 +10,7 @@ export function readTriageSince(sinceIso: string): TriageEntry[] {
 }
 
 const LIST_CAP = 40;
-const clip = (s: string | undefined, n: number) => (s ?? "").replace(/\s+/g, " ").slice(0, n);
+const clip = (s: string | undefined, n: number) => oneLine("digest", s ?? "", n);
 
 // What the heartbeat did with new mail since the last brief, as plain text for the
 // brief prompt. Pure function: easy to test.

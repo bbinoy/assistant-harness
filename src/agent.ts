@@ -19,6 +19,7 @@ import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
 import { recentNotices } from "./messages.ts";
 import { OWNER_SESSION_FILE, type ChatSession } from "./session.ts";
 import { settings } from "./settings.ts";
+import { cleanToolOutput } from "./toolclean.ts";
 import { readJson, readText, writeJson } from "./state.ts";
 import { recordToolsSeen, toolsSeen } from "./toolsseen.ts";
 import { firstWarm, SpareSlot } from "./warmslot.ts";
@@ -82,8 +83,13 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
       {
         hooks: [
           async (input) => {
-            if (input.hook_event_name === "PostToolUse") await afterTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, input.tool_response);
-            return {};
+            if (input.hook_event_name !== "PostToolUse") return {};
+            await afterTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, input.tool_response);
+            // Clean at the door: the model reads the cleaned result, not the original (counts only in the log).
+            const cleaned = cleanToolOutput(input.tool_name, input.tool_response);
+            if (!cleaned) return {};
+            console.log(`clean: tool result ${input.tool_name}: ${cleaned.removed} hidden character(s) removed, ${cleaned.hidden} hidden HTML part(s) left out, ${cleaned.cut} cut`);
+            return { hookSpecificOutput: { hookEventName: "PostToolUse" as const, updatedToolOutput: cleaned.output } };
           },
         ],
       },

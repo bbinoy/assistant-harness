@@ -11,6 +11,7 @@ import { group, type Batch, type Conversation, type Pipeline } from "./conversat
 import { quoteNote } from "./quote.ts";
 import { voiceOption } from "./voicereply.ts";
 import type { Quote } from "@ted-personal-assistant/signal";
+import { clean, defuseSpeakers, oneLine } from "./sanitize.ts";
 import { OWNER, settings } from "./settings.ts";
 
 // Group chats. In its own Signal account the assistant can be added to a group. There it is a friendly
@@ -32,7 +33,7 @@ const MAX_TEXT = 600;
 // own profile name (untrusted text, kept short and single-line), or "a member".
 export function speaker(m: { fromName?: string; isOwner: boolean }): string {
   if (m.isOwner) return `${OWNER} (the owner)`;
-  const name = (m.fromName ?? "").replace(/[\r\n<>]/g, " ").trim().slice(0, 40);
+  const name = oneLine("group member name", (m.fromName ?? "").replace(/[<>]/g, " "), 40);
   return name ? `${name} (a member)` : "a member";
 }
 
@@ -73,7 +74,7 @@ function trimMemberCache(now: number): void {
   for (const [key, v] of memberCache) if (now - v.at >= settings.groupMemberCacheMinutes * 60_000) memberCache.delete(key);
   while (memberCache.size > MAX_CACHED_GROUPS) memberCache.delete(memberCache.keys().next().value!);
 }
-export const groupName = (groupId: string): string => (memberCache.get(groupId)?.name ?? "").replace(/[\r\n"<>]/g, " ").trim().slice(0, 40) || "a group";
+export const groupName = (groupId: string): string => oneLine("group name", (memberCache.get(groupId)?.name ?? "").replace(/["<>]/g, " "), 40) || "a group";
 export const memberCacheSize = () => memberCache.size; // tests
 export async function ownerInGroup(groupId: string, lookup: () => Promise<{ id: string; name?: string; members: { number?: string; uuid?: string }[] }[]>, isOwner: (who: { number?: string; uuid?: string }) => boolean, now = Date.now()): Promise<boolean> {
   const hit = memberCache.get(groupId);
@@ -145,7 +146,8 @@ export function createGroupBrain(brain: Brain) {
 
   return async function onMessage(m: GroupMessage, now = new Date()): Promise<void> {
     const conv = group(m.groupId);
-    const line = m.reaction ? `${speaker(m)} reacted ${m.reaction.emoji.slice(0, 16)} to: ${m.reaction.on.slice(0, 200)}` : `${speaker(m)}: ${m.text.slice(0, MAX_TEXT)}`;
+    // Cleaned again here (idempotent) so a caller that skipped the door in conversation.ts still records clean text.
+    const line = m.reaction ? `${speaker(m)} reacted ${oneLine("reaction", m.reaction.emoji, 16)} to: ${defuseSpeakers(clean("reaction", m.reaction.on, { max: 200 }))}` : `${speaker(m)}: ${defuseSpeakers(clean("group message", m.text, { max: MAX_TEXT }))}`;
     if (!m.reaction && !m.text.trim()) return;
     pipeline.record(conv, "member", m.timestamp, line);
     const direct = m.addressedToMe;

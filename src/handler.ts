@@ -1,4 +1,5 @@
 import { runHandlerTurn } from "./agent.ts";
+import { oneLine } from "./sanitize.ts";
 import type { Approve } from "./permissions.ts";
 import { audit } from "./audit.ts";
 import { draftCollector } from "./propose.ts";
@@ -23,7 +24,7 @@ export interface HandleItem {
 }
 
 const load = () => readJson<HandleItem[]>(QUEUE, []);
-const safe = (s: string) => s.replace(/[<>"\n\r]/g, " ").slice(0, 120);
+const safe = (s: string) => oneLine("mail row", s.replace(/[<>"]/g, " "), 120);
 
 export function handlerPrompt(items: HandleItem[]): string {
   const blocks = items
