@@ -1,8 +1,17 @@
 # @ted-personal-assistant/signal
 
-A small client for [signal-cli](https://github.com/AsamK/signal-cli)'s JSON-RPC daemon, for building a personal assistant or bot on Signal. No runtime dependencies, Node 24+, ships compiled JavaScript with type declarations. It started inside the Ted personal assistant and works on its own.
+A small, dependency-free TypeScript client for [signal-cli](https://github.com/AsamK/signal-cli)'s JSON-RPC daemon, for building bots and personal assistants on Signal.
 
-> Version 0.x: the API may still change between minor versions. Unofficial; not affiliated with Signal.
+- **Two ways to reach someone.** *Note to Self*: the bot is a linked device of your own account. Or *own account*: the bot is a separate Signal account that shows up as a contact, can join groups and shows "typing…" and "seen".
+- **The Signal features a bot needs.** Text with styles, mentions, quotes (threaded replies), reactions, read receipts, typing, attachments, and groups (including whether a message is addressed to the bot).
+- **A library that behaves.** It never calls `process.exit`, installs signal handlers or logs by default: you get a close event and a daemon handle and decide what happens.
+- **Testable.** `/testing` ships `FakeSignalDaemon`, a fake of signal-cli's socket, so a bot's tests need no Signal account.
+- **Optional voice.** Voice messages in (local whisper.cpp) and out (local Kokoro, or your own or a hosted speech server), as separate entry points that the core never imports.
+- **Typed and small.** Zero runtime dependencies, compiled JavaScript with `.d.ts` files, Node 24+, MIT.
+
+It was written for, and is used every day by, a personal assistant ([Ted](https://github.com/bbinoy/ted-personal-assistant)) that lives in a Signal chat and in groups. Unofficial; not affiliated with Signal or signal-cli.
+
+> Version 0.x: the API may still change between minor versions.
 
 ## Install
 

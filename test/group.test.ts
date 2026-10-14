@@ -282,6 +282,23 @@ test("groups: a failure while someone waits is explained (not repeated); an unad
   assert.equal(broken.sent.length, 0);
 });
 
+test("groups: when the gate is refused (usage limit), a conversation the assistant is in hears it once; a group it has not spoken in stays silent", async () => {
+  const limit = async () => { throw new RateLimitError("limit"); };
+  // the assistant answered here a moment ago, so a message that is not tagged may well be for it
+  const g = gid();
+  const live = rig({ gate: limit });
+  await live.on(mk({ groupId: g })); // addressed: answered by the normal run
+  const before = live.sent.length;
+  await live.on(mk({ groupId: g, timestamp: 20, addressedToMe: false }));
+  await live.on(mk({ groupId: g, timestamp: 30, addressedToMe: false }));
+  assert.equal(live.sent.length, before + 1, "told once, not on every message");
+  assert.match(live.sent[live.sent.length - 1]!.text, /usage limit/);
+  // never spoken in this group: nobody is waiting, nothing is said
+  const quiet = rig({ gate: limit });
+  await quiet.on(mk({ groupId: gid(), addressedToMe: false }));
+  assert.equal(quiet.sent.length, 0);
+});
+
 test("groups: reactions are understood and can be made", async () => {
   const r = rig({ gate: async () => ({ act: false, delaySeconds: 0, nextCheckMinutes: 30 }) });
   await r.on(mk({ groupId: gid(), addressedToMe: false, fromName: "Eve", text: "", reaction: { emoji: "👍", on: "Ted: Net Gains FC" } }));

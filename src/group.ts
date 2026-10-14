@@ -2,6 +2,7 @@ import { clockLine } from "./brief.ts";
 import { budgetSpent } from "./budget.ts";
 import { fence } from "./fence.ts";
 import { prepareGroupChat, runGroupTurn } from "./agent.ts";
+import { AuthError, RateLimitError } from "./errors.ts";
 import { askGate, prepareGate, styleLines, type Gate } from "./gate.ts";
 import { recordWake } from "./ledger.ts";
 import { groupContext } from "./groupstore.ts";
@@ -116,7 +117,7 @@ export const realRunner: Runner = async (build, { conv, now, firstOutput }) => (
 
 
 interface Brain {
-  pipeline: Pick<Pipeline, "enqueue" | "burst" | "burstQueued" | "wait" | "holdTyping" | "runTurn" | "record" | "canSpeak" | "react">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
+  pipeline: Pick<Pipeline, "enqueue" | "burst" | "burstQueued" | "wait" | "holdTyping" | "runTurn" | "record" | "canSpeak" | "react" | "warn">; // the shared conversation code (conversation.ts): record, settle, run, reply, notice
   recent: (groupId: string) => string[]; // the tail of that history (for the gate; gate.ts logTail)
   context?: typeof groupContext; // what the run is shown (default: the group's log)
   run?: Runner;
@@ -189,7 +190,10 @@ export function createGroupBrain(brain: Brain) {
         batch.timing.set("gateWait", Date.now() - waitingSince);
         if (batch.stale()) return; // someone wrote meanwhile: that message is judged on its own
         if (!r.ok) {
-          console.error("group: gate failed:", (r.e as Error).message); // not addressed: nobody is waiting for an answer
+          console.error("group: gate failed:", (r.e as Error).message); // not addressed: usually nobody is waiting for an answer
+          // ...unless the assistant is in the middle of a conversation here (it spoke lately): then a message may well be for it,
+          // and a silent group looks like a broken one. The usage limit and an expired login are said once, like in a turn that fails.
+          if ((r.e instanceof RateLimitError || r.e instanceof AuthError) && st.lastSpoke && Date.now() - st.lastSpoke < stickyMs()) await pipeline.warn(conv, r.e);
           return;
         }
         const v = r.v;

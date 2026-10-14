@@ -275,6 +275,13 @@ export function createPipeline(deps: PipelineDeps) {
   }
 
   const lastNotice = new Map<string, number>();
+  // Tell the conversation what went wrong (the usage limit, an expired login, "something broke"), at most once per conv.noticeEveryMs
+  // (always in the owner's chat, every few minutes in a group). The one place both turns that fail and a gate that cannot decide use.
+  async function warn(conv: Conversation, e: unknown, quote?: Quote): Promise<boolean> {
+    if (now() - (lastNotice.get(conv.key) ?? 0) < conv.noticeEveryMs) return false;
+    lastNotice.set(conv.key, now());
+    return out.reply(conv.notice(e), { quote: conv.groupId ? quote : undefined, kind: conv.groupId ? "chat" : undefined, groupId: conv.groupId }).then(() => true, () => false);
+  }
 
   // One run for one conversation: typing, the model, the reply, or a notice if it failed. Call it inside
   // enqueue(). It never throws: a failure becomes a notice (if someone is waiting) and a result.
@@ -301,10 +308,7 @@ export function createPipeline(deps: PipelineDeps) {
       let noticed = false;
       if (!background) status(conv, "⚠️", turn.target);
       // Someone is waiting: say what is wrong (but not over and over, in a group).
-      if (!background && turn.announce && now() - (lastNotice.get(conv.key) ?? 0) >= conv.noticeEveryMs) {
-        lastNotice.set(conv.key, now());
-        noticed = await out.reply(conv.notice(e), { quote: conv.groupId ? turn.threadUnder : undefined, kind: conv.groupId ? "chat" : undefined, groupId: conv.groupId }).then(() => true, () => false);
-      }
+      if (!background && turn.announce) noticed = await warn(conv, e, turn.threadUnder);
       return { spoke: false, error: e, noticed };
     } finally {
       typing?.();
@@ -448,7 +452,7 @@ export function createPipeline(deps: PipelineDeps) {
   // A quick reaction of our own, no run needed (the gate chose it).
   const react = (conv: Conversation, emoji: string, target: { author: string; timestamp: number }) => void signal.react(emoji, target, conv.groupId);
 
-  return { handleIncoming, enqueue, burst, burstQueued, wait, holdTyping, runTurn, deliver, record, canSpeak, react };
+  return { handleIncoming, enqueue, burst, burstQueued, wait, holdTyping, runTurn, deliver, record, canSpeak, react, warn };
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>;

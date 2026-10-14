@@ -4,12 +4,13 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { group, owner, type Conversation } from "../src/conversation.ts";
-import { GATE_SCHEMA, gatePrompt, gateSystem, logTail, parseGate, styleSummary, tailLine } from "../src/gate.ts";
+import { askGateWith, GATE_SCHEMA, gatePrompt, gateSystem, logTail, parseGate, styleSummary, tailLine } from "../src/gate.ts";
 import { clampCheck, lookDue, lookState, wakeText } from "../src/ledger.ts";
 import { compactIfNeeded, findMessage, messagesSince, noticeLines, recordMessage, type Kind, type Sent } from "../src/messages.ts";
 import { groupConversation } from "../src/dream.ts";
 import { groupContext, groupLogFile } from "../src/groupstore.ts";
 import { classify } from "../src/policy.ts";
+import { AuthError, RateLimitError } from "../src/errors.ts";
 import { loadSettings, settings } from "../src/settings.ts";
 import { dataPath } from "../src/state.ts";
 import { createWakeups } from "../src/wake.ts";
@@ -343,4 +344,18 @@ test("wake: bad gate output fails closed; a gate that throws or acts without ins
 test("gate: a quick reaction must be exactly one emoji, otherwise it is dropped", () => {
   assert.equal(parseGate({ act: false, reaction: " 😂 ", nextCheckMinutes: 30 }).reaction, "😂");
   for (const bad of ["haha", "😂😂", "", 5, null]) assert.equal(parseGate({ act: false, reaction: bad, nextCheckMinutes: 30 }).reaction, undefined, String(bad));
+});
+
+test("gate: a refused call (usage limit, expired login) is an error, not a quiet 'no'; any other empty answer is still 'no'", async () => {
+  const fake = (assistantError: string | undefined, subtype: string) => ({
+    query: (() => Object.assign((async function* () {
+      if (assistantError) yield { type: "assistant", error: assistantError, parent_tool_use_id: null, message: { usage: {} } };
+      yield { type: "result", subtype, is_error: subtype !== "success", total_cost_usd: 0, duration_api_ms: 0 };
+    })(), { close() {} })) as never, // the gate closes what it started
+  });
+  const input = { conv: owner(), trigger: "clock" as const, now: new Date("2026-10-14T10:00:00Z"), tail: [] };
+  await assert.rejects(askGateWith(input, fake("rate_limit", "success")), RateLimitError);
+  await assert.rejects(askGateWith(input, fake("authentication_failed", "error_during_execution")), AuthError);
+  assert.equal((await askGateWith(input, fake(undefined, "error_max_turns"))).act, false);
+  assert.equal((await askGateWith(input, fake(undefined, "success"))).act, false); // no structured answer: fails closed
 });

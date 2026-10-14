@@ -1,6 +1,7 @@
 import { query, startup, type Options, type Query, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import { clockLine } from "./brief.ts";
 import { recordCost } from "./budget.ts";
+import { AuthError, failure, RateLimitError } from "./errors.ts";
 import { fence } from "./fence.ts";
 import { groupNotesBlock } from "./groupstore.ts";
 import { clampCheck, DEFAULT_CHECK_MINUTES, MAX_CHECK_MINUTES, MIN_CHECK_MINUTES, parseWake } from "./ledger.ts";
@@ -206,17 +207,22 @@ export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<Ga
   const cold = () => track((io.query ?? query)({ prompt, options: gateOptions(system) }));
   let api: number | undefined;
   let out = NOTHING;
+  let lastError: string | undefined; // the SDK reports a refused call (usage limit, expired login) as an assistant error code
   try {
     // Not `for await ... break`: leaving that loop waits ~0.8 s for the process to wind down, on the critical path.
     const it = (spare ? firstWarm(() => track(spare.query(prompt)), cold, (e) => console.error("gate: warm process failed, starting normally:", e.message)) : cold())[Symbol.asyncIterator]();
     for (let n = await it.next(); !n.done; n = await it.next()) {
       const m = n.value;
       mark("init");
+      if (m.type === "assistant" && m.error) lastError = m.error;
       if (m.type !== "result") continue;
       mark("result");
       api = m.duration_api_ms;
       recordCost(m.total_cost_usd);
       const p0 = Date.now();
+      // A usage limit or an expired login is NOT "nothing to do": say so (group.ts decides whether anyone needs to hear it).
+      const refused = failure(lastError, m.subtype);
+      if (refused instanceof RateLimitError || refused instanceof AuthError) throw refused;
       out = m.subtype === "success" && !m.is_error ? parseGate(m.structured_output) : NOTHING;
       at.parse = Date.now() - p0;
       break;
