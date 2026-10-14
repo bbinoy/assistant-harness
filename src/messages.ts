@@ -115,7 +115,7 @@ export const messagesSince = (sinceIso?: string, file: string = FILE): Sent[] =>
 export const ledgerEntries = (file: string = FILE): readonly Sent[] => readAll(file).sent; // shared with the cache: read-only
 
 const NOTICE_KINDS = new Set<Kind>(["notice", "draft", "brief"]);
-const NOTICE_AGE_MS = 24 * 3600_000;
+const NOTICE_AGE_MS = settings.noticeAgeHours * 3600_000;
 
 // Pure: what the assistant told the owner on its own in the last day, as plain lines for a prompt,
 // oldest first, the last few only. The chat reads it to understand "yes, do that"; the radar, to

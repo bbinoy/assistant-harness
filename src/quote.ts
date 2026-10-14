@@ -1,4 +1,5 @@
 import { fence } from "./fence.ts";
+import { settings } from "./settings.ts";
 import type { Quote } from "@ted-personal-assistant/signal";
 
 // Replies in Signal point at an earlier message. Two directions:
@@ -10,7 +11,7 @@ import type { Quote } from "@ted-personal-assistant/signal";
 //        messages may sit between the question and the answer.
 
 const MAX_QUOTE_CHARS = 1500;
-export const SLOW_REPLY_MS = 20_000;
+export const SLOW_REPLY_MS = settings.slowReplySeconds * 1000;
 
 // The quoted text can come from an email (alerts and briefs quote subjects), so it is fenced
 // as data, never instructions.

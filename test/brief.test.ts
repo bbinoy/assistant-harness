@@ -1,48 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { briefPrompt, clockLine, shouldRun, type BriefState } from "../src/brief.ts";
+import { briefPrompt, clockLine } from "../src/brief.ts";
 import { localDay } from "../src/pause.ts";
 import { buildDigest, type TriageEntry } from "../src/digest.ts";
 import { chunk } from "../src/outbound.ts";
-
-const opts = { startHour: 7, maxAttempts: 3, paused: false };
 const at = (iso: string) => new Date(iso); // local time, no zone suffix
-
-test("brief: does not run before the start hour", () => {
-  assert.equal(shouldRun({ attempts: 0 }, at("2026-10-12T06:59:00"), opts).run, false);
-});
-
-test("brief: runs on the first tick at or after the start hour", () => {
-  assert.equal(shouldRun({ attempts: 0 }, at("2026-10-12T07:00:00"), opts).run, true);
-});
-
-test("brief: runs late too, with no cutoff (Mac woke at 15:30)", () => {
-  assert.equal(shouldRun({ attempts: 0 }, at("2026-10-12T15:30:00"), opts).run, true);
-  assert.equal(shouldRun({ attempts: 0 }, at("2026-10-12T23:50:00"), opts).run, true);
-});
-
-test("brief: only once per day", () => {
-  const s: BriefState = { attempts: 1, doneDay: "2026-10-12", attemptDay: "2026-10-12" };
-  assert.equal(shouldRun(s, at("2026-10-12T09:00:00"), opts).run, false);
-  assert.equal(shouldRun(s, at("2026-10-13T07:15:00"), opts).run, true); // next day is fresh
-});
-
-test("brief: retries a failed run, up to the cap", () => {
-  const failed = (n: number): BriefState => ({ attempts: n, attemptDay: "2026-10-12" });
-  assert.equal(shouldRun(failed(1), at("2026-10-12T08:00:00"), opts).run, true);
-  assert.equal(shouldRun(failed(2), at("2026-10-12T08:15:00"), opts).run, true);
-  const capped = shouldRun(failed(3), at("2026-10-12T08:30:00"), opts);
-  assert.equal(capped.run, false);
-  assert.equal(capped.reason, "attempt cap reached");
-});
-
-test("brief: attempts from yesterday do not count today", () => {
-  assert.equal(shouldRun({ attempts: 3, attemptDay: "2026-10-11" }, at("2026-10-12T07:05:00"), opts).run, true);
-});
-
-test("brief: pause switch wins over everything", () => {
-  assert.equal(shouldRun({ attempts: 0 }, at("2026-10-12T09:00:00"), { ...opts, paused: true }).run, false);
-});
 
 test("clock line: exact weekday and date pairs", () => {
   const line = clockLine(at("2026-10-11T09:30:00"));

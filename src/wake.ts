@@ -135,12 +135,12 @@ export function createWakeups(deps: WakeDeps) {
   }
   const idle = async (): Promise<string[]> => Promise.all([...running.values()]);
 
-  const briefTask = (): Task => buildTask("owner", { task: "brief" }, { scheduler: "gate" })!;
+  const briefTask = (): Task => buildTask("owner", { task: "brief" })!;
 
   // The deterministic brief (no model decides): the backstop hour has passed with no brief logged today, or an attempt came
   // out incomplete. Not held back by quiet hours: a Mac that wakes late still gets that day's brief.
   async function backstop(conv: Conversation, st: LookState, now: Date): Promise<string | undefined> {
-    if (conv.kind !== "owner" || settings.scheduler !== "gate" || !briefOwed(st, now)) return undefined;
+    if (conv.kind !== "owner" || !briefOwed(st, now)) return undefined;
     if (paused(clock()) || spent()) return "guarded";
     return runPreset(conv, briefTask(), st, now);
   }
@@ -195,7 +195,7 @@ export function createWakeups(deps: WakeDeps) {
   }
 
   // Is today's brief still due? (The heartbeat's mail alerts and the radar wait for it.)
-  const briefIsPending = (now = clock()): boolean => settings.scheduler === "gate" && !paused(now) && briefPending(stateOf(owner(), now), now);
+  const briefIsPending = (now = clock()): boolean => !paused(now) && briefPending(stateOf(owner(), now), now);
 
   // Every conversation looks on its own: a slow brief or a failing group never delays another conversation.
   const busy = new Set<string>();

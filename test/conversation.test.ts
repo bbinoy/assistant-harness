@@ -504,3 +504,59 @@ test("groups: an unusable voice message or picture is explained only to someone 
   await bad.pipeline.handleIncoming(group(GID), gm({ image: { id: "p.jpg", size: 10 }, addressedToMe: true }));
   assert.deepEqual(bad.r.sent.map((s) => [s.text, s.groupId]), [["I couldn't hear any words in that voice message.", GID], ["I couldn't open that picture.", GID]]);
 });
+
+// Characterization of the intake differences between the owner's chat and a group (pinned before they were unified).
+test("groups: a picture is opened only when it will be used; an unopenable one is dropped but the caption stays", async () => {
+  const { settings } = await import("../src/settings.ts");
+  const mutable = settings as { groupParticipation: string };
+  const was = mutable.groupParticipation;
+  try {
+    for (const [mode, addressed, opened] of [["tagged", false, 0], ["tagged", true, 1], ["auto", false, 1]] as const) {
+      mutable.groupParticipation = mode;
+      let n = 0;
+      const got: any[] = [];
+      const { pipeline } = rig({ picture: async () => (n++, PIC), admitGroup: async (_c: unknown, m: unknown) => void got.push(m) });
+      await pipeline.handleIncoming(group(GID), gmsg({ text: "look", image: { id: "p.jpg", size: 10 }, addressedToMe: addressed }));
+      assert.equal(n, opened, `${mode} addressed=${addressed}`);
+      assert.deepEqual([got[0].text, got[0].picture], ["🖼️ look", opened ? PIC : undefined]);
+    }
+    mutable.groupParticipation = "auto";
+    const got: any[] = [];
+    const bad = rig({ picture: async () => { throw new Error("I couldn't open that picture."); }, admitGroup: async (_c: unknown, m: unknown) => void got.push(m) });
+    await bad.pipeline.handleIncoming(group(GID), gmsg({ text: "", image: { id: "p.jpg", size: 10 } }));
+    assert.deepEqual([got.length, got[0].text, got[0].picture], [1, "🖼️ image", undefined]);
+    assert.deepEqual(bad.r.sent.map((s) => s.text), ["I couldn't open that picture."]); // addressed: told, and still admitted
+  } finally {
+    mutable.groupParticipation = was;
+  }
+});
+
+test("groups: no read receipt without an author; the owner's chat is always marked read, without an author", async () => {
+  const g = rig();
+  await g.pipeline.handleIncoming(group(GID), gmsg({ from: "", fromUuid: undefined }));
+  assert.equal(g.r.reads.length, 0);
+  const o = rig();
+  await o.pipeline.handleIncoming(owner(), msg({ text: "" , audio: { id: "a.aac", size: 3 } }));
+  assert.deepEqual(o.r.reads, [{ ts: 111, from: undefined }]);
+});
+
+test("log: a finished turn says which conversation kind replied or failed", async () => {
+  const lines: string[] = [];
+  const { log, error } = console;
+  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+  console.error = (...a: unknown[]) => void lines.push(a.join(" "));
+  try {
+    await rig().pipeline.handleIncoming(owner(), msg());
+    await rig({ run: async () => { throw new Error("boom"); } }).pipeline.handleIncoming(owner(), msg());
+    const g = rig();
+    await g.pipeline.runTurn(group(GID), { run: async () => ({ text: "hi", costUsd: 0.01 }), announce: false });
+    await g.pipeline.runTurn(group(GID), { run: async () => { throw new Error("boom"); }, announce: false });
+  } finally {
+    console.log = log;
+    console.error = error;
+  }
+  assert.ok(lines.includes("owner replied (2 chars, $0.0100)"), lines.join("|"));
+  assert.ok(lines.includes("owner: run failed: boom"));
+  assert.ok(lines.includes("group replied (2 chars, $0.0100)"));
+  assert.ok(lines.includes("group: run failed: boom"));
+});

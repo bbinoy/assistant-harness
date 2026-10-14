@@ -1,17 +1,11 @@
 import { FILE as OWNER_LOG, recordMessage, ledgerEntries } from "./messages.ts";
 import { ledger } from "./ledger.ts";
-import { emptyState, MIN_GAP_MINUTES, nudge, type RadarState } from "./radar-rules.ts";
-import { settings } from "./settings.ts";
-import { readJson, writeJson } from "./state.ts";
-
-export const STATE = "state/radar.json";
+import { MIN_GAP_MINUTES } from "./radar-rules.ts";
 
 // The assistant itself changed the calendar (chat, handler, brief): the radar looks again soon.
-//   legacy scheduler: the radar's own state pulls its next run forward.
-//   gate scheduler:   a line in the owner's log ledger tells the gate ("[nudge] ..."), and the owner's next look is
-//                     pulled forward to MIN_GAP_MINUTES from now if it was later.
+// A line in the owner's log ledger tells the gate ("[nudge] ..."), and the owner's next look is pulled forward to
+// MIN_GAP_MINUTES from now if it was later.
 export function nudgeRadar(now = new Date()): void {
-  if (settings.scheduler === "legacy") return void writeJson(STATE, nudge(readJson<RadarState>(STATE, emptyState()), now));
   const entries = ledgerEntries(OWNER_LOG);
   if (entries.some((e) => e.kind === "action" && e.text.startsWith("[nudge]") && now.getTime() - Date.parse(e.at) < MIN_GAP_MINUTES * 60_000)) return; // one per half hour is enough
   recordMessage("action", now.getTime(), ledger.nudge(), now);

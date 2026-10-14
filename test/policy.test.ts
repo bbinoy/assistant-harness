@@ -4,7 +4,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { idsOf } from "../src/permissions.ts";
 import { NOTES_DIR } from "../src/notes.ts";
-import { applyChanges, classify, hiddenTools, isReadTool } from "../src/policy.ts";
+import { applyChanges, classify, hiddenTools, isReadTool, UNATTENDED_WRITES } from "../src/policy.ts";
+import { SOURCES } from "../src/audit.ts";
+
+test("policy: the sources audit.ts names and the sources policy.ts has rights for are the same set", () => {
+  assert.deepEqual(Object.keys(UNATTENDED_WRITES).sort(), [...SOURCES].sort());
+  assert.equal(new Set(SOURCES).size, SOURCES.length);
+  for (const source of SOURCES) assert.ok(["allow", "ask", "deny"].includes(classify("mcp__unknown__tool", {}, source)), source); // every source is classified, none throws
+});
 
 const N = "mcp__claude_ai_Notion__";
 const M = "mcp__mailbird__";

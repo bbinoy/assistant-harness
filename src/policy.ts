@@ -49,7 +49,7 @@ const ROUTINE_WRITES = new Set([
 
 // Least privilege by who is acting. The mail handler reads untrusted email with nobody
 // watching, so on its own it may only leave reply drafts; anything else it must ask for.
-const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
+export const UNATTENDED_WRITES: Record<Source, ReadonlySet<string>> = {
   chat: ROUTINE_WRITES,
   brief: ROUTINE_WRITES,
   handler: DRAFT_REPLIES,

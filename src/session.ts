@@ -5,6 +5,8 @@
 //     auto-compacts near the context limit and every turn re-sends the whole history.
 // The decision is a pure function so the boundaries are unit-tested.
 
+import { settings } from "./settings.ts";
+
 // The owner's session pointer; a group's is session.json in its own folder (groupstore.ts).
 export const OWNER_SESSION_FILE = "state/session.json";
 
@@ -17,7 +19,7 @@ export interface ChatSession {
   seenAt?: string; // groups: the newest log line the session has been shown (group lines nobody answered are prepended after it)
 }
 
-const COMPACT_BACKOFF_MS = 3600_000;
+const COMPACT_BACKOFF_MS = settings.compactBackoffMinutes * 60_000;
 
 type SessionPlan = "fresh" | "resume" | "resume then compact";
 

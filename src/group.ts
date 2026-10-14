@@ -69,7 +69,7 @@ const memberCache = new Map<string, { at: number; ok: boolean; name: string }>()
 export const groupName = (groupId: string): string => (memberCache.get(groupId)?.name ?? "").replace(/[\r\n"<>]/g, " ").trim().slice(0, 40) || "a group";
 export async function ownerInGroup(groupId: string, lookup: () => Promise<{ id: string; name?: string; members: { number?: string; uuid?: string }[] }[]>, isOwner: (who: { number?: string; uuid?: string }) => boolean, now = Date.now()): Promise<boolean> {
   const hit = memberCache.get(groupId);
-  if (hit && now - hit.at < 5 * 60_000) return hit.ok;
+  if (hit && now - hit.at < settings.groupMemberCacheMinutes * 60_000) return hit.ok;
   let ok = false;
   let name = "";
   try {
@@ -122,7 +122,7 @@ interface Brain {
 // as in the private chat; what stays here is the group's own question once the burst has settled: was the assistant
 // addressed (sticky until answered), or does the gate say it should speak.
 // A direct address that could not be answered (paused, over budget) is dropped after this long.
-const STICKY_MS = 30 * 60_000;
+const stickyMs = () => settings.groupStickyMinutes * 60_000;
 
 export function createGroupBrain(brain: Brain) {
   const { pipeline } = brain;
@@ -145,10 +145,10 @@ export function createGroupBrain(brain: Brain) {
     // A group worth answering just got a message: make sure its warm process is the kept one. Not while its own turn runs
     // (the session is about to change; the end of that turn prepares it), nor when nothing will be answered.
     if (!st.running && !isPaused(now) && !budgetSpent()) warm?.(conv, false);
-    if (direct) st.addressed = { line, quote: { text: m.text.slice(0, 200), author: m.author ?? "", timestamp: m.timestamp }, incoming: m.quote, voice: !!m.voice, picture: m.picture, at: now.getTime() }; // sticky until answered, or until it is too old to answer (STICKY_MS)
-    // Still waiting for an answer to a direct address? (It lapses after STICKY_MS: answering hours later would be odd.)
+    if (direct) st.addressed = { line, quote: { text: m.text.slice(0, 200), author: m.author ?? "", timestamp: m.timestamp }, incoming: m.quote, voice: !!m.voice, picture: m.picture, at: now.getTime() }; // sticky until answered, or until it is too old to answer (GROUP_STICKY_MINUTES)
+    // Still waiting for an answer to a direct address? (It lapses after GROUP_STICKY_MINUTES: answering hours later would be odd.)
     const pending = () => {
-      if (st.addressed && now.getTime() - st.addressed.at > STICKY_MS) st.addressed = undefined;
+      if (st.addressed && now.getTime() - st.addressed.at > stickyMs()) st.addressed = undefined;
       return st.addressed;
     };
     // The gate is asked the moment an untagged message arrives, in parallel with the settling pause, so the two overlap

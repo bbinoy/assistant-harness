@@ -98,8 +98,7 @@ export async function doctor() {
   const dream = readJson<{ lastRunAt?: string }>("state/dream.json", {});
   line(true, "nightly dream", settings.dream ? `once a day before the brief; last run ${dream.lastRunAt ? localTime(dream.lastRunAt) : "not yet"}` : "off (DREAM=off)");
 
-  const radar = readJson<{ lastRunAt?: string; nextRunAt?: string; sent?: number }>("state/radar.json", {});
-  line(true, "proactive radar", settings.proactive ? `adaptive, at most every ${settings.radarMinutes} min; last run ${radar.lastRunAt ? localTime(radar.lastRunAt) : "not yet"}${radar.nextRunAt ? `, next ${localTime(radar.nextRunAt)}` : ""}; ${radar.sent ?? 0} message(s) today` : "off (PROACTIVE=off)");
+  line(true, "proactive radar", settings.proactive ? `chosen by your chat's gate, about every ${settings.radarMinutes} min (its "[radar] ran" lines are in the log)` : "off (PROACTIVE=off)");
 
   const beat = readJson<{ lastTickAt?: string; lastNewMailAt?: string }>("state/heartbeat.json", {});
   const ageMin = beat.lastTickAt ? (Date.now() - Date.parse(beat.lastTickAt)) / 60_000 : Infinity;
