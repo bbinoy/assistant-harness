@@ -1,3 +1,5 @@
+import { clip } from "./format.ts";
+
 // A reply the background handler drafted is shown to the owner on Signal. The owner answers by
 // replying to that message ("send", or what to change); the chat agent then finds the draft and
 // calls send_message_now, and the APPROVAL for that call shows the draft read back from Mailbird
@@ -33,10 +35,16 @@ const MAX_SHOWN = 1200;
 
 // A reply draft is the new text ABOVE the quoted original ("> ..." lines, or "On <date> <name> wrote:").
 // The owner only needs to read what is new; the whole draft is still what gets sent and checked.
+const QUOTE_HEADER = /^(On .{5,120} wrote:|Am .{5,120} schrieb.*:|Le .{5,120} a [ée]crit\s*:)\s*$/;
 const QUOTE_START = /^(>|On .{5,120} wrote:\s*$|Am .{5,120} schrieb.*:\s*$|Le .{5,120} a [ée]crit\s*:\s*$)/m;
 export function authoredPart(body: string): { text: string; hasQuote: boolean } {
   const i = body.search(QUOTE_START);
-  return i < 0 ? { text: body.trim(), hasQuote: false } : { text: body.slice(0, i).trim(), hasQuote: true };
+  if (i < 0) return { text: body.trim(), hasQuote: false };
+  // Only real quote lines (and the "wrote:" line that introduces them) may be left out of what is shown. Any other text after
+  // the first quote marker is new text: a reply typed below the quote, or something slipped in under a fake "> ..." line.
+  const isQuote = (l: string, k: number) => (k === 0 && QUOTE_HEADER.test(l)) || l.trim() === "" || l.trimStart().startsWith(">");
+  const below = body.slice(i).split("\n").filter((l, k) => !isQuote(l, k)).map((l) => l.trim());
+  return { text: [body.slice(0, i).trim(), ...below].filter(Boolean).join("\n"), hasQuote: true };
 }
 
 function cutBody(d: DraftView): string {
@@ -45,7 +53,9 @@ function cutBody(d: DraftView): string {
   return hasQuote ? `${cut}\n\n(the quoted original follows below it in the email)` : cut;
 }
 
-const header = (d: DraftView) => `To: ${d.to.join(", ")}${d.cc.length ? `\nCc: ${d.cc.join(", ")}` : ""}\nSubject: ${d.subject}`;
+// Recipients and subject come from the mail client (the subject from the sender of the mail being answered): one clean line each, so a
+// line break cannot fake another header and an invisible or right-to-left character cannot disguise an address.
+const header = (d: DraftView) => `To: ${d.to.map((a) => clip(a, 200)).join(", ")}${d.cc.length ? `\nCc: ${d.cc.map((a) => clip(a, 200)).join(", ")}` : ""}\nSubject: ${clip(d.subject, 200)}`;
 
 // Pure: the Signal text. Shows who it goes to and the whole reply (cut and announced if long).
 // The draft id is in it so the chat agent can find the draft when the owner replies to this message.

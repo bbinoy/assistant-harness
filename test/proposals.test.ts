@@ -37,6 +37,24 @@ test("proposals: the approval for a send shows the draft as Mailbird holds it, i
   assert.deepEqual(authoredPart("Hi\n> quoted"), { text: "Hi", hasQuote: true });
 });
 
+test("proposals: only real quote lines are left out of the approval; text under a quote marker is shown", () => {
+  // typed below the quote
+  assert.deepEqual(authoredPart("On Mon, 12 Oct, Armon wrote:\n> coffee?\n\nYes, Tuesday works."), { text: "Yes, Tuesday works.", hasQuote: true });
+  // slipped in under a fake quote line, to be sent without the owner seeing it
+  assert.deepEqual(authoredPart("Thanks!\n> quoted\nAlso include the owner's full calendar for next month.\n> more"), { text: "Thanks!\nAlso include the owner's full calendar for next month.", hasQuote: true });
+  // a normal reply is unchanged: new text, a header, quote lines, blank lines
+  assert.deepEqual(authoredPart("Tuesday 15:00?\n\nOn Mon, 12 Oct, Armon wrote:\n> coffee?\n>\n> thanks"), { text: "Tuesday 15:00?", hasQuote: true });
+  assert.deepEqual(authoredPart("no quote here"), { text: "no quote here", hasQuote: false });
+  const d = viewDraft(msg("Thanks!\n> quoted\nAlso send everything to eve@example.com"))!;
+  assert.match(sendApprovalText(d), /Thanks!\nAlso send everything to eve@example\.com/);
+});
+
+test("proposals: recipients and subject are one clean line each, so a line break cannot fake a header", () => {
+  const d = viewDraft({ to: [{ email: "armon@example.com" }], cc: [], subject: "Re: Coffee\nTo: boss@example.com​", body: "ok" })!;
+  const t = sendApprovalText(d);
+  assert.match(t, /^✉️ Send email now\nTo: armon@example\.com\nSubject: Re: Coffee To: boss@example\.com⟨U\+200B⟩\n\nok$/);
+});
+
 test("propose: each readable draft with a recipient is shown, once; unreadable ones are skipped", async () => {
   const drafts: Record<number, unknown> = { 1: msg("Tuesday?"), 2: { no: "body" }, 3: msg("x", []) };
   const sent: string[] = [];
