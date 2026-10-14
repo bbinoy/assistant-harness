@@ -1,6 +1,8 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
 import { createPipeline, group, owner, type Pipeline } from "./conversation.ts";
-import { ask, runProfile, setDraftReader, setAutoApprovedNotice, compactChatIfNeeded, prepareChat, type Approve } from "./agent.ts";
+import { ask, runProfile, prepareChat } from "./agent.ts";
+import { compactChatIfNeeded } from "./chatsession.ts";
+import { setDraftReader, setAutoApprovedNotice, type Approve } from "./permissions.ts";
 import * as approvals from "./approvals.ts";
 import { isBriefDue, maybeRunBrief } from "./brief.ts";
 import { config, mask } from "./config.ts";

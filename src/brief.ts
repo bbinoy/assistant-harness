@@ -1,4 +1,6 @@
-import { AuthError, runBriefTurn, type Approve } from "./agent.ts";
+import { AuthError } from "./errors.ts";
+import { runBriefTurn } from "./agent.ts";
+import type { Approve } from "./permissions.ts";
 import { audit } from "./audit.ts";
 import { overBudget } from "./budget.ts";
 import { buildDigest, readTriageSince } from "./digest.ts";

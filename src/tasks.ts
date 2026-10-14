@@ -1,5 +1,5 @@
 import { audit } from "./audit.ts";
-import type { OwnerProfile, ProfileName } from "./agent.ts";
+import type { OwnerProfile, ProfileName } from "./profiles.ts";
 import { BRIEF_INSTRUCTIONS, currentBriefPrompt, markBriefDone, runBriefAttempt, type BriefOutcome } from "./brief.ts";
 import { buildDigest, readTriageSince } from "./digest.ts";
 import { ledger, type GateOutput, type LookState, type TaskName } from "./gate.ts";

@@ -7,6 +7,7 @@ import type { GroupMessage } from "./group.ts";
 import { FILE as OWNER_LOG, findMessage, type Kind } from "./messages.ts";
 import { NOTES_DIR } from "./notes.ts";
 import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
+import { OWNER_SESSION_FILE } from "./session.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
@@ -44,7 +45,7 @@ const OWNER_CONVERSATION: Conversation = Object.freeze({
   source: "chat",
   logFile: OWNER_LOG,
   notesDir: NOTES_DIR,
-  sessionFile: "state/session.json",
+  sessionFile: OWNER_SESSION_FILE,
   gate: false,
   approvals: true,
   threadAlways: false,

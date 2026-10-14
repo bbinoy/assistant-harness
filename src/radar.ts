@@ -1,4 +1,5 @@
-import { runRadarTurn, type Approve } from "./agent.ts";
+import { runRadarTurn } from "./agent.ts";
+import type { Approve } from "./permissions.ts";
 import { audit } from "./audit.ts";
 import { inQuietHours } from "./actions.ts";
 import { clockLine } from "./brief.ts";

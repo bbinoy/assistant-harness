@@ -11,7 +11,7 @@ import { ledgerEntries, logSignature } from "./messages.ts";
 import { localDay } from "./pause.ts";
 import { voiceOption } from "./voicereply.ts";
 import { isPaused } from "./pause.ts";
-import type { OwnerProfile } from "./agent.ts";
+import type { OwnerProfile } from "./profiles.ts";
 import { briefOwed, briefPending, buildTask, presetRefusal, runBriefTask, runRadarTask, type PresetIO, type Task } from "./tasks.ts";
 import { OWNER, settings } from "./settings.ts";
 

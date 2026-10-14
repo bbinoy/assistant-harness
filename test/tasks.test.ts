@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PROFILES } from "../src/agent.ts";
+import { PROFILES } from "../src/profiles.ts";
 import { group, owner, type Conversation } from "../src/conversation.ts";
 import { gateSystem, parseGate } from "../src/gate.ts";
 import { recordMessage, type Kind } from "../src/messages.ts";

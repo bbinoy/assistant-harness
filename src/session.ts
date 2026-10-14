@@ -5,6 +5,9 @@
 //     auto-compacts near the context limit and every turn re-sends the whole history.
 // The decision is a pure function so the boundaries are unit-tested.
 
+// The owner's session pointer; a group's is session.json in its own folder (groupstore.ts).
+export const OWNER_SESSION_FILE = "state/session.json";
+
 export interface ChatSession {
   sessionId?: string;
   costUsd: number; // total_cost_usd is cumulative across a resumed session, so we keep the running total
