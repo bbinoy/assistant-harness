@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agreement, isJudgeable, judgeAction, judgePrompt, mayAutoApprove, parseVerdict } from "../src/autojudge.ts";
+import { agreement, isJudgeable, isPlainWebAddress, judgeAction, judgePrompt, mayAutoApprove, parseVerdict } from "../src/autojudge.ts";
 
 const CAL = "mcp__claude_ai_Google_Calendar__";
 
@@ -45,4 +45,16 @@ test("judge prompt: the owner's words and the action are fenced as data, and can
 test("judge report: counts where it agreed with the owner and where it would have been wrong", () => {
   const a = agreement([{ judge: "auto", ownerApproved: true }, { judge: "auto", ownerApproved: true }, { judge: "auto", ownerApproved: false }, { judge: "ask", ownerApproved: true }, { judge: "ask", ownerApproved: false }]);
   assert.deepEqual(a, { total: 5, judgedAuto: 3, autoOwnerApproved: 2, autoOwnerDeclined: 1, judgedAskOwnerApproved: 1 });
+});
+
+test("judge floor: opening a web page is judged only in chat, and only for a plain public address", () => {
+  const fetch = (url: string, source: "chat" | "handler" | "radar" | "brief" | "background" = "chat") => isJudgeable("WebFetch", { url, prompt: "what does it say" }, source);
+  assert.equal(fetch("https://en.wikipedia.org/wiki/Zurich"), true);
+  assert.equal(fetch("https://example.com/search?q=opening+hours"), true);
+  // unattended runs read untrusted mail and pages: they always ask
+  for (const s of ["handler", "radar", "brief", "background"] as const) assert.equal(fetch("https://example.com/a", s), false, s);
+  // an address can carry data out: nothing but a plain https address on a named public host
+  for (const bad of ["http://example.com/a", "https://user:pw@example.com/a", "https://example.com:8443/a", "https://127.0.0.1/a", "https://192.168.1.5/a", "https://localhost/a", "https://printer.local/a", "https://intranet.internal/a", "https://[::1]/a", "https://example.com/a#frag", `https://example.com/a?d=${"x".repeat(130)}`, `https://example.com/${"a".repeat(300)}`, "not a url", "file:///etc/passwd", "ftp://example.com/a"]) assert.equal(isPlainWebAddress(bad), false, bad);
+  assert.equal(isPlainWebAddress(undefined), false);
+  assert.equal(isJudgeable("WebFetch", {}), false);
 });
