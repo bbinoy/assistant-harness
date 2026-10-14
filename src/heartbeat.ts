@@ -1,4 +1,6 @@
 import { formatAlert, inQuietHours, planActions } from "./actions.ts";
+import { mailBody } from "./mailtext.ts";
+import { LIMITS, oneLine } from "./sanitize.ts";
 import { audit } from "./audit.ts";
 import type { HandleItem } from "./handler.ts";
 import { Mailbird } from "./mailbird.ts";
@@ -65,8 +67,8 @@ const newMail = (inbox: { email: string }, row: Row): NewMail => ({
   accountEmail: inbox.email,
   conversationId: row.conversationId,
   messageId: row.lastMessageId,
-  from: row.lastSender,
-  subject: row.subject,
+  from: oneLine("mail sender", row.lastSender ?? "", LIMITS.name), // cleaned where the mail enters: audit, digest, alerts and prompts all start from this
+  subject: oneLine("mail subject", row.subject ?? ""),
   receivedAtUtc: row.receivedAtUtc,
 });
 
@@ -132,11 +134,11 @@ async function fetchInputs(mb: MailSource, mails: NewMail[]): Promise<MailInput[
     const msg = await mb.call<{ body?: string; from?: { displayName?: string; email?: string } }>("get_message", { messageId: m.messageId });
     return {
       account: m.accountEmail,
-      fromName: msg.from?.displayName ?? m.from,
-      fromEmail: msg.from?.email ?? "",
+      fromName: oneLine("mail sender", msg.from?.displayName ?? m.from, LIMITS.name),
+      fromEmail: oneLine("mail sender", msg.from?.email ?? "", LIMITS.name),
       subject: m.subject,
       receivedAtUtc: m.receivedAtUtc,
-      body: msg.body ?? "",
+      body: mailBody(msg.body ?? ""),
     };
   });
 }

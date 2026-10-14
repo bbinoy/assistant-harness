@@ -179,7 +179,11 @@ src/contain.ts       `isInside`: the one path-containment check (symlinks and `.
 src/logtrim.ts       cuts launchd-stderr.log down in place at start (pure part tested)
 src/session.ts       when a conversation's session resumes, starts fresh or gets compacted (pure, tested)
 src/migrate.ts       one-time move of old state/ files into logs/ and memory/ (idempotent)
-src/fence.ts         fences untrusted or stored text as data inside a prompt
+src/fence.ts         fences untrusted or stored text as data inside a prompt (cleaned and defused first)
+src/sanitize.ts      the one shared text sanitiser: hidden characters, caps, run collapse, fence and header defusing
+src/html.ts          HTML to visible text (parse5; drops hidden content)
+src/mailtext.ts      a mail body: html.ts, then sanitize.ts
+src/toolclean.ts     cleans tool results (used by the PostToolUse hook in agent.ts)
 src/reaction.ts      the model's emoji reactions: "[[react: 👍]]" at the start of a reply (pure, tested)
 src/quote.ts         Signal reply threading: quoted text in, threaded answers out (pure, tested)
 src/format.ts        readable approval text for each tool call (pure, tested)

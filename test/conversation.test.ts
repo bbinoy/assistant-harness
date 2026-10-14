@@ -124,7 +124,7 @@ test("private chat: threaded under the message only when it was a reply or the a
 
   let t = 1_000_000;
   const slow = rig({ now: () => t, run: async () => ((t += SLOW_REPLY_MS + 1), "late") });
-  await slow.pipeline.handleIncoming(owner(), msg({ text: "q".repeat(300) }));
+  await slow.pipeline.handleIncoming(owner(), msg({ text: "quick ".repeat(50) }));
   assert.equal(slow.r.sent[0]!.quote.text.length, 200);
 
   const quick = rig({ now: () => t });

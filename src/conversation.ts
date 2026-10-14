@@ -12,6 +12,7 @@ import { shouldThread, withQuoteContext } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
+import { clean, LIMITS, oneLine } from "./sanitize.ts";
 import { startTiming, type Timing } from "./timing.ts";
 import type { IncomingMessage, IncomingReaction, Quote } from "@ted-personal-assistant/signal";
 import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal/tts";
@@ -148,6 +149,14 @@ export interface Batch<T> {
 }
 
 const SILENT = /^\s*\[\[silent\]\]\s*$/i;
+
+// A message as it comes in from Signal, cleaned: text (also a picture's caption), the sender's name and the quoted text.
+export const cleanIncoming = (m: IncomingMessage): IncomingMessage => ({
+  ...m,
+  text: clean("message", m.text, { max: LIMITS.body }),
+  ...(m.fromName ? { fromName: oneLine("group member name", m.fromName, LIMITS.name) } : {}),
+  ...(m.quote ? { quote: { ...m.quote, text: clean("quoted message", m.quote.text, { max: LIMITS.line }) } } : {}),
+});
 
 export function createPipeline(deps: PipelineDeps) {
   const { signal, out } = deps;
@@ -337,7 +346,7 @@ export function createPipeline(deps: PipelineDeps) {
     const target = { author: m.from, timestamp: m.timestamp };
     if (conv.attention === "always") status(conv, "👂", target);
     try {
-      return { ...m, text: await deps.transcript(m), audio: undefined, voice: true };
+      return { ...m, text: clean("voice transcript", await deps.transcript(m), { max: LIMITS.body }), audio: undefined, voice: true };
     } catch (e) {
       await tell(conv, m, (e as Error).message, () => status(conv, "⚠️", target));
       return false;
@@ -358,7 +367,8 @@ export function createPipeline(deps: PipelineDeps) {
 
   // Everything a message goes through before its conversation decides what to do with it. The same steps for the owner and
   // every group; the Conversation's flags (vouch, attention, optionalPictures) say where they differ.
-  async function intake(conv: Conversation, original: IncomingMessage): Promise<void> {
+  async function intake(conv: Conversation, raw: IncomingMessage): Promise<void> {
+    const original = cleanIncoming(raw); // the door: hidden characters never get past here
     const arrived = now();
     if (conv.vouch && !(await deps.vouch(conv.groupId!))) return; // a group we cannot vouch for gets nothing, not even a transcription
     const author = original.from || original.fromUuid;
@@ -439,7 +449,7 @@ export function createPipeline(deps: PipelineDeps) {
     const groupId = conv.groupId!;
     if (!(await deps.vouch(groupId))) return;
     const on = findMessage(r.targetTimestamp, conv.logFile)?.text ?? "an older message";
-    return deps.admitGroup(conv, { groupId, text: "", timestamp: now(), isOwner: deps.isOwner(r), fromName: r.fromName, addressedToMe: false, reaction: { emoji: r.emoji, on } });
+    return deps.admitGroup(conv, { groupId, text: "", timestamp: now(), isOwner: deps.isOwner(r), fromName: r.fromName && oneLine("group member name", r.fromName, LIMITS.name), addressedToMe: false, reaction: { emoji: oneLine("reaction", r.emoji, 16), on } });
   }
 
   // Everything that arrives for a conversation. The caller has already decided who may speak to it

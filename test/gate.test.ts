@@ -39,17 +39,17 @@ test("gate: the delay is capped by the setting in code, and the prompt says typi
 });
 
 test("gate prompt: a message look sees the latest exchange with long lines cut, a clock look the whole log; the clock and the notes stay", () => {
-  const long = Array.from({ length: 30 }, (_, i) => `[10-14 09:${String(i).padStart(2, "0")}] Eve (a member): msg${i} ${"x".repeat(i === 29 ? 1000 : 10)}`);
+  const long = Array.from({ length: 30 }, (_, i) => `[10-14 09:${String(i).padStart(2, "0")}] Eve (a member): msg${i} ${"xy".repeat(i === 29 ? 500 : 5)}`);
   const p = gatePrompt({ trigger: "message", now: T0, tail: long, secondsSinceMine: 90 }, "- [context] play on Thursdays");
   assert.match(p, /msg29/);
   assert.match(p, /msg18\b/);
   assert.doesNotMatch(p, /msg17\b/); // 12 lines
-  assert.doesNotMatch(p, /x{300}/); // a long message is cut
-  assert.match(p, /msg29 x+…/);
+  assert.doesNotMatch(p, /(xy){150}/); // a long message is cut
+  assert.match(p, /msg29 (xy)+…/);
   assert.match(p, /CURRENT TIME/);
   assert.match(p, /last spoke here 90 seconds ago/);
   assert.match(p, /play on Thursdays/);
-  assert.match(gatePrompt({ trigger: "clock", now: T0, tail: long }, ""), /x{1000}/); // the clock look is unchanged
+  assert.match(gatePrompt({ trigger: "clock", now: T0, tail: long }, ""), /(xy){500}/); // the clock look is unchanged
   assert.ok(p.length < 2500, `${p.length} chars`);
 });
 
