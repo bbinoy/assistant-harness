@@ -83,6 +83,22 @@ test("snapshots: refs map to the real role, name, value, link target and form", 
   assert.ok(isRef("e12") && isRef("f1e3") && !isRef("button[type=submit]") && !isRef("Submit") && !isRef(undefined));
 });
 
+test("snapshots: elements whose label YAML wraps in quotes (a colon, an apostrophe) are in the table", () => {
+  const n = parseSnapshot([
+    "- combobox \"From\" [expanded] [ref=e86]: Zürich",
+    "  - listbox [ref=e90]:",
+    "    - 'option \"Zürich HB: Bahnhof\" [ref=e91]'",
+    "    - 'button \"Don''t book: later\" [ref=e92] [cursor=pointer]':",
+    "      - /url: /x",
+    "    - \"option \\\"Zürich\\\\n\\\" [ref=e93]\"",
+  ].join("\n"));
+  assert.equal(n.get("e91")!.name, "Zürich HB: Bahnhof");
+  assert.equal(n.get("e91")!.role, "option");
+  assert.equal(n.get("e92")!.name, "Don't book: later");
+  assert.equal(n.get("e92")!.url, "/x");
+  assert.equal(n.get("e86")!.value, "Zürich");
+});
+
 test("commit classifier: decided from the real name, not the model's description", () => {
   const n = parseSnapshot(FORM);
   assert.equal(classifyClick(n.get("e44")).commit, true);

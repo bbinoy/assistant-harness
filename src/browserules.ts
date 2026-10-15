@@ -97,13 +97,32 @@ const unquote = (s: string): string => {
   return t;
 };
 
+// The snapshot is YAML: a key with ": ", a quote or other special characters in its label is written wrapped, as
+// - 'link "Zürich: Hauptbahnhof" [ref=e9]': or with double quotes. Unwrapped here so those elements (suggestion lists, dates,
+// buttons with a colon in the label) are in the table too; without it their refs would be "not in the last page view".
+function unwrapKey(line: string): string {
+  const m = /^(\s*- )(['"])(.*)\2((?::(?: .*)?)?)$/.exec(line);
+  if (!m) return line;
+  let inner = m[3]!;
+  if (m[2] === "'") inner = inner.replace(/''/g, "'");
+  else {
+    try {
+      inner = JSON.parse(`"${inner}"`) as string;
+    } catch {
+      return line;
+    }
+  }
+  return `${m[1]}${inner}${m[4]}`;
+}
+
 // Pure. The elements of a Playwright MCP aria snapshot ("- button "Book now" [ref=e12]"), keyed by ref. Lines that are not elements
 // with a ref are skipped. `inForm`: some ancestor is a form.
 export function parseSnapshot(text: string): Map<string, Node> {
   const out = new Map<string, Node>();
   const stack: { indent: number; role: string; name: string; ref?: string }[] = [];
   let last: Node | undefined;
-  for (const line of text.split("\n")) {
+  for (const raw of text.split("\n")) {
+    const line = unwrapKey(raw);
     const m = LINE.exec(line);
     if (!m) continue;
     const indent = m[1]!.length;
