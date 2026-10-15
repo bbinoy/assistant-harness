@@ -2,6 +2,7 @@ import { audit, type Source } from "./audit.ts";
 import { runJudge, withTimeout } from "./approvaljudge.ts";
 import type { JudgeIO } from "./judgespare.ts";
 import { factsOf, validateQuestion } from "./questionfacts.ts";
+import { templateQuestion } from "./questiontemplate.ts";
 import { answerPrompt, parseAnswer, parseWrite, writePrompt, type AnswerJudgement, type OpenView, type Recent } from "./approvalprompt.ts";
 
 // The model calls of approvals. Each one fails closed: a thrown error, a timeout, an error result, an
@@ -29,23 +30,25 @@ export interface QuestionInput {
   background: boolean;
   source: Source;
 }
-export type Composed = { text: string; ms: number } | { text?: undefined; failure: string; ms: number };
+export type Composed = { text: string; ms: number; by?: "template" | "model" } | { text?: undefined; failure: string; ms: number; by?: undefined };
 
 type Run = (prompt: string) => Promise<unknown>;
 const viaJudge = (io: JudgeIO, ms: number): Run => async (prompt) => (await withTimeout(runJudge("write", prompt, io), ms))?.out;
 
-// ONE model call writes the question; code checks that every address, URL, id, title, time, date, amount
+// A simple call is asked from a code template (questiontemplate.ts, no model call). Otherwise ONE model call writes the question; code checks that every address, URL, id, title, time, date, amount
 // and the words Cc / Bcc from the exact arguments appear in it (questionfacts.ts) and that no other address does. If anything
 // fails (error, timeout, junk, a missing fact) there is NO question and no retry: the caller does not ask, the action is not
 // approved, and the failure is audited with the full arguments. Never throws.
 export async function composeQuestion(q: QuestionInput, io: JudgeIO = {}, timeoutMs = 15_000, run: Run = viaJudge(io, timeoutMs)): Promise<Composed> {
   const started = Date.now();
+  const templated = templateQuestion(q);
+  if (templated) return { text: templated, ms: Date.now() - started, by: "template" };
   const facts = factsOf(q.args, q.details);
   let failure: string;
   try {
     const text = parseWrite(await run(writePrompt({ ...q, required: facts.must })));
     const wrong = text ? validateQuestion(text, facts) : "no usable question from the writer";
-    if (text && !wrong) return { text, ms: Date.now() - started };
+    if (text && !wrong) return { text, ms: Date.now() - started, by: "model" };
     failure = wrong!;
     audit(q.tool, "question-failed", q.source, { reason: failure, question: text, details: q.details });
   } catch (e) {
