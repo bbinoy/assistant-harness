@@ -347,6 +347,7 @@ test("describePoint: links, password fields, canvases and frames are described a
   assert.match((await describePoint(fakeCdp({ "DOM.getNodeForLocation": new Error("Target closed") }), 1, 1, PAGE)) as string, /lookup failed/);
   assert.equal(typeof (await describePoint(fakeCdp({ "DOM.getNodeForLocation": new Error("gone") }), 1, 1, PAGE)), "string", "a protocol error");
   assert.equal(typeof (await describePoint(fakeCdp({ ...hit, ...one("button", "x"), ...world, "Runtime.callFunctionOn": { result: {} } }), 1, 1, PAGE)), "string", "the element could not be described");
+  assert.equal(((await describePoint(fakeCdp({ ...hit, ...one("generic", ""), ...world, "Runtime.callFunctionOn": { result: { value: null } } }), 1, 1, PAGE)) as PointInfo).nothing, true, "the document itself is the page background");
 });
 
 test("the connection: with several tabs the worker's own is picked, else no answer; a port that answers nothing means no answer", async () => {

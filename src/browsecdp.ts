@@ -76,6 +76,7 @@ export async function describePoint(cdp: Cdp, x: number, y: number, pageUrl: str
     const node = await cdp.send("DOM.resolveNode", { backendNodeId, executionContextId: world.executionContextId });
     const ran = await cdp.send("Runtime.callFunctionOn", { objectId: node.object?.objectId, functionDeclaration: DESCRIBE, returnByValue: true });
     const d = ran.result?.value as { tag: string; type: string; hints: string; href: string; inForm: boolean; formName: string } | null | undefined;
+    if (d === null) return nothingAt(pageUrl); // the hit is the document itself (no element around it): the page's background
     if (!d || typeof d.tag !== "string") return "the element at that point could not be described";
     if (!name && SURFACE.has(d.tag)) name = `(${d.tag})`;
 
