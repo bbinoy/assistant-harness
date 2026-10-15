@@ -1,3 +1,4 @@
+import { readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseLanguages } from "./lang.ts";
@@ -37,9 +38,10 @@ function list(env: Env, name: string, fallback: readonly string[], valid: RegExp
 
 // The speech engine (TTS_PROVIDER): Kokoro here, or an optional remote one. Remote settings are checked at start-up:
 // a missing key or a plain-http address to another machine stops the agent instead of leaking text or failing later.
-function ttsProvider(env: Env, kokoro: { dir: string; voice: string; speed: number }): TtsProviderConfig {
-  const provider = oneOf(env, "TTS_PROVIDER", "kokoro", ["kokoro", "elevenlabs", "http"] as const);
-  const fallback = oneOf(env, "TTS_FALLBACK", "none", ["none", "kokoro"] as const);
+function ttsProvider(env: Env, kokoro: { dir: string; voice: string; speed: number }, dataDir: string): TtsProviderConfig {
+  const provider = oneOf(env, "TTS_PROVIDER", "kokoro", ["kokoro", "elevenlabs", "http", "qwen"] as const);
+  // The local cloned voice falls back to the local Kokoro by default (nothing leaves the Mac); a remote one never switches unless asked.
+  const fallback = oneOf(env, "TTS_FALLBACK", provider === "qwen" ? "kokoro" : "none", ["none", "kokoro"] as const);
   const timeoutMs = num(env, "TTS_TIMEOUT_SECONDS", 60, 5, 300) * 1000;
   const need = (name: string): string => {
     const v = env[name]?.trim();
@@ -53,6 +55,26 @@ function ttsProvider(env: Env, kokoro: { dir: string; voice: string; speed: numb
     const url = need("TTS_HTTP_URL");
     if (!isSafeUrl(url)) throw new Error("TTS_HTTP_URL must be an https:// address (http:// only for localhost)");
     return { provider, fallback, kokoro, http: { url, token: env.TTS_HTTP_TOKEN?.trim() || undefined, voice: env.TTS_HTTP_VOICE?.trim() || undefined, referenceId: env.TTS_HTTP_REFERENCE_ID?.trim() || undefined, timeoutMs } };
+  }
+  if (provider === "qwen") {
+    // The reference recording and its text are yours and stay outside the repo (state/ is ignored). TTS_REF_TEXT is the words
+    // themselves or the path of a text file; a missing file or text is reported by `npm run doctor`, and Ted then speaks with Kokoro.
+    const path = (v: string | undefined) => (v?.trim() ? resolve(dataDir, v.trim().replace(/^~(?=\/)/, env.HOME ?? "")) : "");
+    const textRaw = env.TTS_REF_TEXT?.trim() ?? "";
+    const textFile = textRaw && !textRaw.includes("\n") ? path(textRaw) : "";
+    const isFile = textFile !== "" && (() => { try { return statSync(textFile).isFile(); } catch { return false; } })();
+    const idleMs = num(env, "WARM_IDLE_MINUTES", num(env, "GROUP_WARM_IDLE_MINUTES", 60, 1, 1440), 1, 1440) * 60_000;
+    return {
+      provider, fallback, kokoro,
+      qwen: {
+        dir: path(env.TTS_QWEN_DIR) || join(dataDir, "state/tts-qwen"),
+        model: env.TTS_QWEN_MODEL?.trim() || "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
+        refAudio: path(env.TTS_REF_AUDIO),
+        refText: isFile ? readFileSync(textFile, "utf8").trim() : textRaw,
+        timeoutMs,
+        idleMs,
+      },
+    };
   }
   return { provider, fallback, kokoro };
 }
@@ -209,7 +231,7 @@ export function loadSettings(env: Env) {
     ttsLanguages: parseLanguages(env.TTS_LANGUAGES), // languages the voice speaks (default en); a reply in another one goes out as text (src/lang.ts)
     ttsSpeed: kokoro.speed,
     // Optional remote speech (docs/REMOTE-TTS.md): sends the spoken words to a third party or to your own server.
-    tts: ttsProvider(env, kokoro),
+    tts: ttsProvider(env, kokoro, dataDir),
     // Group chats (own-account mode, src/group.ts): it takes part in any group the owner is in, speaking only
     // when it fits (see PARTICIPATION in persona.ts).
     groupParticipation: oneOf(env, "GROUP_PARTICIPATION", "auto", ["auto", "tagged"] as const), // auto: the assistant judges every message; tagged: only when @mentioned or replied to

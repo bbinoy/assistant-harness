@@ -16,6 +16,7 @@
     "uninstall:launchd": "scripts/uninstall-launchd.sh",
     "triage-check": "node --conditions=workspace-source --env-file-if-exists=.env src/cli.ts triage-check",
     "signal:hello": "node --conditions=workspace-source --env-file=.env scripts/signal-hello.ts",
+    "setup:tts-qwen": "bash scripts/setup-tts-qwen.sh",
     "setup:browse": "node scripts/setup-browse.ts",
     "postinstall": "node scripts/setup-browse.ts --quiet",
     "browse:smoke": "node --conditions=workspace-source --env-file-if-exists=.env scripts/browse-smoke.ts"

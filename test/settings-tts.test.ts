@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { loadSettings } from "../src/settings.ts";
 
 test("settings: Kokoro is the default speech provider, with no fallback", () => {
@@ -44,4 +47,21 @@ test("settings: the timing constants keep the values they had when they were har
   assert.equal(loadSettings({ GROUP_STICKY_MINUTES: "45" }).groupStickyMinutes, 45);
   assert.throws(() => loadSettings({ BRIEF_RETRY_GAP_MINUTES: "0" }), /BRIEF_RETRY_GAP_MINUTES/);
   assert.throws(() => loadSettings({ SLOW_REPLY_SECONDS: "soon" }), /SLOW_REPLY_SECONDS/);
+});
+
+test("settings: the local cloned voice (qwen) takes its reference from paths, falls back to Kokoro by default", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ref-"));
+  writeFileSync(join(dir, "ref.txt"), "  Words spoken in the reference.\n");
+  const q = loadSettings({ TTS_PROVIDER: "qwen", HARNESS_DATA_DIR: dir, TTS_REF_AUDIO: "ref.wav", TTS_REF_TEXT: "ref.txt", WARM_IDLE_MINUTES: "30" }).tts;
+  assert.ok(q.provider === "qwen");
+  assert.equal(q.fallback, "kokoro");
+  assert.equal(q.qwen.refAudio, join(dir, "ref.wav"));
+  assert.equal(q.qwen.refText, "Words spoken in the reference.");
+  assert.equal(q.qwen.dir, join(dir, "state/tts-qwen"));
+  assert.equal(q.qwen.idleMs, 30 * 60_000);
+  assert.match(q.qwen.model, /Qwen3-TTS-12Hz-0\.6B-Base-8bit$/);
+  const inline = loadSettings({ TTS_PROVIDER: "qwen", TTS_REF_TEXT: "Just these words." }).tts;
+  assert.ok(inline.provider === "qwen" && inline.qwen.refText === "Just these words." && inline.qwen.refAudio === "");
+  assert.ok(loadSettings({ TTS_PROVIDER: "qwen", TTS_FALLBACK: "none" }).tts.fallback === "none");
+  rmSync(dir, { recursive: true, force: true });
 });

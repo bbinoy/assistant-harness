@@ -5,3 +5,4 @@ export { synthesizeWith, providerReady, type TtsProviderConfig, type TtsFallback
 export type { ElevenLabsConfig } from "./tts-elevenlabs.ts";
 export type { HttpTtsConfig } from "./tts-http.ts";
 export { isSafeUrl, type Fetch } from "./tts-remote.ts";
+export { synthesizeQwen, warmQwen, stopQwen, qwenReady, type QwenConfig } from "./tts-qwen.ts";

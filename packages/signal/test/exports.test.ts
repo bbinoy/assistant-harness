@@ -31,7 +31,7 @@ test("exports: ./voice", () => {
 });
 
 test("exports: ./tts", () => {
-  assert.deepEqual(names(tts), ["MAX_SPOKEN_CHARS", "isSafeUrl", "providerReady", "synthesize", "synthesizeWith", "ttsReady"]);
+  assert.deepEqual(names(tts), ["MAX_SPOKEN_CHARS", "isSafeUrl", "providerReady", "qwenReady", "stopQwen", "synthesize", "synthesizeQwen", "synthesizeWith", "ttsReady", "warmQwen"]);
 });
 
 test("exports: ./testing", () => {

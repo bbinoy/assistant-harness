@@ -27,7 +27,7 @@ import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { openLog } from "./state.ts";
 import { attachmentPath, ensureSignalDaemon, SignalClient, type IncomingMessage } from "@ted-personal-assistant/signal";
-import { providerReady, synthesizeWith } from "@ted-personal-assistant/signal/tts";
+import { providerReady, stopQwen, synthesizeWith, warmQwen } from "@ted-personal-assistant/signal/tts";
 import { Limiter } from "./limiter.ts";
 import { transcribe, voiceReady } from "@ted-personal-assistant/signal/voice";
 
@@ -154,7 +154,7 @@ void daemon.exited.then(({ code, signal: sig }) => {
   process.exit(1);
 });
 process.once("exit", () => daemon.stop());
-for (const sig of ["SIGTERM", "SIGINT"] as const) process.once(sig, () => (daemon.stop(), process.exit(0)));
+for (const sig of ["SIGTERM", "SIGINT"] as const) process.once(sig, () => (daemon.stop(), stopQwen(), process.exit(0)));
 signal.onClose(({ error }) => {
   console.error(`signal socket closed${error ? ` (${error.message})` : ""}; exiting so launchd restarts us`);
   process.exit(1);
@@ -163,6 +163,8 @@ await signal.connect();
 console.log(`connected to signal-cli (${signal.separateAccount ? "own account" : "Note to Self"}); accepting only ${mask(config.ownerNumber)}; auth: ${config.credential}`);
 
 warmChat();
+// The cloned voice takes a few seconds to load: have it ready for the first spoken reply (it is stopped again after WARM_IDLE_MINUTES idle, and the next reply restarts it).
+if (settings.tts.provider === "qwen" && settings.warm && settings.voiceReplies && providerReady(settings.tts).ok) void warmQwen(settings.tts.qwen).then((err) => console.log(err ? `Qwen voice not warmed up (Kokoro stands in): ${err}` : "Qwen voice server ready"));
 // A warm process is used only while fresh (agent.ts); keep one ready so a message after a
 // quiet hour is still quick. Local work only, no model call.
 setInterval(() => prepareChat(approve, say, { refresh: true }), settings.warmRefreshMinutes * 60_000).unref();
