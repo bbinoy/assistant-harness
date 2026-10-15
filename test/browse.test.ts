@@ -94,7 +94,42 @@ test("commit classifier: decided from the real name, not the model's description
   const names = (list: string[]) => list.map((name) => classifyClick({ ref: "e1", role: "button", name, inForm: false }).commit);
   assert.deepEqual(names(["Book now", "Buy", "Pay £12.00", "Confirm reservation", "Place your order", "Send message", "Reserve a table", "Register", "Subscribe", "Jetzt buchen", "Bestellen", "Checkout", "Complete purchase"]), Array(13).fill(true));
   assert.deepEqual(names(["Search", "Next", "Show more", "Close", "Accept cookies", "Menu", "Learn more"]), Array(7).fill(false));
-  assert.equal(classifyClick({ ref: "e1", role: "button", name: "", inForm: false }).commit, true);
+  assert.equal(classifyClick({ ref: "e1", role: "button", name: "", inForm: false }).commit, false); // carousel arrow, icon button, menu
+  assert.equal(classifyClick({ ref: "e1", role: "button", name: "", inForm: true }).commit, true); // unlabeled inside a form stays a commit
+  assert.equal(classifyClick({ ref: "e1", role: "button", name: "Book", inForm: false }).ambiguous, undefined); // named commit: definite
+  assert.equal(classifyClick(n.get("e71")).ambiguous, true); // form position only
+});
+
+test("a stale ref is denied with a fresh-snapshot hint and is not counted as a refusal; an unlabeled non-form button is a plain click", async () => {
+  const g = onPage(guard());
+  const stale = await g.decide(`${B}click`, { target: "e2225" });
+  assert.equal(stale.kind, "deny");
+  assert.match(stale.reason!, /fresh browser_snapshot/);
+  for (let i = 0; i < 10; i++) await g.decide(`${B}click`, { target: "e2225" });
+  assert.equal(g.denied, 0);
+  g.nodes.set("e900", { ref: "e900", role: "button", name: "", inForm: false });
+  g.nodes.set("e901", { ref: "e901", role: "button", name: "", inForm: true });
+  assert.equal((await g.decide(`${B}click`, { target: "e900" })).kind, "defer");
+  assert.equal((await g.decide(`${B}click`, { target: "e901" })).kind, "ask");
+});
+
+test("ambiguous form button goes to the judge; a definite commit never does", async () => {
+  const g = onPage(guard());
+  const d = await g.decide(`${B}click`, { target: "e71" });
+  assert.equal(d.kind, "ask");
+  assert.equal(d.judge, true);
+  assert.equal((await g.decide(`${B}click`, { target: "e44" })).judge, undefined); // Submit order
+  let judged = 0;
+  const asked: string[] = [];
+  const judge = async (): Promise<Verdict> => (judged++, { decision: "auto", reason: "test" });
+  const canUse = asCall(makeCanUseTool(async (x) => (asked.push(x), { approved: false }), "browse", undefined, "order a pizza for Ann", judge, onPage(guard())));
+  const broad = settings.autoApprove === "broad";
+  assert.equal((await canUse(`${B}click`, { target: "e71" }, opts)).behavior, broad ? "allow" : "deny");
+  assert.equal(asked.length, broad ? 0 : 1);
+  assert.equal(judged, settings.autoApprove === "off" ? 0 : 1);
+  const before = judged;
+  assert.equal((await canUse(`${B}click`, { target: "e44" }, opts)).behavior, "deny"); // Submit order: asks the owner, judge not consulted
+  assert.equal(judged, before);
 });
 
 test("payment and credential fields, and card numbers (Luhn)", () => {
@@ -177,7 +212,7 @@ test("clicks: a commit step asks with the real label, the URL and the values ent
   assert.ok(!ask.description!.includes("Next page"), "the model's description is not what the owner reads");
   assert.equal((await g.decide(`${B}click`, { target: "e60" })).kind, "defer"); // an ordinary link
   assert.equal((await g.decide(`${B}click`, { target: "e61" })).kind, "deny"); // a link into the private network
-  assert.equal((await g.decide(`${B}click`, { target: "e500" })).kind, "ask"); // a ref that is not on the page: fails closed
+  assert.equal((await g.decide(`${B}click`, { target: "e500" })).kind, "deny"); // a ref that is not on the page: never clicked unseen, never asked
   assert.equal((await g.decide(`${B}click`, { target: "text=Pay" })).kind, "deny");
   assert.equal((await g.decide(`${B}press_key`, { key: "Enter" })).kind, "ask"); // after typing, Enter can submit
   assert.equal((await guard().decide(`${B}press_key`, { key: "Enter" })).kind, "defer"); // nothing typed: harmless
