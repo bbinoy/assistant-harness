@@ -5,7 +5,7 @@ import { createSdkMcpServer, tool, type McpServerConfig, type Options } from "@a
 import { z } from "zod";
 import { audit } from "./audit.ts";
 import { budgetSpent } from "./budget.ts";
-import { addressProblem, ALLOWED_BROWSER_TOOLS, BLOCKED_ORIGINS, BROWSER_PREFIX, classifyClick, dnsResolver, hostOf, isAllowedBrowserTool, isRef, looksLikeCardNumber, parseSnapshot, resolvesPublic, sensitiveField, type Node, type Resolver } from "./browserules.ts";
+import { addressProblem, BLOCKED_ORIGINS, BROWSER_PREFIX, classifyClick, dnsResolver, hostOf, isAllowedBrowserTool, isRef, looksLikeCardNumber, parseSnapshot, resolvesPublic, sensitiveField, type Node, type Resolver } from "./browserules.ts";
 import { fence } from "./fence.ts";
 import { clip } from "./format.ts";
 import { isPaused } from "./pause.ts";
@@ -19,7 +19,6 @@ import { OWNER, settings } from "./settings.ts";
 // decides each call (browserules.ts has the pure rules), the browser server's command line, the entry tool and the result.
 
 export type BrowseMode = "owner" | "group";
-export const BROWSE_TOOL = "mcp__browse__browse";
 
 // ---- is browsing set up? ----
 
@@ -362,7 +361,6 @@ export interface BrowseContext {
 }
 
 let busy = false;
-export const browseBusy = () => busy; // tests
 
 // Why a browse run may not start now, or undefined. Code only: pause, the daily spend limit, set-up, one run at a time.
 export function startRefusal(_ctx: Pick<BrowseContext, "mode">, now = Date.now(), status: BrowseStatus = browseStatus()): string | undefined {
@@ -417,5 +415,3 @@ export function createBrowseServer(ctx: BrowseContext) {
     ],
   });
 }
-
-export const browseToolNames = (): string[] => ALLOWED_BROWSER_TOOLS.map((n) => BROWSER_PREFIX + n);

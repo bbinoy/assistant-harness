@@ -357,10 +357,6 @@ export function prepareGroupChat(conv: GroupConv, style: () => string, opts: { f
 
 // ---- the other owner runs ----
 
-// The owner profiles, as before (the legacy scheduler and the gate's presets both go through runProfile).
-export const runBriefTurn = (prompt: string, approve: Approve, onToolSuccess: (tool: string, input: unknown) => void): Promise<AgentReply> => runProfile("brief", prompt, approve, { onToolSuccess });
-export const runRadarTurn = (prompt: string, approve: Approve): Promise<AgentReply> => runProfile("radar", prompt, approve);
-
 // Background handling of heartbeat-flagged mail: fresh session, least privilege (see policy.ts).
 export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void): Promise<AgentReply> {
   return runAgent(prompt, approve, {

@@ -63,7 +63,7 @@ function ttsProvider(env: Env, kokoro: { dir: string; voice: string; speed: numb
     const textRaw = env.TTS_REF_TEXT?.trim() ?? "";
     const textFile = textRaw && !textRaw.includes("\n") ? path(textRaw) : "";
     const isFile = textFile !== "" && (() => { try { return statSync(textFile).isFile(); } catch { return false; } })();
-    const idleMs = num(env, "WARM_IDLE_MINUTES", num(env, "GROUP_WARM_IDLE_MINUTES", 60, 1, 1440), 1, 1440) * 60_000;
+    const idleMs = num(env, "WARM_IDLE_MINUTES", 60, 1, 1440) * 60_000;
     return {
       provider, fallback, kokoro,
       qwen: {
@@ -217,25 +217,21 @@ export function loadSettings(env: Env) {
     transcribeConcurrency: num(env, "TRANSCRIBE_CONCURRENCY", 2, 1, 8), // voice notes transcribed at the same time; the rest wait their turn (main.ts, limiter.ts)
     // Spoken replies to voice messages (src/voicereply.ts): local text to speech with Kokoro (scripts/setup-tts.sh).
     voiceReplies: oneOf(env, "VOICE_REPLIES", "on", ["on", "off"] as const) === "on",
-    ttsDir: kokoro.dir,
-    ttsVoice: kokoro.voice,
     ttsLanguages: parseLanguages(env.TTS_LANGUAGES), // languages the voice speaks (default en); a reply in another one goes out as text (src/lang.ts)
-    ttsSpeed: kokoro.speed,
     // Optional remote speech (docs/REMOTE-TTS.md): sends the spoken words to a third party or to your own server.
     tts: ttsProvider(env, kokoro, dataDir),
     // Group chats (own-account mode, src/group.ts): it takes part in any group the owner is in, speaking only
     // when it fits (see PARTICIPATION in persona.ts).
     groupParticipation: oneOf(env, "GROUP_PARTICIPATION", "auto", ["auto", "tagged"] as const), // auto: the assistant judges every message; tagged: only when @mentioned or replied to
     // Every conversation, the owner's chat and each group: wait this long after a message for a burst to end, then answer all of
-    // it as one turn. SETTLE_SECONDS; the old name GROUP_DEBOUNCE_SECONDS still works when the new one is not set.
-    settleSeconds: num(env, "SETTLE_SECONDS", num(env, "GROUP_DEBOUNCE_SECONDS", 2, 0, 60), 0, 60),
+    // it as one turn.
+    settleSeconds: num(env, "SETTLE_SECONDS", 2, 0, 60),
     settleMaxSeconds: num(env, "SETTLE_MAX_SECONDS", 10, 1, 120), // the longest a burst waits since its first message, so continuous chatter cannot postpone the answer forever
     // Warm model processes (src/agent.ts, src/gate.ts): a process started ahead of the next message skips the ~3 s start-up. At most
     // three exist: the owner's chat, the group that spoke last, and one small Haiku process for the participation gate. Each costs
     // about 150 to 200 MB resident and no tokens, and is dropped after WARM_IDLE_MINUTES without use. WARM=off: every turn starts cold.
-    // GROUP_WARM and GROUP_WARM_IDLE_MINUTES are the deprecated names of these two (they were group-only); they still work when the new ones are unset.
-    warm: oneOf(env, "WARM", oneOf(env, "GROUP_WARM", "on", ["on", "off"] as const), ["on", "off"] as const) === "on",
-    warmIdleMinutes: num(env, "WARM_IDLE_MINUTES", num(env, "GROUP_WARM_IDLE_MINUTES", 60, 1, 1440), 1, 1440),
+    warm: oneOf(env, "WARM", "on", ["on", "off"] as const) === "on",
+    warmIdleMinutes: num(env, "WARM_IDLE_MINUTES", 60, 1, 1440),
     // The participation gate may ask for a pause before answering an untagged message, to seem natural. "typing…" shows meanwhile,
     // so a long pause only makes the answer late: whatever the gate asks for is cut to this many seconds (0: never wait).
     gateMaxDelaySeconds: num(env, "GATE_MAX_DELAY_SECONDS", 4, 0, 120),
@@ -275,7 +271,5 @@ export const settings = loadSettings(process.env);
 // The speech keys were read into `settings` above. Nothing the agent starts (Claude Code and its MCP servers, ffmpeg, signal-cli)
 // needs them, and they are inherited by every child process unless dropped here.
 for (const name of ["ELEVENLABS_API_KEY", "TTS_HTTP_TOKEN"]) delete process.env[name];
-// SCHEDULER=legacy was retired: the gate is the only scheduler. A stale value in .env is ignored, with one line to say so.
-if (process.env.SCHEDULER === "legacy") console.warn("settings: SCHEDULER=legacy is no longer supported and is ignored (the gate scheduler is the only one); remove it from .env");
 export const OWNER = settings.owner;
 export const ASSISTANT = settings.assistant;

@@ -165,18 +165,13 @@ test("group warm: a process built before the session moved on is not used", asyn
   }
 });
 
-test("warm: WARM=off starts nothing; WARM and WARM_IDLE_MINUTES are validated; the old GROUP_WARM names still work", async () => {
+test("warm: WARM=off starts nothing; WARM and WARM_IDLE_MINUTES are validated", async () => {
   assert.equal(loadSettings({}).warm, true);
   assert.equal(loadSettings({ WARM: "off" }).warm, false);
   assert.throws(() => loadSettings({ WARM: "maybe" }), /WARM/);
   assert.equal(loadSettings({}).warmIdleMinutes, 60);
   assert.throws(() => loadSettings({ WARM_IDLE_MINUTES: "0" }), /WARM_IDLE_MINUTES/);
   assert.equal(loadSettings({ WARM_IDLE_MINUTES: "90" }).warmIdleMinutes, 90);
-  // deprecated aliases, used only when the new name is unset
-  assert.equal(loadSettings({ GROUP_WARM: "off" }).warm, false);
-  assert.equal(loadSettings({ GROUP_WARM: "off", WARM: "on" }).warm, true);
-  assert.equal(loadSettings({ GROUP_WARM_IDLE_MINUTES: "15" }).warmIdleMinutes, 15);
-  assert.equal(loadSettings({ GROUP_WARM_IDLE_MINUTES: "15", WARM_IDLE_MINUTES: "30" }).warmIdleMinutes, 30);
   const was = settings.warm;
   (settings as { warm: boolean }).warm = false;
   try {
