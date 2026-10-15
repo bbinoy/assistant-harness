@@ -1,4 +1,4 @@
-// The one cheap check on a model-written approval question (APPROVAL_STYLE=conversational): the facts that decide what will run
+// The one cheap check on a model-written approval question: the facts that decide what will run
 // must appear in it verbatim. No second model call. Pure.
 //
 // Required, taken from the exact arguments (and the code-rendered details, which for a mail send are read back from the mail client):

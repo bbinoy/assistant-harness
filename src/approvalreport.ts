@@ -1,7 +1,7 @@
 import type { AuditEntry } from "./audit.ts";
 import { localTime } from "./pause.ts";
 
-// `npm run report`: each approval ask (APPROVAL_STYLE soft / conversational) with the exact arguments next to the question that was
+// `npm run report`: each approval ask with the exact arguments next to the question that was
 // sent and what became of it, for review. Newest last. A line "ARGUMENTS DIFFER" means the call that ran was not the one asked about
 // (and no edit was applied): the thing to investigate.
 export const APPROVAL_DECISIONS = ["approval-asked", "approval-outcome", "question-failed"];
@@ -14,7 +14,7 @@ export function approvalLines(entries: readonly AuditEntry[], max = 12): string[
     const m = e.meta ?? {};
     const after = outcomes.find((o) => o.ts >= e.ts && o.tool === e.tool && o.source === e.source);
     const result = after ? `${after.meta?.approved ? "approved" : "not approved"}${after.meta?.modified ? " (edited)" : ""}${after.meta?.argsEqual === false ? ", ARGUMENTS DIFFER from the ask" : ""}` : "no outcome logged";
-    lines.push(`  ${localTime(e.ts)} ${e.tool} [${m.style}, ${m.wording}${""}] -> ${result}`);
+    lines.push(`  ${localTime(e.ts)} ${e.tool} -> ${result}`);
     lines.push(`    arguments: ${(typeof m.args === "string" ? m.args : JSON.stringify(m.args)).slice(0, 600)}`);
     lines.push(`    question:  ${String(m.question).replace(/\s*\n\s*/g, " / ").slice(0, 600)}`);
   }

@@ -3,7 +3,7 @@
 //   HARNESS_DATA_DIR=$(mktemp -d) node --conditions=workspace-source scripts/approval-eval-check.ts [out.json]
 import { writeFileSync } from "node:fs";
 import { describeCall } from "../src/format.ts";
-import { composeQuestion } from "../src/softjudge.ts";
+import { composeQuestion } from "../src/approvalmodel.ts";
 import { factsOf, validateQuestion } from "../src/questionfacts.ts";
 
 const MAIL = "mcp__claude_ai_Gmail__send_message";

@@ -450,10 +450,10 @@ export function createPipeline(deps: PipelineDeps) {
 
   // Is this message the answer to a question open in THIS conversation? Then it is consumed (and the owner or group is told what happened).
   // Never an edit (an approval is answered by a new message, a reaction or a quoted reply, so "no" edited into "yes" changes nothing)
-  // and never a picture caption. A voice message is a message like any other for the model styles, which are told it is an automatic
-  // transcript; the strict style keeps the older rule that a spoken "yes" is not an approval.
+  // and never a picture caption. A voice message is a message like any other; the judge is told it is an automatic
+  // transcript.
   async function approvalAnswer(conv: Conversation, m: Held, by: string | undefined): Promise<boolean> {
-    if (m.picture || m.edit || (m.voice && settings.approvalStyle === "strict")) return false;
+    if (m.picture || m.edit) return false;
     const target = { author: m.from, timestamp: m.timestamp };
     const { outcome, changes, reply } = await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote, undefined, { scope: conv.key, by, voice: !!m.voice });
     if (outcome === "none") return false;

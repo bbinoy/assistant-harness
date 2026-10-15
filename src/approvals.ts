@@ -1,9 +1,9 @@
-import { discardJudge, judgeReply, prepareJudge } from "./judge.ts";
+import { discardJudge, prepareJudge } from "./approvaljudge.ts";
 import { applyChanges, isModifiable, type Change } from "./policy.ts";
 import { settings } from "./settings.ts";
 import { audit } from "./audit.ts";
-import { judgeAnswer } from "./softjudge.ts";
-import type { OpenView, Recent } from "./softprompt.ts";
+import { judgeAnswer } from "./approvalmodel.ts";
+import type { OpenView, Recent } from "./approvalprompt.ts";
 import { recentChat } from "./recentchat.ts";
 
 // Human-in-the-loop approvals over Signal. Several questions may be open at once; each is
@@ -52,14 +52,13 @@ interface Open {
   background: boolean; // asked by an unattended run (wake-up, preset, handler): the owner is not in a conversation with it
   ts: number; // 0 until the "Approve?" message is sent
   done: boolean;
-  shown: string; // the question text as sent (soft styles: what the judge is shown)
+  shown: string; // the question text as sent (what the judge is shown)
   askedAt: number;
   source: "chat" | "background" | "group";
-  warmed: boolean; // counted in openChat (holds the shared judge)
   scope: string; // the conversation it was asked in (Conversation.key): an answer from another conversation never applies
 }
 const open = new Map<number, Open>();
-let openChat = 0; // approvals that hold the warm judge (chat ones; in soft styles background ones too): they share the one warm judge
+let openChat = 0; // open approvals (background ones too): they share the one warm judge
 const closed = new Map<number, string>(); // recently ended approvals (timestamp -> label): a quoted reply to one must not land on another
 
 // "15 min", "2 h", "1 h 30 min".
@@ -79,26 +78,17 @@ export function answerReaction(emoji: string, targetTimestamp: number, scope: st
   if (!current || current.done || current.scope !== scope) return "ignored";
   const e = emoji.replace(/[︎️]/g, ""); // drop variation selectors
   if (REACT_YES.has(e) || REACT_NO.has(e)) {
-    if (settings.approvalStyle !== "strict") audit(current.call.tool, "answer-reaction", current.source, { by, scope, approved: REACT_YES.has(e), question: current.shown });
+    audit(current.call.tool, "answer-reaction", current.source, { by, scope, approved: REACT_YES.has(e), question: current.shown });
     current.resolve({ approved: REACT_YES.has(e) });
     return REACT_YES.has(e) ? "approved" : "declined";
   }
   return "ignored";
 }
 
-function newestChat(mine: readonly Open[]): Open | undefined {
-  let best: Open | undefined;
-  for (const o of mine) if (!o.background && !o.done && (!best || o.ts > best.ts)) best = o;
-  return best;
-}
-
-// Feed an incoming owner message while approvals may be open. Routing:
-//   - a reply that quotes an open approval message answers that one (the only way free text reaches a background approval);
-//   - a plain yes / no answers the NEWEST open chat approval, else the only open background one (when exactly one is open);
-//   - any other text is judged / taken as feedback by the newest chat approval; background approvals never take it.
-// Result: "none" = a normal message; "approved" / "declined" = consumed as the answer; "feedback" = consumed as feedback.
-// `onJudging` fires just before the (slower) model judge starts, for an ack.
-export interface SoftDeps {
+// Feed an incoming message while approvals may be open in its conversation (read() below). Result: "none" = a normal message;
+// "approved" / "declined" / "modified" = consumed as the answer; "feedback" = consumed as feedback; "clarify" = consumed, the
+// approval stays open. `onJudging` fires just before the (slower) model judge starts, for an ack.
+export interface AnswerDeps {
   judge?: typeof judgeAnswer;
   recent?: (reply: string) => Recent[];
 }
@@ -109,66 +99,23 @@ export interface Ctx {
   by?: string;
   voice?: boolean;
 }
-export async function answer(text: string, onJudging: () => void, quote?: { timestamp: number }, deps: SoftDeps = {}, ctx: Ctx = {}): Promise<Answer> {
+export async function answer(text: string, onJudging: () => void, quote?: { timestamp: number }, deps: AnswerDeps = {}, ctx: Ctx = {}): Promise<Answer> {
   const scope = ctx.scope ?? OWNER_SCOPE;
   const mine = [...open.values()].filter((o) => o.scope === scope && !o.done);
   if (mine.length === 0) return { outcome: "none" };
-  if (settings.approvalStyle !== "strict") return answerSoft(text, onJudging, quote, deps, ctx, mine);
-  const t = normalise(text);
-  const yn = YES.has(t) || NO.has(t);
-  let target = quote && quote.timestamp !== 0 ? open.get(quote.timestamp) : undefined;
-  if (target?.done || target?.scope !== scope) target = undefined;
-  if (!target) {
-    target = newestChat(mine);
-    if (!target && yn) {
-      if (mine.length === 1) target = mine[0];
-    }
-  }
-  if (!target) return { outcome: "none" };
-  const current = target;
-  const call = current.call;
-  if (YES.has(t)) {
-    current.resolve({ approved: true });
-    return { outcome: "approved" };
-  }
-  if (NO.has(t)) {
-    current.resolve({ approved: false });
-    return { outcome: "declined" };
-  }
-  onJudging();
-  const j = await judgeReply(text, { label: current.label, ...call });
-  // Timed out or resolved while the judge was thinking: treat as a normal message.
-  if (current.done) return { outcome: "none" };
-  if (j.verdict === "approve") {
-    current.resolve({ approved: true });
-    return { outcome: "approved" };
-  }
-  if (j.verdict === "decline") {
-    current.resolve({ approved: false });
-    return { outcome: "declined" };
-  }
-  if (j.verdict === "approve_modified") {
-    const patched = applyChanges(call.tool, call.input, j.changes ?? []);
-    if (patched) {
-      current.resolve({ approved: true, updatedInput: patched });
-      return { outcome: "modified", changes: j.changes };
-    }
-    // Patch rejected by policy: fall through to feedback, the agent re-proposes.
-  }
-  current.resolve({ approved: false, feedback: text });
-  return { outcome: "feedback" };
+  return read(text, onJudging, quote, deps, ctx, mine);
 }
 
 const CLARIFY = (label: string) => `I'm not sure that was a yes, so "${label}" is still open. Say yes or no (or react 👍 / 👎).`;
 const WHICH = "Which one do you mean? Reply to the question itself, or react to it.";
 
-// APPROVAL_STYLE soft / conversational. Code decides only two things: an exact plain yes / no that unambiguously targets the one
+// Code decides only two things: an exact plain yes / no that unambiguously targets the one
 // open approval (it is the single open one, or the reply quotes it), and the safety invariants below. Every other message is read by
 // the judge against ALL open approvals (which one(s), yes / no / an allowed edit / something else); nothing is matched by words
 // here and there is no length rule. Invariants kept in code: only this function (a message after the ask) or a reaction resolves an
 // approval; an edit applies only through applyChanges (the allow-list); any judge failure or unusable answer approves nothing, is
 // logged and is silent: the message goes on as a normal chat message.
-async function answerSoft(text: string, onJudging: () => void, quote: { timestamp: number } | undefined, deps: SoftDeps, ctx: Ctx, mine: readonly Open[]): Promise<Answer> {
+async function read(text: string, onJudging: () => void, quote: { timestamp: number } | undefined, deps: AnswerDeps, ctx: Ctx, mine: readonly Open[]): Promise<Answer> {
   const live = [...mine].sort((a, b) => a.ts - b.ts);
   const t = normalise(text);
   const found = quote && quote.timestamp !== 0 ? open.get(quote.timestamp) : undefined;
@@ -267,7 +214,7 @@ export function request(
   const minutes = background ? settings.backgroundApprovalTimeoutMinutes : settings.approvalTimeoutMinutes;
   return new Promise<Decision>((resolve) => {
     const label = description.split("\n")[0] ?? "";
-    const shown = opts.question ?? description; // conversational style: a model-written question; the label stays the code's first line
+    const shown = opts.question ?? description; // a model-written question; the label stays the code's first line
     const finish = (d: Decision, why?: string) => {
       if (entry.done) return;
       entry.done = true;
@@ -279,12 +226,11 @@ export function request(
       signal?.removeEventListener("abort", onAbort);
       if (entry.ts && open.get(entry.ts) === entry) open.delete(entry.ts);
       // The warm judge is shared and single-use: drop it only when no other chat approval is left to use it.
-      if (entry.warmed && --openChat === 0) discardJudge();
+      if (--openChat === 0) discardJudge();
       if (why) console.log(`approval ${why}: ${label}`);
       resolve(d);
     };
-    const warmed = !background || settings.approvalStyle !== "strict"; // soft styles judge every reply, background approvals included
-    const entry: Open = { resolve: finish, label, call, background, ts: 0, done: false, shown, askedAt: Date.now(), source: opts.scope && opts.scope !== OWNER_SCOPE ? "group" : background ? "background" : "chat", warmed, scope: opts.scope ?? OWNER_SCOPE };
+    const entry: Open = { resolve: finish, label, call, background, ts: 0, done: false, shown, askedAt: Date.now(), source: opts.scope && opts.scope !== OWNER_SCOPE ? "group" : background ? "background" : "chat", scope: opts.scope ?? OWNER_SCOPE };
     const onAbort = () => finish({ approved: false });
     const timer = setTimeout(
       () => finish({ approved: false }, `expired after ${formatWait(minutes)}${background ? " (background)" : ""}`),
@@ -292,10 +238,8 @@ export function request(
     );
     signal?.addEventListener("abort", onAbort);
     console.log(`approval requested${background ? " (background)" : ""}: ${label}`);
-    if (warmed) {
-      openChat++;
-      prepareJudge(); // warm the judge while the owner reads the question (strict: a background approval is judged only for a quoted reply: rare)
-    }
+    openChat++;
+    prepareJudge(); // warm the judge while the owner reads the question
     const hint = background
       ? "Reply yes or no (or reply to this message to change something)"
       : isModifiable(call.tool) ? "Reply yes, no, or tell me what to change" : "Reply yes or no";

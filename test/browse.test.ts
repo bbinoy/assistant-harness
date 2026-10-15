@@ -283,12 +283,9 @@ test("a group browse run: a commit click asks in that group, a member's yes lets
   const approvals = await import("../src/approvals.ts");
   const { makeApprove } = await import("../src/approvalask.ts");
   const { setGroupApprover, approveInGroup, DENY_ALL } = await import("../src/permissions.ts");
-  const style = settings as { approvalStyle: string };
-  const was = style.approvalStyle;
-  style.approvalStyle = "strict";
   const posted: { groupId: string; text: string }[] = [];
   let ts = 1000;
-  setGroupApprover((groupId) => makeApprove(async (t) => (posted.push({ groupId, text: t }), ++ts), false, undefined, undefined, groupId));
+  setGroupApprover((groupId) => makeApprove(async (t) => (posted.push({ groupId, text: t }), ++ts), false, undefined, async (q) => ({ text: q.details, ms: 0 }), groupId));
   try {
     const g = onPage(guard("group"));
     const canUse = asCall(makeCanUseTool(approveInGroup("g-browse"), "browse", undefined, undefined, judgeAuto, g));
@@ -309,7 +306,6 @@ test("a group browse run: a commit click asks in that group, a member's yes lets
     assert.equal((await canUse(`${B}type`, { target: "e51", text: "4111111111111111" }, opts)).behavior, "deny");
     assert.equal(posted.length, 0);
   } finally {
-    style.approvalStyle = was;
     setGroupApprover(() => DENY_ALL);
   }
 });
