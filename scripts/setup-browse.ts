@@ -13,7 +13,7 @@ const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const dataDir = process.env.HARNESS_DATA_DIR ? resolve(process.env.HARNESS_DATA_DIR) : root;
 const browsers = join(dataDir, "state", "browse", "browsers");
 
-if (process.env.BROWSE === "off" || process.env.BROWSE_SKIP_INSTALL === "1") {
+if (process.env.BROWSE === "off" || process.env.BROWSE_SKIP_INSTALL === "1" || (process.env.CI && process.argv.includes("--quiet"))) {
   say("browse: skipped (BROWSE=off or BROWSE_SKIP_INSTALL=1)");
   process.exit(0);
 }
