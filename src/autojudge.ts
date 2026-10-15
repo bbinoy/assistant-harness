@@ -95,7 +95,7 @@ export function judgePrompt(i: JudgeInput): string {
   const asked = i.ownerMessage
     ? `${before}${OWNER}'s message that led here:\n${fence("owner_message", i.ownerMessage.slice(0, 600))}`
     : `This came from a background job (${i.source}), not from a message of ${OWNER}'s.${i.task ? `\nThe instructions the job was given:\n${fence("job_instructions", i.task.slice(0, 800))}` : ""}`;
-  return `${asked}\n\nThe action:\n${fence("action", i.description.slice(0, 1200))}`;
+  return `${asked}\n\nThe action:\n${fence("action", i.description.slice(0, 2400))}`;
 }
 
 // Pure: whatever came back, as a verdict. Anything but an exact "auto" is "ask".
