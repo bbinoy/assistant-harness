@@ -142,9 +142,14 @@ test("heartbeat: a usage limit leaves the mail unseen, so the next tick classifi
       { alert: async () => {}, handle: () => {}, briefDue: () => false, onTick: () => {} },
       { mail, triage: async () => { calls++; throw new RateLimitError("rate_limit"); }, setTimeout: () => 0, setInterval: () => 0 },
     );
+    const { coolingDown, resetCooldown } = await import("../src/cooldown.ts");
     await hb.mailCheck();
+    assert.ok(coolingDown(), "the limit starts the cooldown");
     await hb.mailCheck();
-    assert.equal(calls, 2, "tried again on the next tick");
+    assert.equal(calls, 1, "no model call while cooling down");
+    resetCooldown();
+    await hb.mailCheck();
+    assert.equal(calls, 2, "tried again once the cooldown is over: the mail stayed unseen");
   } finally {
     console.log = log;
     console.error = err;

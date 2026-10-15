@@ -6,7 +6,7 @@ import { audit } from "./audit.ts";
 import type { HandleItem } from "./handler.ts";
 import { GmailMail } from "./gmail.ts";
 import { Mailbird } from "./mailbird.ts";
-import { skipForCooldown } from "./cooldown.ts";
+import { noteRateLimit, skipForCooldown } from "./cooldown.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";
@@ -165,6 +165,7 @@ async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: Heartbeat
     results = await triage(await fetchInputs(mb, fresh));
   } catch (e) {
     if (!(e instanceof RateLimitError)) throw e;
+    noteRateLimit();
     console.error("heartbeat: usage limit hit, the mail stays unseen and is retried next tick");
     return fresh;
   }
