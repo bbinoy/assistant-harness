@@ -96,7 +96,7 @@ export function createWakeups(deps: WakeDeps) {
     });
   }
 
-  const presetIO = (conv: Conversation, now: Date): PresetIO => ({
+  const presetIO = (conv: Conversation): PresetIO => ({
     runProfile: deps.runProfile,
     sendBrief: deps.presets?.sendBrief ?? (async () => {}),
     notify: deps.presets?.notify ?? (async () => {}),
@@ -116,7 +116,7 @@ export function createWakeups(deps: WakeDeps) {
       return `refused:${refused}`;
     }
     if (running.has(task.name)) return `${task.name}-running`;
-    const io = presetIO(conv, now);
+    const io = presetIO(conv);
     const job = (async () => {
       try {
         const result = task.name === "brief" ? `brief-${await runBriefTask(io, task, st, now)}` : `radar-${await runRadarTask(io, task, st, now)}`;

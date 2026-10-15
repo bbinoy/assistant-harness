@@ -105,7 +105,7 @@ export const MANIFEST: readonly ToolEntry[] = [
 const READ_VERB = /^(list|get|search|read|query|fetch|summarize|suggest|whats|download|show|ai-search)/i;
 const readVerb = (tool: string) => READ_VERB.test((tool.split("__").pop() ?? "").replace(/^notion-/i, ""));
 
-export type MailProvider = "none" | "mailbird" | "gmail"; // settings.mailProvider cannot be gmail yet; the data can already be
+export type MailProvider = "none" | "mailbird" | "gmail";
 
 // A mail provider's entries count only while it is the active one; every other provider's always do.
 const active = (e: ToolEntry, mail: MailProvider) => !MAIL_PROVIDERS.includes(e.provider) || e.provider === mail;

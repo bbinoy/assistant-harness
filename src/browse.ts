@@ -123,7 +123,7 @@ export class BrowseGuard {
     this.log(tool, "deny", input, { reason: reason.slice(0, 120), ...extra });
     return { kind: "deny", reason };
   }
-  private refNode(input: Record<string, unknown>, ref: unknown): Node | string {
+  private refNode(ref: unknown): Node | string {
     if (!isRef(ref)) return "Use an element ref from a page view (like e12), not a selector or a description.";
     return this.nodes.get(ref) ?? `${String(ref)} is not in the last page view. Take a fresh browser_snapshot and use a ref from it.`;
   }
@@ -172,7 +172,7 @@ export class BrowseGuard {
         return { kind: "defer", description: `🌐 Browser: open a page\nAddress: ${clip(String(input.url), 300)}` };
       }
       case "type": {
-        const n = this.refNode(input, input.target);
+        const n = this.refNode(input.target);
         if (typeof n === "string") return this.deny(toolName, input, n);
         const text = String(input.text ?? "");
         if (sensitiveField(n.name) || looksLikeCardNumber(text)) return this.deny(toolName, input, "Payment and login details are never entered by this run. Stop here: the owner finishes this step themselves. Return needs_owner with the page link.", { sensitive: true, role: n.role });
@@ -184,7 +184,7 @@ export class BrowseGuard {
         const fields = Array.isArray(input.fields) ? (input.fields as Record<string, unknown>[]) : [];
         const lines: string[] = [];
         for (const f of fields) {
-          const n = this.refNode(input, f.target);
+          const n = this.refNode(f.target);
           if (typeof n === "string") return this.deny(toolName, input, n);
           if (sensitiveField(n.name) || sensitiveField(String(f.name ?? "")) || looksLikeCardNumber(String(f.value ?? ""))) return this.deny(toolName, input, "Payment and login details are never entered by this run. Stop here: the owner finishes this step themselves. Return needs_owner with the page link.", { sensitive: true, role: n.role });
           lines.push(`• ${clip(n.name || n.ref, 80)}: ${clip(String(f.value ?? ""), 160)}`);
@@ -193,7 +193,7 @@ export class BrowseGuard {
         return { kind: "defer", description: `⌨️ Browser: fill in a form\nSite: ${clip(hostOf(this.url), 100)}\n${lines.join("\n")}` };
       }
       case "select_option": {
-        const n = this.refNode(input, input.target);
+        const n = this.refNode(input.target);
         if (typeof n === "string") return this.deny(toolName, input, n);
         this.log(toolName, "select", input, { role: n.role });
         return { kind: "defer", description: `⌨️ Browser: choose “${clip(Array.isArray(input.values) ? input.values.join(", ") : "", 120)}” in “${clip(n.name || n.ref, 80)}”\nSite: ${clip(hostOf(this.url), 100)}` };
@@ -206,7 +206,7 @@ export class BrowseGuard {
       case "handle_dialog":
         return input.accept === true ? this.commit(toolName, input, undefined, "accepting a page dialog") : { kind: "defer" };
       case "click": {
-        const n = this.refNode(input, input.target);
+        const n = this.refNode(input.target);
         if (typeof n === "string") {
           // A ref that is not in the last view is not looked up: commit-class (fails closed), but invented selectors are refused.
           if (!isRef(input.target)) return this.deny(toolName, input, n);

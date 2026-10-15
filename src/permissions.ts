@@ -6,7 +6,7 @@ import { describeCall } from "./format.ts";
 import { isGmailTool, isInboxArchive } from "./gmailrules.ts";
 import { classify, isReadTool } from "./policy.ts";
 import type { DraftView } from "./proposals.ts";
-import { actionOf, entryFor, mailView, type MailView } from "./toolmanifest.ts";
+import { actionOf, entryFor, mailView, type MailView, type ViewKind } from "./toolmanifest.ts";
 import { OWNER, settings } from "./settings.ts";
 
 // Permissions as code: policy.ts decides allow / ask / deny; "ask" goes to the owner's phone (the Approve callback).
@@ -74,6 +74,15 @@ export interface GmailReaders {
 let gmailReaders: GmailReaders | undefined;
 export const setGmailReaders = (r: GmailReaders | undefined) => void (gmailReaders = r);
 
+// What the mail client holds for a send of a draft, or the original of a Gmail reply (undefined: nothing to read, or it could not be read).
+async function readBack(kind: ViewKind | undefined, input: Record<string, unknown>): Promise<DraftView | undefined> {
+  const id = Number(input.messageId);
+  if (kind === "mbSend" && draftReader && Number.isFinite(id)) return draftReader(id).catch(() => undefined);
+  if (kind === "gmSend" && typeof input.draftId === "string" && gmailReaders) return gmailReaders.draft(input.draftId).catch(() => undefined);
+  if (kind === "gmReply" && typeof input.messageId === "string" && gmailReaders) return gmailReaders.original(input.messageId).catch(() => undefined);
+  return undefined;
+}
+
 // A run that needs rules a flag cannot say per call (the browse run: which element a click is, which address is fine) passes a guard.
 // It sees every call first: deny it, allow it, turn it into a question with code-built text (`ask`), or leave it to the manifest
 // (`defer`; `description` is then what the owner and the judge read).
@@ -125,12 +134,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     if (MAIL_OUT.has(actionOf(tool))) {
       // Show what the mail client holds right now, not what the model says it is sending (a send of a draft), and the same view for
       // every provider. If that cannot be read, the owner would be approving blind, so the send does not happen.
-      const id = Number((input as { messageId?: unknown }).messageId);
-      const fromDraft = entryFor(tool)?.view === "mbSend";
-      const kind = entryFor(tool)?.view;
-      let draft = fromDraft && draftReader && Number.isFinite(id) ? await draftReader(id).catch(() => undefined) : undefined;
-      if (kind === "gmSend" && typeof input.draftId === "string" && gmailReaders) draft = await gmailReaders.draft(input.draftId).catch(() => undefined);
-      if (kind === "gmReply" && typeof input.messageId === "string" && gmailReaders) draft = await gmailReaders.original(input.messageId).catch(() => undefined);
+      const draft = await readBack(entryFor(tool)?.view, input);
       view = mailView(tool, input, draft && { ...draft, bcc: draft.bcc ?? [], hasAttachments: draft.hasAttachments ?? false });
       if (!view || (view.action !== "forward" && view.to.length === 0)) {
         audit(tool, "deny-unreadable-draft", source);

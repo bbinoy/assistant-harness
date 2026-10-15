@@ -20,12 +20,10 @@ export interface Resume {
 const chatPlanOpts = (mode: CompactMode) => ({ compactTokens: settings.chatCompactTokens, compactGrowth: settings.chatCompactGrowthTokens, quietMinutes: settings.compactQuietMinutes, mode });
 
 // A conversation continues its saved session unless session.ts says to start fresh.
-export function chatResume(announce: boolean, file: string = OWNER_SESSION_FILE, source: Source = "chat"): Resume {
+export function chatResume(file: string = OWNER_SESSION_FILE): Resume {
   const saved = readJson<ChatSession>(file, { costUsd: 0 });
   // A fresh session starts its cost total at zero, so the previous total must not be subtracted.
-  const now = new Date();
-  const opts = chatPlanOpts("off");
-  if (planSession(saved, now, opts) === "fresh") return { previousCost: 0 };
+  if (planSession(saved, new Date(), chatPlanOpts("off")) === "fresh") return { previousCost: 0 };
   return { resume: saved.sessionId, previousCost: saved.costUsd, seenAt: saved.seenAt };
 }
 
