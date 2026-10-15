@@ -3,7 +3,7 @@ import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
-import { BLOCKED_ORIGINS } from "./browserules.ts";
+import { BLOCKED_ORIGINS, type VisionMode } from "./browserules.ts";
 import { settings } from "./settings.ts";
 
 // Is browsing set up, and how the browser server is started (the browse sub-task: browse.ts; its guard: browseguard.ts).
@@ -59,14 +59,16 @@ export function browseStatus(): BrowseStatus {
 // The MCP server of the browser, for the browse run's options only. Isolated (in memory: no cookies, no logins, nothing saved),
 // headless, no service workers, no images to the model, private ranges blocked (a best-effort extra: the guard's address check is
 // the real veto). Started with a minimal environment, in a folder of its own that is removed afterwards.
-export function browserServer(st: Extract<BrowseStatus, { ok: true }>, outDir: string, ua: string | undefined = desktopUserAgent(st.exe)): McpServerConfig {
+export function browserServer(st: Extract<BrowseStatus, { ok: true }>, outDir: string, ua: string | undefined = desktopUserAgent(st.exe), vision: { mode: VisionMode; cdpPort?: number } = { mode: "off" }): McpServerConfig {
   // An ordinary language and the time zone of this machine, so the page sees what a browser on this computer would send.
   const configFile = join(outDir, "browser-config.json");
-  writeFileSync(configFile, JSON.stringify({ browser: { contextOptions: { locale: settings.browseLocale, timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone } } }));
+  // BROWSE_VISION=click only: the browser also listens on a debugging port on loopback, for the guard's own lookup of what is under a point (browsecdp.ts).
+  const launchOptions = vision.mode === "click" && vision.cdpPort ? { launchOptions: { args: [`--remote-debugging-port=${vision.cdpPort}`] } } : {};
+  writeFileSync(configFile, JSON.stringify({ browser: { ...launchOptions, contextOptions: { locale: settings.browseLocale, timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone } } }));
   return {
     type: "stdio",
     command: process.execPath,
-    args: [st.cli, ...(ua ? ["--user-agent", ua] : []), "--config", configFile, "--headless", "--isolated", "--block-service-workers", "--image-responses", "omit", "--file-paths", "absolute", "--timeout-navigation", "30000", "--viewport-size", "1280x800", "--output-dir", outDir, "--executable-path", st.exe, "--blocked-origins", BLOCKED_ORIGINS.join(";")],
+    args: [st.cli, ...(ua ? ["--user-agent", ua] : []), "--config", configFile, "--headless", "--isolated", "--block-service-workers", ...(vision.mode === "click" ? ["--caps", "vision"] : []), "--image-responses", vision.mode === "off" ? "omit" : "allow", "--file-paths", "absolute", "--timeout-navigation", "30000", "--viewport-size", "1280x800", "--output-dir", outDir, "--executable-path", st.exe, "--blocked-origins", BLOCKED_ORIGINS.join(";")],
     env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", TMPDIR: process.env.TMPDIR ?? "", PLAYWRIGHT_BROWSERS_PATH: BROWSERS() },
   };
 }

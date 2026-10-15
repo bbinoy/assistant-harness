@@ -5,7 +5,7 @@ import { createTellServer, OWNER_TELL } from "./telluser.ts";
 import { browseSystem, createBrowseServer } from "./browse.ts";
 import { resultText, withText, type BrowseGuard, type BrowseMode } from "./browseguard.ts";
 import { browseStatus, browserServer } from "./browseserver.ts";
-import { HIDDEN_BROWSER_TOOLS } from "./browserules.ts";
+import { hiddenBrowserTools } from "./browserules.ts";
 import { pausing, RunTimeout, withCeiling, type Ceiling } from "./ceiling.ts";
 import { chatResume, forgetUnresumable } from "./chatsession.ts";
 import { recordConnectors } from "./connectors.ts";
@@ -61,7 +61,7 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 function browseRunOptions(guard: BrowseGuard): RunOptions {
   return {
     source: PROFILES.browse.source,
-    systemPrompt: browseSystem(),
+    systemPrompt: browseSystem(undefined, guard.vision),
     maxTurns: PROFILES.browse.maxTurns,
     maxBudgetUsd: PROFILES.browse.maxBudgetUsd,
     maxMinutes: settings.browseMaxMinutes,
@@ -131,7 +131,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
   const status = browsing ? browseStatus() : undefined;
   if (status && !status.ok) throw new Error(`browsing is not set up: ${status.reason}`);
   const mcpServers: Options["mcpServers"] = browsing && opts.guard && status?.ok
-    ? { browser: browserServer(status, opts.guard.outDir) }
+    ? { browser: browserServer(status, opts.guard.outDir, undefined, { mode: opts.guard.vision, cdpPort: opts.guard.cdpPort }) }
     : opts.memory || browseTool || tellServer
       ? { ...(tellServer ? { tell: tellServer } : {}), ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
       : undefined;
@@ -168,7 +168,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     // other skills would cost context on every call and are none of its business).
     plugins: isolated ? undefined : [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
     skills: isolated ? undefined : (opts.skills ? [...opts.skills] : OFFERED_SKILLS),
-    disallowedTools: browsing ? HIDDEN_BROWSER_TOOLS : isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
+    disallowedTools: browsing ? hiddenBrowserTools(opts.guard?.vision) : isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
     canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir, opts.judgeContext, undefined, opts.guard),
     hooks,
     maxTurns: opts.maxTurns,
