@@ -207,6 +207,7 @@ export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<Ga
   const track = (q: Query): Query => (started.push(q), q);
   const cold = () => track((io.query ?? query)({ prompt, options: gateOptions(system) }));
   let api: number | undefined;
+  let cost: number | undefined;
   let out = NOTHING;
   let lastError: string | undefined; // the SDK reports a refused call (usage limit, expired login) as an assistant error code
   try {
@@ -219,7 +220,7 @@ export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<Ga
       if (m.type !== "result") continue;
       mark("result");
       api = m.duration_api_ms;
-      recordCost(m.total_cost_usd);
+      recordCost((cost = m.total_cost_usd));
       const p0 = Date.now();
       // A usage limit or an expired login is NOT "nothing to do": say so (group.ts decides whether anyone needs to hear it).
       const refused = failure(lastError, m.subtype);
@@ -230,7 +231,7 @@ export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<Ga
     }
   } finally {
     for (const q of started) q.close(); // the answer is in, or it failed
-    console.log(`timing gate ${input.trigger} ${spare ? "warm" : "cold"} prompt=${prompt.length} system=${system.length} ${Object.entries(at).map(([k, v]) => `${k}=${v}`).join(" ")}${api === undefined ? "" : ` api=${api}`} total=${Date.now() - t0}`);
+    console.log(`timing gate ${input.trigger} ${spare ? "warm" : "cold"} prompt=${prompt.length} system=${system.length} ${Object.entries(at).map(([k, v]) => `${k}=${v}`).join(" ")}${api === undefined ? "" : ` api=${api}`}${cost === undefined ? "" : ` cost=$${cost.toFixed(4)}`} total=${Date.now() - t0}`);
   }
   return out;
 }

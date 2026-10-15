@@ -36,14 +36,16 @@ export function providerReady(cfg: TtsProviderConfig): { ok: boolean; missing: s
  * `fallback` is "kokoro" and Kokoro is set up; a silent switch never happens otherwise.
  */
 export async function synthesizeWith(text: string, cfg: TtsProviderConfig, log: Logger = silentLogger): Promise<string> {
-  if (cfg.provider === "kokoro") return synthesize(text, cfg.kokoro);
+  const t0 = Date.now();
+  const done = (provider: string, file: string) => (log.info(`voice: ${provider} synthesised ${text.length} chars in ${Date.now() - t0} ms`), file);
+  if (cfg.provider === "kokoro") return done("kokoro", await synthesize(text, cfg.kokoro));
   try {
     if (cfg.provider === "qwen" && !qwenReady(cfg.qwen).ok) throw new Error(`Qwen voice not set up, missing: ${qwenReady(cfg.qwen).missing.join(", ")}`);
-    return await (cfg.provider === "qwen" ? synthesizeQwen(text, cfg.qwen) : cfg.provider === "elevenlabs" ? synthesizeElevenLabs(text, cfg.elevenlabs) : synthesizeHttp(text, cfg.http));
+    return done(cfg.provider, await (cfg.provider === "qwen" ? synthesizeQwen(text, cfg.qwen) : cfg.provider === "elevenlabs" ? synthesizeElevenLabs(text, cfg.elevenlabs) : synthesizeHttp(text, cfg.http)));
   } catch (e) {
     // Only when asked for (fallback: "kokoro"): the same words, spoken locally.
     if (cfg.fallback !== "kokoro" || !ttsReady(cfg.kokoro.dir).ok) throw e;
     log.warn(`${cfg.provider} speech failed, using Kokoro:`, (e as Error).message);
-    return synthesize(text, cfg.kokoro);
+    return done("kokoro (fallback)", await synthesize(text, cfg.kokoro));
   }
 }
