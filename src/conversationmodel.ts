@@ -113,6 +113,7 @@ export interface PipelineDeps {
     reply(text: string, opts?: { plain?: boolean; quote?: Quote; kind?: Kind; groupId?: string }): Promise<number>;
     replyPlain(text: string, kind?: Kind): Promise<number>;
     sendVoice(file: string, spoken: string, groupId?: string): Promise<number>;
+    sendPicture(file: string, caption: string, opts?: { quote?: Quote; kind?: Kind; groupId?: string }): Promise<number>;
   };
   record: (groupId: string | undefined, kind: Kind, ts: number, text: string, extra?: Extra) => void; // into that conversation's log
   account: string; // our own Signal number: the author of messages of ours that a reaction points at

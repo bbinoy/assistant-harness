@@ -1,5 +1,6 @@
 import type { Kind as MessageKind } from "./messages.ts";
 import { settings } from "./settings.ts";
+import { clean } from "./sanitize.ts";
 import { briefDelivery } from "./brief.ts";
 import { BRIEF_FOOTER, BRIEF_FOOTER_NO_MAIL, renderMarkdown, signalSummary, splitSections, toSignalStyles } from "./markdown.ts";
 import type { Quote, SignalClient } from "@ted-personal-assistant/signal";
@@ -68,6 +69,16 @@ export function createOutbound(signal: Pick<SignalClient, "send">, record?: (kin
     return ts;
   }
 
+  // A picture (a screenshot kept by the browse tool, sendpicture.ts) with an optional caption, to the owner's chat or a group.
+  async function sendPicture(file: string, caption: string, opts: { quote?: Quote; kind?: MessageKind; groupId?: string } = {}): Promise<number> {
+    const r = caption ? renderMarkdown(clean("picture caption", caption, { max: 300 })) : { text: "", styles: [] };
+    if (!opts.groupId && r.text) remember(`x:${r.text}`);
+    const ts = await signal.send(r.text, { attachments: [file], style: toSignalStyles(r.styles), quote: opts.quote, ...(opts.groupId ? { groupId: opts.groupId } : {}) });
+    if (!opts.groupId) remember(`t:${ts}`);
+    record?.(opts.kind ?? "chat", ts, `🖼️ ${r.text || "(picture)"}`, opts.groupId);
+    return ts;
+  }
+
   const replyPlain = (text: string, kind?: MessageKind) => reply(text, { plain: true, kind });
 
   // The whole brief, one message per section (not used for the daily brief any more: Signal gets
@@ -84,5 +95,5 @@ export function createOutbound(signal: Pick<SignalClient, "send">, record?: (kin
     }
   }
 
-  return { reply, replyPlain, sendVoice, sendBrief, sendBriefSummary, isOwnEcho };
+  return { reply, replyPlain, sendVoice, sendPicture, sendBrief, sendBriefSummary, isOwnEcho };
 }

@@ -1,11 +1,12 @@
-import { readFileSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { addressProblem, BROWSER_PREFIX, classifyClick, dnsResolver, hostOf, isAllowedBrowserTool, isRef, parseSnapshot, resolvesPublic, sensitiveKind, type Node, type Resolver, type VisionMode } from "./browserules.ts";
 import type { Probe } from "./browsecdp.ts";
 import { clickProblem, MAX_POINT_CLICKS, MAX_SHOTS, nodeOfPoint, screenshotInput, validPoint } from "./browsevision.ts";
 import { audit } from "./audit.ts";
 import { clip } from "./format.ts";
 import { cleanText } from "./sanitize.ts";
+import { isJpeg, MAX_PICTURE_BYTES } from "./sendpicture.ts";
 import { settings } from "./settings.ts";
 
 // The guard of a browse run: it decides every call the browsing model makes (browserules.ts has the pure rules). One per run.
@@ -34,6 +35,7 @@ export interface GuardOptions {
   vision?: VisionMode; // the vision experiment (browsevision.ts); off: today's behaviour
   probe?: Probe; // click mode: what is under a point of the page, looked up by code (browsecdp.ts)
   cdpPort?: number; // click mode: the browser's debugging port on loopback (browseserver.ts starts the browser with it)
+  shotsDir?: string; // vision on: where each screenshot is kept as a small jpeg, for the chat to pass on (sendpicture.ts)
 }
 
 const SNAPSHOT_CAP = 24_000; // characters (~7k tokens) of one page view: bigger ones are cut with a visible marker (MCP results over 25k tokens would be written to a file the run cannot read)
@@ -59,6 +61,8 @@ export class BrowseGuard {
   readonly cdpPort?: number;
   private readonly probe?: Probe;
   private shots = 0;
+  readonly shotsDir?: string;
+  kept: { id: string; file: string; size: number }[] = []; // the screenshots kept for the chat, in order
   private pointClicks = 0;
   private pending?: string; // the commit call that was asked about: counted when that very call succeeds
 
@@ -71,6 +75,23 @@ export class BrowseGuard {
     this.vision = o.vision ?? "off";
     this.probe = o.probe;
     this.cdpPort = o.cdpPort;
+    this.shotsDir = o.shotsDir;
+  }
+
+  // After a screenshot call succeeded: keeps its picture as a jpeg file (only real jpeg bytes, a size limit, a name code chooses) and returns its id.
+  keepShot(response: unknown): string | undefined {
+    if (!this.shotsDir) return undefined;
+    const bytes = imageBytes(response);
+    if (!bytes || bytes.length > MAX_PICTURE_BYTES || !isJpeg(bytes)) return undefined;
+    const id = `shot${this.kept.length + 1}`;
+    const file = join(this.shotsDir, `${id}.jpg`);
+    try {
+      writeFileSync(file, bytes, { mode: 0o600, flag: "wx" });
+    } catch {
+      return undefined;
+    }
+    this.kept.push({ id, file, size: bytes.length });
+    return id;
   }
 
   private log(tool: string, verdict: string, input: Record<string, unknown>, extra: Record<string, unknown> = {}) {
@@ -334,8 +355,14 @@ export class BrowseGuard {
 }
 
 // The text of a tool result, whatever its shape (a string, {content: [...]}, or the blocks themselves), and the same result with new text.
-type Block = { type?: string; text?: string };
+type Block = { type?: string; text?: string; data?: string; source?: { data?: string } };
 const blocksOf = (r: unknown): Block[] | undefined => (Array.isArray(r) ? (r as Block[]) : r && typeof r === "object" && Array.isArray((r as { content?: unknown }).content) ? (r as { content: Block[] }).content : undefined);
+// The bytes of the first image of a tool result (base64 in the block), if any.
+export function imageBytes(r: unknown): Buffer | undefined {
+  const img = blocksOf(r)?.find((x) => x?.type === "image");
+  const data = img?.source?.data ?? img?.data;
+  return typeof data === "string" && data ? Buffer.from(data, "base64") : undefined;
+}
 export function resultText(r: unknown): string {
   if (typeof r === "string") return r;
   const b = blocksOf(r);
