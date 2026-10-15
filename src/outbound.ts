@@ -69,7 +69,7 @@ export function createOutbound(signal: Pick<SignalClient, "send">, record?: (kin
     return ts;
   }
 
-  // A picture (a screenshot kept by the browse tool, sendpicture.ts) with an optional caption, to the owner's chat or a group.
+  // A picture (a screenshot kept by the browse tool, shots.ts) with an optional caption, to the owner's chat or a group.
   async function sendPicture(file: string, caption: string, opts: { quote?: Quote; kind?: MessageKind; groupId?: string } = {}): Promise<number> {
     const r = caption ? renderMarkdown(clean("picture caption", caption, { max: 300 })) : { text: "", styles: [] };
     if (!opts.groupId && r.text) remember(`x:${r.text}`);

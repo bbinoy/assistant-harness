@@ -1,7 +1,6 @@
 import { query, startup } from "@anthropic-ai/claude-agent-sdk";
 import { buildOptions, runAgent, type AgentReply, type RunOptions } from "./agentrun.ts";
 import { groupSpare, runWarmOrCold, spare, warmUp } from "./agentwarm.ts";
-import { OWNER_TELL, withTell, type TellSink } from "./telluser.ts";
 import { chatResume } from "./chatsession.ts";
 import { disconnected, readConnectors } from "./connectors.ts";
 import type { Conversation } from "./conversation.ts";
@@ -50,13 +49,13 @@ export function prepareChat(approve: Approve, notify: (text: string) => Promise<
 }
 
 // Interactive chat: resumes the persistent conversation, on the warm process when it fits.
-export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void; tell?: TellSink }): Promise<AgentReply> {
+export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void }): Promise<AgentReply> {
   setChatOwnerMessage(ownerMessage ?? prompt);
   spare.touch("owner"); // in use: the idle period starts over
   const o = { ...chatOptions(notify), onFirstOutput: hooks?.firstOutput };
   const r = chatResume();
   const input = userInput(prompt, pictures);
-  return withTell(OWNER_TELL, hooks?.tell, () => runWarmOrCold(spare, "owner", o, r, "chat", input, (abortController) => query({ prompt: input, options: { ...buildOptions(approve, o, r.resume), abortController } })));
+  return runWarmOrCold(spare, "owner", o, r, "chat", input, (abortController) => query({ prompt: input, options: { ...buildOptions(approve, o, r.resume), abortController } }));
 }
 
 // ---- a group's chat ----
@@ -75,13 +74,13 @@ export const groupRunOptions = (conv: GroupConv, systemPrompt: string): RunOptio
 });
 
 // `build` makes the prompt once it is known whether the session resumes: a resumed one is told only what it has not seen (group.ts).
-export async function runGroupTurn(conv: GroupConv, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}, tell?: TellSink): Promise<AgentReply> {
+export async function runGroupTurn(conv: GroupConv, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}): Promise<AgentReply> {
   const r = chatResume(conv.sessionFile);
   const { prompt, seenAt, pictures } = build(r.resume ? r.seenAt : undefined);
   const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
   const input = userInput(prompt, pictures);
   // The group's own warm process, if it is the one kept and nothing it was built from has changed (same group, session, prompt, notes index).
-  return withTell(conv.groupId!, tell, () => runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, (abortController) => (io.query ?? query)({ prompt: input, options: { ...buildOptions(approveInGroup(conv.groupId!), o, r.resume), abortController } })));
+  return runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, (abortController) => (io.query ?? query)({ prompt: input, options: { ...buildOptions(approveInGroup(conv.groupId!), o, r.resume), abortController } }));
 }
 
 // Keep ONE warm process for the group that spoke last, replacing another group's. Called when a message arrives for a

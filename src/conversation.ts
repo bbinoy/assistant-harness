@@ -6,8 +6,7 @@ import { findMessage, revisionsOf, type Extra, type Kind } from "./messages.ts";
 import { DELETED_LINE, editNote, isAuthor, sameText } from "./edit.ts";
 import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
-import { withPictures, type PictureSink } from "./sendpicture.ts";
-import { OWNER_TELL, type TellSink } from "./telluser.ts";
+import { OWNER_KEY, withSend, type Content, type SendSink } from "./send.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
@@ -130,25 +129,60 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
-  // The reply of a run: by voice (only if speech is set up), a reaction, words, or nothing ([[silent]]).
-  async function deliver(conv: Conversation, replied: string, t: Pick<Turn, "target" | "threadUnder" | "hadQuote" | "reaction" | "kind"> & { started: number }): Promise<{ spoke: boolean; reacted: boolean }> {
+  // THE delivery of everything a turn says: the final reply and each `send` tool call (send.ts) go through here, so the rules exist once.
+  // Text (or a voice note: only if speech is set up and the language is one the voice speaks, else text), a picture, an emoji reaction.
+  // Target and quote: a threaded quote under the conversation's rule, a reaction on the message being answered. The sanitiser runs in
+  // out.reply / out.sendPicture; [[silent]] sends nothing; logging is out's. `more`: the turn goes on, so "typing…" resumes (a send clears it on the phone).
+  function delivery(conv: Conversation, t: Pick<Turn, "target" | "threadUnder" | "hadQuote" | "reaction" | "kind"> & { started: number }) {
+    const state = { spoke: false, reacted: false };
+    const quote = () => (t.threadUnder && (conv.threadAlways || shouldThread(!!t.hadQuote, now() - t.started)) ? t.threadUnder : undefined);
+    async function send(c: Content, more: boolean): Promise<string> {
+      let told: string;
+      if (c.kind === "reaction") {
+        if (!t.target) return "Nothing to react to.";
+        void signal.react(c.emoji, t.target, conv.groupId);
+        state.reacted = true;
+        told = "Reacted.";
+      } else if (c.kind === "picture") {
+        const caption = c.caption.trim();
+        await out.sendPicture(c.file, SILENT.test(caption) ? "" : caption, { kind: t.kind ?? "chat", quote: quote(), groupId: conv.groupId });
+        state.spoke = true;
+        console.log(`${conv.kind} picture sent (${c.id}, ${c.size} bytes)`);
+        told = `Sent ${c.id} as a picture.`;
+      } else {
+        const words = SILENT.test(c.text) ? "" : c.text.trim();
+        let spoken = false;
+        let speechFailed = false;
+        // Safety net: the voice speaks only TTS_LANGUAGES; text in another language would get a wrong accent, so it goes out as text.
+        const speakable = c.voice && !!words && canSpeak() && words.length <= MAX_SPOKEN_CHARS;
+        const foreign = speakable ? await deps.speech.foreign(words) : undefined;
+        if (foreign) console.error(`voice skipped: ${foreign === UNSURE ? "the language of the reply could not be told" : `reply looks ${foreign}`}, the voice speaks ${settings.ttsLanguages.join("/")}; sending text`);
+        if (speakable && !foreign) speechFailed = !(spoken = await speak(conv, words));
+        if (spoken) {
+          state.spoke = true;
+          told = "Sent as a voice note.";
+        } else if (!words) {
+          return "Nothing to send.";
+        } else {
+          await out.reply(speechFailed ? `${words}\n\n${VOICE_FAILED_NOTE}` : words, { kind: t.kind ?? "chat", quote: quote(), groupId: conv.groupId }); // the model may have announced a voice message
+          state.spoke = true;
+          told = "Sent.";
+        }
+        console.log(`${conv.kind} ${spoken ? "voice note" : "text"} sent (${words.length} chars)`);
+      }
+      if (more && typers.has(conv.key)) void signal.typing(false, conv.groupId);
+      return `${told} Carry on.`;
+    }
+    return { state, send };
+  }
+
+  // The final reply of a run, by its markers: [[voice]] words, [[react: 👍]] with or without words, [[silent]] or nothing.
+  async function deliverFinal(conv: Conversation, d: ReturnType<typeof delivery>, replied: string, t: Pick<Turn, "target" | "reaction">): Promise<void> {
     const chosen = splitVoice(replied);
-    let spoken = false;
-    let speechFailed = false;
-    // Safety net: the voice speaks only TTS_LANGUAGES; text in another language would get a wrong accent, so it goes out as text.
-    const speakable = !!chosen.voice && canSpeak() && chosen.voice.length <= MAX_SPOKEN_CHARS;
-    const foreign = speakable ? await deps.speech.foreign(chosen.voice!) : undefined;
-    if (foreign) console.error(`voice skipped: ${foreign === UNSURE ? "the language of the reply could not be told" : `reply looks ${foreign}`}, the voice speaks ${settings.ttsLanguages.join("/")}; sending text`);
-    if (speakable && !foreign) speechFailed = !(spoken = await speak(conv, chosen.voice!));
-    // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
-    const { reaction, text } = splitReaction(spoken ? "" : chosen.text);
-    const said = SILENT.test(text) ? "" : text;
-    const words = said && speechFailed ? `${said}\n\n${VOICE_FAILED_NOTE}` : said; // the model may have announced a voice message
-    const quote = t.threadUnder && (conv.threadAlways || shouldThread(!!t.hadQuote, now() - t.started)) ? t.threadUnder : undefined;
-    if (words) await out.reply(words, { kind: t.kind ?? "chat", quote, groupId: conv.groupId });
-    if (reaction && t.target) void signal.react(reaction, t.target, conv.groupId);
-    else if (!t.reaction) status(conv, "✅", t.target);
-    return { spoke: spoken || !!words, reacted: !!reaction };
+    const { reaction, text } = splitReaction(chosen.text);
+    await d.send({ kind: "text", text, voice: !!chosen.voice }, false);
+    if (reaction && t.target) await d.send({ kind: "reaction", emoji: reaction }, false);
+    else if (!t.reaction && !d.state.reacted) status(conv, "✅", t.target); // a reaction the model already put on that message stays
   }
 
   // "typing…" for a conversation, from the moment it is decided to answer (not when the model starts) until the reply is out.
@@ -194,34 +228,15 @@ export function createPipeline(deps: PipelineDeps) {
     const background = !!turn.reaction || !!turn.background; // a reaction or a wake-up is no conversation: no typing, no icons
     if (!background) status(conv, "👀", turn.target); // 👀 working, ✅ answered, ⚠️ failed, each replacing the last
     const typing = background ? undefined : holdTyping(conv, turn.timing); // already showing if the decision to answer came earlier
-    // tell_user: an interim message goes out at once as plain text under the answer's rules (sanitiser in out.reply, quote, [[silent]] sends nothing).
-    const tell: TellSink | undefined = background ? undefined : async (raw) => {
-      const words = splitReaction(splitVoice(raw).text).text.trim(); // never voice or a reaction before the work is done
-      if (!words || SILENT.test(words)) return "Nothing to send.";
-      const quote = turn.threadUnder && (conv.threadAlways || shouldThread(!!turn.hadQuote, now() - started)) ? turn.threadUnder : undefined;
-      try {
-        await out.reply(words, { kind: turn.kind ?? "chat", quote, groupId: conv.groupId });
-      } catch (e) {
-        console.error(`${conv.kind}: tell_user failed:`, (e as Error).message);
-        return "Could not send it; carry on.";
-      }
-      console.log(`${conv.kind} tell_user sent (${words.length} chars)`);
-      if (typers.has(conv.key)) void signal.typing(false, conv.groupId); // sending clears "typing…" on the phone: still working
-      return "Sent. Carry on with the task.";
-    };
-    // send_picture (sendpicture.ts): a screenshot of this turn's browse run, as an attachment under the same target and quote rules; its files go when the turn ends.
-    const sendPicture: PictureSink | undefined = background ? undefined : async (file, raw, id) => {
-      const words = splitReaction(splitVoice(raw).text).text.trim();
-      const quote = turn.threadUnder && (conv.threadAlways || shouldThread(!!turn.hadQuote, now() - started)) ? turn.threadUnder : undefined;
-      await out.sendPicture(file, SILENT.test(words) ? "" : words, { kind: turn.kind ?? "chat", quote, groupId: conv.groupId });
-      if (typers.has(conv.key)) void signal.typing(false, conv.groupId);
-      return `Sent ${id} as a picture. Carry on.`;
-    };
+    const d = delivery(conv, { ...turn, started }); // one for the whole turn: the tool sends and the final reply share its state
+    // The `send` tool (send.ts): the same delivery as the final reply; none for a reaction or a wake-up. Its screenshots go when the turn ends.
+    const sink: SendSink | undefined = background ? undefined : (c) => d.send(c, true);
     try {
-      const { text, costUsd } = await withPictures(conv.groupId ?? OWNER_TELL, sendPicture, () => turn.run({ firstOutput: () => turn.timing?.mark("first"), tell }));
+      const { text, costUsd } = await withSend(conv.groupId ?? OWNER_KEY, sink, () => turn.run({ firstOutput: () => turn.timing?.mark("first") }));
       turn.timing?.set("run", now() - started);
       console.log(`${conv.kind} replied (${text.length} chars${costUsd === undefined ? "" : `, $${costUsd.toFixed(4)}`})`);
-      const sent = await deliver(conv, text, { ...turn, started });
+      await deliverFinal(conv, d, text, turn);
+      const sent = d.state;
       turn.timing?.mark("total");
       turn.timing?.report(); // before compaction: that runs after the reply and is not part of the wait
       if (conv.kind === "group") audit("group_reply", sent.spoke || sent.reacted ? "sent" : "silent", "group");
@@ -445,7 +460,7 @@ export function createPipeline(deps: PipelineDeps) {
   // A quick reaction of our own, no run needed (the gate chose it).
   const react = (conv: Conversation, emoji: string, target: { author: string; timestamp: number }) => void signal.react(emoji, target, conv.groupId);
 
-  return { handleIncoming, enqueue, burst, burstQueued, wait, holdTyping, runTurn, deliver, record, canSpeak, react, warn, dropPending };
+  return { handleIncoming, enqueue, burst, burstQueued, wait, holdTyping, runTurn, record, canSpeak, react, warn, dropPending };
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>;

@@ -1,45 +1,100 @@
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { audit } from "./audit.ts";
+import { isOneEmoji } from "./reaction.ts";
+import { dropShots, loadShot } from "./shots.ts";
 
-// tell_user: lets the model say something to the person NOW while it keeps working ("On it, researching now"). Text the
-// model writes before a tool call stays internal; only this tool sends. The owner's chat and groups have it; unattended
-// runs (brief, radar, handler, browse worker, dream, compaction, wake-ups) do not (agent.ts, toolmanifest.ts).
-// Delivery is the conversation's own (conversation.ts runTurn): same sanitiser, target and quote rules, [[silent]] sends
-// nothing. How often to use it is the model's call; the run's turn, budget and time limits bound a runaway loop.
+// send: the model's way to put something in the conversation NOW while it keeps working: a message ("On it, researching now"), a voice note,
+// a picture (a screenshot of this run's browse), or an emoji reaction. Text the model writes before a tool call stays internal; only this tool
+// sends. The owner's chat and groups have it; unattended runs (brief, radar, handler, browse worker, dream, compaction, wake-ups) do not
+// (agentrun.ts, toolmanifest.ts). The final reply stays the default last message and needs no tool call.
+// ONE kind of content per call (text, optionally spoken; a picture, optionally with a caption; or a reaction), any number of calls in any order.
+// Delivery is the conversation's own (conversation.ts runTurn, the same function as the final reply): sanitiser, target, quote and thread rules,
+// the voice language check, group rules, typing, logging. How often to send is the model's call; the run's turn, budget and time limits bound a runaway loop.
 
-// Sends one interim message of the running turn; returns what the model is told.
-export type TellSink = (text: string) => Promise<string>;
+export type Content =
+  | { kind: "text"; text: string; voice: boolean } // voice: speak it (the delivery falls back to text when it cannot)
+  | { kind: "picture"; file: string; caption: string; id: string; size: number }
+  | { kind: "reaction"; emoji: string }; // on the message being answered
 
-export const OWNER_TELL = "owner";
+// Delivers one piece of content of the running turn; returns what the model is told.
+export type SendSink = (c: Content) => Promise<string>;
 
-// Warm processes are built before their turn exists, so the server looks the turn's sink up when called.
-const sinks = new Map<string, TellSink>();
+export const OWNER_KEY = "owner"; // the owner's chat; a group's key is its group id
 
-export async function withTell<T>(key: string, sink: TellSink | undefined, run: () => Promise<T>): Promise<T> {
-  if (!sink) return run();
-  sinks.set(key, sink);
+const sinks = new Map<string, SendSink>();
+
+// Around a conversation's turn: the sink is found by key while it runs (a warm process is built before its turn exists); afterwards the
+// turn's screenshots are removed.
+export async function withSend<T>(key: string, sink: SendSink | undefined, run: () => Promise<T>): Promise<T> {
+  if (sink) sinks.set(key, sink);
   try {
     return await run();
   } finally {
-    if (sinks.get(key) === sink) sinks.delete(key);
+    if (sink && sinks.get(key) === sink) sinks.delete(key);
+    dropShots(key);
   }
 }
 
-export function createTellServer(key: string) {
+export interface SendArgs {
+  text?: string;
+  voice?: boolean;
+  picture?: string;
+  caption?: string;
+  react?: string;
+}
+
+// The tool body, apart from the server so tests can call it. Checks which combination makes sense, then hands the content to the turn's sink.
+export async function sendNow(key: string, a: SendArgs): Promise<string> {
+  const source = key === OWNER_KEY ? "chat" : "group";
+  const kinds = [a.text !== undefined, a.picture !== undefined, a.react !== undefined].filter(Boolean).length;
+  if (kinds !== 1) return "Send exactly one thing per call: text (add voice: true to speak it), a picture (id, optional caption), or react (one emoji). Call send again for more.";
+  if (a.voice !== undefined && a.text === undefined) return "voice only goes with text.";
+  if (a.caption !== undefined && a.picture === undefined) return "caption only goes with a picture.";
+  const sink = sinks.get(key);
+  if (!sink) return "Nobody to send it to right now.";
+  let content: Content;
+  if (a.text !== undefined) {
+    content = { kind: "text", text: a.text, voice: !!a.voice };
+  } else if (a.react !== undefined) {
+    if (!isOneEmoji(a.react.trim())) return "react takes exactly one emoji.";
+    content = { kind: "reaction", emoji: a.react.trim() };
+  } else {
+    const r = loadShot(key, a.picture!);
+    if ("problem" in r) {
+      audit("send", "refused", source, { kind: "picture", id: a.picture!.slice(0, 20), conversation: source });
+      return r.problem;
+    }
+    content = { kind: "picture", file: r.shot.file, caption: a.caption ?? "", id: r.shot.id, size: r.shot.size };
+  }
+  try {
+    const told = await sink(content);
+    audit("send", "sent", source, { kind: content.kind, conversation: source, ...(content.kind === "picture" ? { id: content.id, size: content.size } : {}) });
+    return told;
+  } catch (e) {
+    audit("send", "failed", source, { kind: content.kind, conversation: source, ...(content.kind === "picture" ? { id: content.id, size: content.size } : {}) });
+    console.error(`${source}: send ${content.kind} failed:`, (e as Error).message);
+    return "Could not send it; carry on.";
+  }
+}
+
+export function createSendServer(key: string) {
   return createSdkMcpServer({
-    name: "tell",
+    name: "send",
     version: "1.0.0",
     alwaysLoad: true, // its schema is in the prompt from the first call: a deferred tool is only found by searching for it, and the model never does
     tools: [
       tool(
-        "tell_user",
-        "Send a short message to the person right now while you keep working, for example \"On it, researching now.\" Call it BEFORE your first other tool call on any task that will take more than about ten seconds (research, browsing, several lookups, retrying or continuing earlier work), once, in their language and your usual voice, and again only if the work is genuinely long. Not for quick answers, not for trivial steps, and never for the result itself: that is your final reply.",
-        { message: z.string().min(1).max(500).describe("One short line, as you would write it in the chat.") },
-        async ({ message }) => {
-          const sink = sinks.get(key);
-          const text = sink ? await sink(message).catch(() => "Could not send it; carry on.") : "Nobody to tell right now; carry on.";
-          return { content: [{ type: "text" as const, text }] };
+        "send",
+        "Put one thing in the conversation right now while you keep working: text (a short message, for example \"On it, researching now.\"; add voice: true to speak it as a voice note), picture (the id of a screenshot the browse tool took, like shot1, with an optional one-line caption), or react (one emoji on the message you are answering). One thing per call; call it again for more. Use it for a quick note before a long task (always before the browse tool), or a picture, voice note or reaction mid-turn. Not for trivial steps, and not for the result itself: your final reply is sent on its own. Write in the person's language and your usual voice. A picture shows page content, so describe it as what the page shows, never as something you checked.",
+        {
+          text: z.string().min(1).max(2000).optional().describe("The message, as you would write it in the chat."),
+          voice: z.boolean().optional().describe("With text: speak it as a voice note instead (only the voice languages; otherwise it goes out as text)."),
+          picture: z.string().min(1).max(20).optional().describe("A screenshot id from the browse result, like shot1."),
+          caption: z.string().max(300).optional().describe("With picture: one short line."),
+          react: z.string().min(1).max(16).optional().describe("One emoji, on the message you are answering."),
         },
+        async (a) => ({ content: [{ type: "text" as const, text: await sendNow(key, a) }] }),
         { alwaysLoad: true },
       ),
     ],

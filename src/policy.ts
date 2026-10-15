@@ -96,7 +96,7 @@ export function classify(tool: string, input: Record<string, unknown>, source: S
     if (NOTE_FILE_TOOLS.has(tool)) return groupNotesDir && isInside(input.file_path, groupNotesDir) ? "allow" : "deny";
     // The browse tool starts a separate run with no owner data (browse.ts); in a group the run asks in that group like the owner's chat does.
     if (tool === "mcp__browse__browse") return settings.browse ? "allow" : "deny";
-    if (tool === "mcp__tell__tell_user" || tool === "mcp__picture__send_picture") return "allow";
+    if (tool === "mcp__send__send") return "allow";
     return tool === WEB_SEARCH || tool === FORGET_NOTE || tool === SEARCH_LOGS || tool === UNDO_DREAM ? "allow" : "deny";
   }
   if (DENY.some((re) => re.test(tool))) return "deny";
