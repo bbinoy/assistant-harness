@@ -297,7 +297,10 @@ export class BrowseGuard {
     const unknown = (why: string) => this.commit(tool, input, undefined, `the element at the point could not be identified: ${why}`, `Click at ${at} on something code could not identify\n${this.controlsSeen()}`);
     if (typeof info === "string") return unknown(info);
     if (!this.url || info.pageUrl !== this.url) return unknown("the page is not the one in the last page view");
-    if (info.opaque) return unknown(info.opaque);
+    if (info.opaque) { // an embedded frame can hold a payment or login widget that code cannot read: the owner is asked, not the judge
+      const d = unknown(info.opaque);
+      return d.kind === "ask" ? { ...d, judge: false } : d;
+    }
     if (info.href && info.href.split("#")[0] !== this.url.split("#")[0]) {
       const badLink = addressProblem(info.href);
       if (badLink) return this.deny(tool, input, `That link is not allowed: ${badLink}.`, { role: info.role });

@@ -155,7 +155,6 @@ test("point clicks: the same commit classification and judge as a ref click", as
 test("point clicks: what code cannot resolve goes to the judge with its context, not straight to the owner", async () => {
   const unresolved: [string, (x: number, y: number) => Promise<PointInfo | string>][] = [
     ["another page than the last page view", async () => info({ pageUrl: "https://evil.example.net/" })],
-    ["an embedded frame", async () => info({ tag: "iframe", opaque: "an embedded frame (payment and login widgets live in one)" })],
     ["a lookup that keeps failing", async () => "the lookup failed (boom)"],
     ["tabs that cannot be told apart", async () => "2 tabs are open, so which one is shown is not certain"],
   ];
@@ -169,6 +168,10 @@ test("point clicks: what code cannot resolve goes to the judge with its context,
     assert.match(d.description!, /find a table for two/);
     assert.match(d.description!, /Controls on the page: button “Search”/);
   }
+  // an embedded frame can hold a payment or login widget code cannot read: the owner is asked directly, never the judge
+  const framed = await guard("click", async () => info({ tag: "iframe", opaque: "an embedded frame (payment and login widgets live in one)" })).decide(`${B}mouse_click_xy`, click);
+  assert.equal(framed.kind, "ask");
+  assert.notEqual(framed.judge, true);
   // no page view yet
   const fresh = new BrowseGuard({ mode: "owner", task: "t", outDir: "/x", resolver: publicDns, vision: "click", probe: at() });
   assert.equal((await fresh.decide(`${B}mouse_click_xy`, click)).judge, true);
