@@ -94,7 +94,7 @@ export function classify(tool: string, input: Record<string, unknown>, source: S
   // group's own notes folder, and the memory tools (scoped to that group by the server, memory-tools.ts).
   if (source === "group") {
     if (NOTE_FILE_TOOLS.has(tool)) return groupNotesDir && isInside(input.file_path, groupNotesDir) ? "allow" : "deny";
-    // The browse tool starts a separate run with no owner data (browse.ts); in a group it can read and fill but never commit.
+    // The browse tool starts a separate run with no owner data (browse.ts); in a group the run asks in that group like the owner's chat does.
     if (tool === "mcp__browse__browse") return settings.browse ? "allow" : "deny";
     return tool === WEB_SEARCH || tool === FORGET_NOTE || tool === SEARCH_LOGS || tool === UNDO_DREAM ? "allow" : "deny";
   }

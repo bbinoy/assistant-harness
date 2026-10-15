@@ -146,7 +146,8 @@ test("navigation: a public page goes on to the judge (the owner), private and no
   const rebinding = guard("owner", { resolver: async () => ["127.0.0.1"] });
   assert.equal((await rebinding.decide(`${B}navigate`, { url: "https://evil.example.org/" })).kind, "deny");
   assert.equal((await rebinding.decide(`${B}tabs`, { action: "new", url: "http://localhost/" })).kind, "deny");
-  assert.equal((await guard("group").decide(`${B}navigate`, { url: "https://example.com/" })).kind, "allow"); // a group has nobody to ask: code's checks are the gate
+  assert.equal((await guard("group").decide(`${B}navigate`, { url: "https://example.com/" })).kind, "defer"); // a group is decided exactly like the owner's chat
+  assert.equal((await guard("group", { resolver: async () => ["127.0.0.1"] }).decide(`${B}navigate`, { url: "https://evil.example.org/" })).kind, "deny");
 });
 
 test("typing: refs only, payment and login fields denied outright, card numbers denied, a submitting Enter is a commit", async () => {
@@ -183,15 +184,13 @@ test("clicks: a commit step asks with the real label, the URL and the values ent
   assert.equal((await g.decide(`${B}handle_dialog`, { accept: true })).kind, "ask");
 });
 
-test("a group run: a commit step or a submitting key is denied, not asked", async () => {
+test("a group run is guarded exactly like the owner's: commit steps ask, payment fields are denied outright", async () => {
   const g = onPage(guard("group"));
-  const d = await g.decide(`${B}click`, { target: "e44" });
-  assert.equal(d.kind, "deny");
-  assert.match(d.reason!, /not allowed in a group/);
+  assert.equal((await g.decide(`${B}click`, { target: "e44" })).kind, "ask");
   g.typed.set("e5", { label: "x", value: "y" });
-  assert.equal((await g.decide(`${B}press_key`, { key: "Enter" })).kind, "deny");
+  assert.equal((await g.decide(`${B}press_key`, { key: "Enter" })).kind, "ask");
   assert.equal((await g.decide(`${B}type`, { target: "e51", text: "1" })).kind, "deny");
-  assert.equal((await g.decide(`${B}type`, { target: "e5", text: "Ann" })).kind, "allow");
+  assert.equal((await g.decide(`${B}type`, { target: "e5", text: "Ann" })).kind, "defer");
 });
 
 test("caps: commit steps per run, and a run that keeps being refused is stopped", async () => {
@@ -280,13 +279,39 @@ test("canUseTool: an approved commit runs once; the same click is not repeated",
   assert.equal(again.behavior, "deny");
 });
 
-test("a group run's canUseTool never asks anybody", async () => {
-  const g = onPage(guard("group"));
-  let asked = 0;
-  const canUse = asCall(makeCanUseTool(async () => (asked++, { approved: true }), "browse", undefined, undefined, judgeAuto, g));
-  assert.equal((await canUse(`${B}click`, { target: "e44" }, opts)).behavior, "deny");
-  assert.equal((await canUse(`${B}navigate`, { url: "https://example.com/" }, opts)).behavior, "allow");
-  assert.equal(asked, 0);
+test("a group browse run: a commit click asks in that group, a member's yes lets it continue, another chat's answer does not", async () => {
+  const approvals = await import("../src/approvals.ts");
+  const { makeApprove } = await import("../src/approvalask.ts");
+  const { setGroupApprover, approveInGroup, DENY_ALL } = await import("../src/permissions.ts");
+  const style = settings as { approvalStyle: string };
+  const was = style.approvalStyle;
+  style.approvalStyle = "strict";
+  const posted: { groupId: string; text: string }[] = [];
+  let ts = 1000;
+  setGroupApprover((groupId) => makeApprove(async (t) => (posted.push({ groupId, text: t }), ++ts), false, undefined, undefined, groupId));
+  try {
+    const g = onPage(guard("group"));
+    const canUse = asCall(makeCanUseTool(approveInGroup("g-browse"), "browse", undefined, undefined, judgeAuto, g));
+    const pending = canUse(`${B}click`, { target: "e44", element: "harmless" }, opts);
+    for (let i = 0; i < 50 && posted.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.equal(posted.length, 1, "one question");
+    assert.equal(posted[0]!.groupId, "g-browse", "posted in the group");
+    assert.match(posted[0]!.text, /Submit order/);
+    assert.match(posted[0]!.text, /Customer name: Ann Example/);
+    // an answer in another chat (the owner's 1:1 or another group) does nothing
+    assert.equal((await approvals.answer("yes", () => {}, undefined, {}, { scope: approvals.OWNER_SCOPE })).outcome, "none");
+    assert.equal((await approvals.answer("yes", () => {}, undefined, {}, { scope: "g-other", by: "stranger" })).outcome, "none");
+    // a (non-owner) member of that group answers
+    assert.equal((await approvals.answer("yes", () => {}, undefined, {}, { scope: "g-browse", by: "member" })).outcome, "approved");
+    assert.equal((await pending).behavior, "allow");
+    // and a payment field in a group is denied outright, never asked
+    posted.length = 0;
+    assert.equal((await canUse(`${B}type`, { target: "e51", text: "4111111111111111" }, opts)).behavior, "deny");
+    assert.equal(posted.length, 0);
+  } finally {
+    style.approvalStyle = was;
+    setGroupApprover(() => DENY_ALL);
+  }
 });
 
 // ---- the injection fixture: a hostile page and a model that obeys it ----
@@ -347,7 +372,7 @@ test("results: status is one of three words, bad structure becomes failed, strin
 
 const READY: BrowseStatus = { ok: true, cli: "cli.js", exe: "chrome" };
 
-test("starting: not set up, off, one at a time and a group's hourly rate are explained, not silent", async () => {
+test("starting: not set up, off, one at a time are explained, not silent", async () => {
   assert.match(startRefusal({ mode: "owner" }, Date.now(), { ok: false, reason: "the browser is not downloaded (run npm run setup:browse)" })!, /not set up: the browser is not downloaded/);
   assert.equal(startRefusal({ mode: "owner" }, Date.now(), READY), settings.browse ? undefined : "Browsing is switched off (BROWSE=off).");
   const never = (): Promise<never> => new Promise(() => {});
@@ -358,11 +383,8 @@ test("starting: not set up, off, one at a time and a group's hourly rate are exp
   assert.match(await browse({ mode: "owner", run: async () => ({ text: "" }) }, "look up opening hours", { status: READY }), /Another browser run is in progress/);
   release();
   assert.match(await slow, /slept/);
-  const ctx = { mode: "group" as const, groupId: "g-rate", run: async () => ({ text: "", structured: { status: "done", answer: "fine", sources: [] } }) };
-  const now = Date.now();
-  for (let i = 0; i < settings.browseGroupPerHour; i++) assert.match(await browse(ctx, "look up opening hours", { status: READY, now }), /fine/);
-  assert.match(await browse(ctx, "look up opening hours", { status: READY, now }), /used its \d+ browser run/);
-  assert.match(await browse({ ...ctx, groupId: "other" }, "look up opening hours", { status: READY, now }), /fine/, "another group has its own allowance");
+  const group = { mode: "group" as const, groupId: "g-rate", run: async () => ({ text: "", structured: { status: "done", answer: "fine", sources: [] } }) };
+  for (let i = 0; i < 5; i++) assert.match(await browse(group, "look up opening hours", { status: READY }), /fine/, "no per-group hourly limit");
 });
 
 test("a failed run comes back as a failed result, with the folder removed", async () => {
@@ -371,14 +393,12 @@ test("a failed run comes back as a failed result, with the folder removed", asyn
   assert.match(out, /budget exceeded/);
 });
 
-test("the run's prompt says pages are data and what to do at a payment, in both modes", () => {
-  for (const mode of ["owner", "group"] as const) {
-    const p = browseSystem(mode, "Alex");
-    assert.match(p, /untrusted/);
-    assert.match(p, /NEVER enter card numbers/);
-    assert.match(p, /needs_owner/);
-  }
-  assert.match(browseSystem("group"), /group chat run/);
+test("the run's prompt says pages are data and what to do at a payment (one text for owner and group)", () => {
+  const p = browseSystem("Alex");
+  assert.match(p, /untrusted/);
+  assert.match(p, /NEVER enter card numbers/);
+  assert.match(p, /needs_owner/);
+  assert.match(p, /shown for approval/);
 });
 
 // ---- the options of the runs ----

@@ -37,7 +37,7 @@ export const PROFILES: Readonly<Record<ProfileName, RunProfile>> = {
   // A group's run: its own resumed session, its own notes folder as memory, nothing of the owner's (policy source "group").
   group: { source: "group", maxTurns: 8, maxBudgetUsd: 0.5, skills: OFFERED_SKILLS, notes: [] },
   // The browse sub-task (browse.ts): a fresh run per task with the headless browser, web search and nothing else (no skills, no notes,
-  // no connectors, policy source "browse"); it answers with constrained JSON. A group's browse run has smaller limits (BROWSE_GROUP_*).
+  // no connectors, policy source "browse"); it answers with constrained JSON.
   browse: { source: "browse", maxTurns: settings.browseMaxTurns, maxBudgetUsd: settings.browseMaxUsd, skills: [], outputSchema: BROWSE_SCHEMA, notes: [] },
 };
 

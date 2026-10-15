@@ -74,16 +74,15 @@ function profileOptions(name: OwnerProfile, extra: { onToolSuccess?: RunOptions[
 export const runProfile = (name: OwnerProfile, prompt: string, approve: Approve, extra: { onToolSuccess?: RunOptions["onToolSuccess"]; judgeContext?: string } = {}): Promise<AgentReply> =>
   runAgent(prompt, approve, profileOptions(name, extra));
 
-// The browse sub-run (browse.ts calls this through the entry tool): a fresh run with the browser, under the guard. A group's run has
-// smaller limits and no one to ask (commit steps are refused by the guard).
+// The browse sub-run (browse.ts calls this through the entry tool): a fresh run with the browser, under the guard. A group's run is the same
+// as the owner's; only `approve` differs (the group's own approver).
 function browseRunOptions(guard: BrowseGuard, mode: BrowseMode): RunOptions {
-  const group = mode === "group";
   return {
     source: PROFILES.browse.source,
-    systemPrompt: browseSystem(mode),
-    maxTurns: group ? settings.browseGroupMaxTurns : PROFILES.browse.maxTurns,
-    maxBudgetUsd: group ? settings.browseGroupMaxUsd : PROFILES.browse.maxBudgetUsd,
-    maxMinutes: group ? settings.browseGroupMaxMinutes : settings.browseMaxMinutes,
+    systemPrompt: browseSystem(),
+    maxTurns: PROFILES.browse.maxTurns,
+    maxBudgetUsd: PROFILES.browse.maxBudgetUsd,
+    maxMinutes: settings.browseMaxMinutes,
     outputFormat: PROFILES.browse.outputSchema,
     judgeContext: guard.task,
     guard,

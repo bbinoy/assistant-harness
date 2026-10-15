@@ -142,16 +142,12 @@ export function loadSettings(env: Env) {
 
     // The browser sub-task (src/browse.ts): a separate run that opens pages, reads them and fills forms for the owner's chat, background
     // jobs and groups. Pages are untrusted; the run holds no mail, calendar or notes. A commit step (book, buy, send...) asks the owner,
-    // payment and login fields are never filled, and in a group any commit or form submission is refused. BROWSE=off turns it all off.
+    // payment and login fields are never filled. A group asks in the group, with the same limits. BROWSE=off turns it all off.
     browse: oneOf(env, "BROWSE", "on", ["on", "off"] as const) === "on",
     browseMaxTurns: num(env, "BROWSE_MAX_TURNS", 40, 3, 200),
     browseMaxUsd: num(env, "BROWSE_MAX_USD", 1.5, 0.05, 50),
     browseMaxMinutes: num(env, "BROWSE_MAX_MINUTES", 10, 1, 120),
     browseMaxCommits: num(env, "BROWSE_MAX_COMMITS", 2, 0, 10),
-    browseGroupMaxTurns: num(env, "BROWSE_GROUP_MAX_TURNS", 15, 3, 100),
-    browseGroupMaxUsd: num(env, "BROWSE_GROUP_MAX_USD", 0.4, 0.05, 20),
-    browseGroupMaxMinutes: num(env, "BROWSE_GROUP_MAX_MINUTES", 4, 1, 60),
-    browseGroupPerHour: num(env, "BROWSE_GROUP_PER_HOUR", 3, 0, 100), // browse runs one group may start per hour (0: groups cannot browse)
     browseBrowserPath: env.BROWSE_BROWSER_PATH?.trim() || undefined, // advanced: a Chromium or Chrome executable instead of the one npm run setup:browse installs
 
     // A small model's second opinion on approvals (src/autojudge.ts). It may skip the question for
