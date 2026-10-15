@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SOURCES } from "../src/audit.ts";
 import type { Verdict } from "../src/autojudge.ts";
-import { BrowseGuard, browse, browseSystem, resultMessage, resultText, sanitizeResult, startRefusal, withText, type BrowseStatus } from "../src/browse.ts";
+import { BrowseGuard, browse, browserServer, desktopUserAgent, browseSystem, resultMessage, resultText, sanitizeResult, startRefusal, withText, type BrowseStatus } from "../src/browse.ts";
 import { addressProblem, classifyClick, isAllowedBrowserTool, isRef, looksLikeCardNumber, luhnValid, parseSnapshot, resolvesPublic, sensitiveField } from "../src/browserules.ts";
 import { makeCanUseTool } from "../src/permissions.ts";
 import { classify } from "../src/policy.ts";
@@ -425,4 +425,19 @@ test("options: a browse run cannot be built without the browser, with a clear re
   const { browseStatus } = await import("../src/browse.ts");
   if (browseStatus().ok) return;
   assert.throws(() => buildOptions(async () => ({ approved: false }), { source: "browse", systemPrompt: "x", maxTurns: 1, maxBudgetUsd: 1, guard: guard() }, undefined), /browsing is not set up/);
+});
+
+test("browser server: a plain desktop Chrome user agent of the same version, an ordinary language, and the safety flags kept", () => {
+  assert.equal(desktopUserAgent("x", () => "Google Chrome for Testing 155.0.8059.12 "), "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36");
+  assert.equal(desktopUserAgent("x", () => "no version here"), undefined);
+  assert.equal(desktopUserAgent("x", () => { throw new Error("nope"); }), undefined);
+  const dir = mkdtempSync(join(tmpdir(), "bs-"));
+  const cfg = browserServer({ ok: true, cli: "/c/cli.js", exe: "/e/chrome" }, dir, "UA/1") as { args: string[] };
+  assert.equal(cfg.args[cfg.args.indexOf("--user-agent") + 1], "UA/1");
+  for (const f of ["--headless", "--isolated", "--block-service-workers", "--blocked-origins", "--config"]) assert.ok(cfg.args.includes(f), f);
+  assert.equal(cfg.args[cfg.args.indexOf("--image-responses") + 1], "omit");
+  const conf = JSON.parse(readFileSync(cfg.args[cfg.args.indexOf("--config") + 1]!, "utf8"));
+  assert.equal(conf.browser.contextOptions.locale, settings.browseLocale);
+  assert.ok(conf.browser.contextOptions.timezoneId);
+  assert.ok(!(browserServer({ ok: true, cli: "/c/cli.js", exe: "/e/chrome" }, dir, undefined) as { args: string[] }).args.includes("--user-agent"));
 });

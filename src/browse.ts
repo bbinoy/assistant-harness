@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 import { createSdkMcpServer, tool, type McpServerConfig, type Options } from "@anthropic-ai/claude-agent-sdk";
@@ -49,6 +50,17 @@ function findBrowser(): string | undefined {
   }
   return undefined;
 }
+// The headless build announces itself as "HeadlessChrome" in its user agent, which several train and booking sites (SBB, Omio, Eurostar)
+// turn away on sight. The browser is the same Chromium either way, so it is presented as the plain desktop Chrome of the same version.
+// Nothing else is changed: no fingerprint, no script, no behaviour (a site that blocks automated browsers still does).
+export function desktopUserAgent(exe: string, run: (exe: string) => string = (e) => execFileSync(e, ["--version"], { encoding: "utf8", timeout: 5000 })): string | undefined {
+  try {
+    const v = /(\d+)\.\d+\.\d+\.\d+/.exec(run(exe))?.[0];
+    return v ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v.split(".")[0]}.0.0.0 Safari/537.36` : undefined;
+  } catch {
+    return undefined;
+  }
+}
 export type BrowseStatus = { ok: true; cli: string; exe: string } | { ok: false; reason: string };
 export function browseStatus(): BrowseStatus {
   const cli = serverCli();
@@ -61,11 +73,14 @@ export function browseStatus(): BrowseStatus {
 // The MCP server of the browser, for the browse run's options only. Isolated (in memory: no cookies, no logins, nothing saved),
 // headless, no service workers, no images to the model, private ranges blocked (a best-effort extra: the guard's address check is
 // the real veto). Started with a minimal environment, in a folder of its own that is removed afterwards.
-export function browserServer(st: Extract<BrowseStatus, { ok: true }>, outDir: string): McpServerConfig {
+export function browserServer(st: Extract<BrowseStatus, { ok: true }>, outDir: string, ua: string | undefined = desktopUserAgent(st.exe)): McpServerConfig {
+  // An ordinary language and the time zone of this machine, so the page sees what a browser on this computer would send.
+  const configFile = join(outDir, "browser-config.json");
+  writeFileSync(configFile, JSON.stringify({ browser: { contextOptions: { locale: settings.browseLocale, timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone } } }));
   return {
     type: "stdio",
     command: process.execPath,
-    args: [st.cli, "--headless", "--isolated", "--block-service-workers", "--image-responses", "omit", "--file-paths", "absolute", "--timeout-navigation", "30000", "--viewport-size", "1280x800", "--output-dir", outDir, "--executable-path", st.exe, "--blocked-origins", BLOCKED_ORIGINS.join(";")],
+    args: [st.cli, ...(ua ? ["--user-agent", ua] : []), "--config", configFile, "--headless", "--isolated", "--block-service-workers", "--image-responses", "omit", "--file-paths", "absolute", "--timeout-navigation", "30000", "--viewport-size", "1280x800", "--output-dir", outDir, "--executable-path", st.exe, "--blocked-origins", BLOCKED_ORIGINS.join(";")],
     env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", TMPDIR: process.env.TMPDIR ?? "", PLAYWRIGHT_BROWSERS_PATH: BROWSERS() },
   };
 }
@@ -320,6 +335,7 @@ export function browseSystem(who: string = OWNER): string {
     `Work with page views: browser_navigate returns the page; use the refs ([ref=e12]) from the latest view to click and type. On a big page use browser_find for the part you need instead of reading it all. Be quick and stop as soon as you can answer: you have a small budget of steps and money.`,
     `Only type details the task gives you. NEVER enter card numbers, CVV, passwords, one-time codes, bank or ID numbers, and never log in or solve a CAPTCHA: if the page needs that, stop with status needs_owner and give handoffUrl, the address of the page where ${who} can finish (a link that carries the selection if the page has one).`,
     `A click or key press that commits something (book, buy, pay, send, confirm, register, subscribe, submit) is shown for approval with the real button and what you entered, and runs only if it is approved. If it is declined or refused, stop: status needs_owner, say what is ready, handoffUrl as above. Do not look for another way to the same step.`,
+    `If a site shows a bot check, "access denied", a CAPTCHA or a security-verification page, do not retry it, reload it or look for a way round: name the site in the answer as blocking this browser and go on to another source.`,
     `Answer with the JSON object only: status (done, needs_owner or failed), answer (a few plain sentences: what you found or did, with prices, times and names exactly as shown), sources (page addresses) and handoffUrl when you stopped before a step.`,
   ].join("\n\n");
 }
