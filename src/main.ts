@@ -25,6 +25,7 @@ import { createProposer } from "./propose.ts";
 import { preparePicture } from "./image.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
+import { unsupportedForVoice } from "./lang.ts";
 import { openLog } from "./state.ts";
 import { attachmentPath, ensureSignalDaemon, SignalClient, type IncomingMessage } from "@ted-personal-assistant/signal";
 import { providerReady, stopQwen, synthesizeWith, warmQwen } from "@ted-personal-assistant/signal/tts";
@@ -104,6 +105,7 @@ const pipeline: Pipeline = createPipeline({
   speech: {
     ready: () => settings.voiceReplies && signal.separateAccount && providerReady(settings.tts).ok,
     synth: (words) => synthesizeWith(words, settings.tts, console),
+    foreign: (words) => unsupportedForVoice(words, settings.ttsLanguages),
   },
   approvals,
   vouch,

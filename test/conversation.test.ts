@@ -28,7 +28,7 @@ interface Rig {
   spoken: string[];
 }
 
-function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: any; transcript?: (m: IncomingMessage) => Promise<string>; picture?: (m: IncomingMessage) => Promise<Picture>; pictures?: Picture[][]; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; admitGroup?: any; settleMs?: number; settleMaxMs?: number } = {}) {
+function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: any; transcript?: (m: IncomingMessage) => Promise<string>; picture?: (m: IncomingMessage) => Promise<Picture>; pictures?: Picture[][]; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; foreign?: (words: string) => Promise<string | undefined>; admitGroup?: any; settleMs?: number; settleMaxMs?: number } = {}) {
   const r: Rig = { sent: [], reacts: [], typing: [], reads: [], records: [], prompts: [], spoken: [] };
   let ts = 5000;
   const signal = {
@@ -52,6 +52,7 @@ function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) =>
     speech: {
       ready: () => over.ready ?? false,
       synth: over.synth ?? (async (words) => (r.spoken.push(words), writeFileSync(join(dir, "v.wav"), "x"), join(dir, "v.wav"))),
+      foreign: over.foreign ?? (async () => undefined),
     },
     approvals: {
       answer: async (text: string, _w: unknown, _q: unknown, _d: unknown, ctx: unknown) => (typeof over.approval === "function" ? over.approval(text, ctx) : over.approval) ?? { outcome: "none" },
@@ -176,6 +177,23 @@ test("private chat: the voice option is offered with ANY message when speech is 
   assert.equal(mute.r.prompts[0], "hello");
 });
 
+test("private chat: a reply the language check holds back (foreign or unsure) goes out as text; the check runs only for a reply that would be spoken", async () => {
+  const asked: string[] = [];
+  for (const verdict of ["de", "unknown"]) {
+    const held = rig({ ready: true, foreign: async (w) => (asked.push(w), verdict), run: async () => "[[voice]] Guten Morgen, du hast heute zwei Termine" });
+    await held.pipeline.handleIncoming(owner(), msg());
+    assert.equal(held.r.spoken.length, 0, verdict);
+    assert.deepEqual(held.r.sent.map((s) => s.text), ["Guten Morgen, du hast heute zwei Termine"], verdict);
+  }
+  const ok = rig({ ready: true, foreign: async (w) => (asked.push(w), undefined), run: async () => "[[voice]] Good morning" });
+  await ok.pipeline.handleIncoming(owner(), msg());
+  assert.deepEqual(ok.r.spoken, ["Good morning"]);
+  const before = asked.length;
+  const text = rig({ ready: true, foreign: async (w) => (asked.push(w), "de"), run: async () => "Just text" });
+  await text.pipeline.handleIncoming(owner(), msg());
+  assert.equal(asked.length, before); // no voice chosen: no check
+});
+
 test("private chat: voice falls back to text when speech is off, too long, or fails; no invitation without speech", async () => {
   const off = rig({ ready: false, run: async () => "[[voice]] Hello there" });
   await off.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 10 } }));
@@ -194,7 +212,7 @@ test("private chat: voice falls back to text when speech is off, too long, or fa
 
 test("private chat: a [[voice]] reply in a language the voice does not speak is sent as text, not spoken", async () => {
   const de = "Du hast heute zwei Termine, und der erste ist um halb elf. Viel Erfolg dir!";
-  const r = rig({ ready: true, run: async () => `[[voice]] ${de}` });
+  const r = rig({ ready: true, foreign: async () => "de", run: async () => `[[voice]] ${de}` });
   await r.pipeline.handleIncoming(owner(), msg({ text: "what is on today" }));
   assert.equal(r.r.spoken.length, 0);
   assert.deepEqual(r.r.sent.map((s) => s.text), [de]); // plain text, no "voice didn't work" note

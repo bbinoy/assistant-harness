@@ -14,7 +14,7 @@ import type { TellSink } from "./telluser.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
-import { unsupportedForVoice } from "./lang.ts";
+import { UNSURE } from "./lang.ts";
 import { clean, LIMITS, oneLine } from "./sanitize.ts";
 import { startTiming, type Timing } from "./timing.ts";
 import type { IncomingDeletion, IncomingMessage, IncomingReaction, Quote } from "@ted-personal-assistant/signal";
@@ -131,7 +131,7 @@ interface PipelineDeps {
   runOwner: (prompt: string, ownerMessage: string, pictures?: Picture[], hooks?: RunHooks) => Promise<{ text: string; costUsd?: number }>;
   picture: (m: IncomingMessage) => Promise<Picture>; // throws a sentence the sender can be told
   transcript: (m: IncomingMessage) => Promise<string>; // throws a sentence the sender can be told
-  speech: { ready: () => boolean; synth: (words: string) => Promise<string> }; // spoken replies: local TTS, a file
+  speech: { ready: () => boolean; synth: (words: string) => Promise<string>; foreign: (words: string) => Promise<string | undefined> }; // spoken replies: local TTS, a file
   approvals: { answer: (text: string, working: () => void, quote?: { timestamp: number }, deps?: undefined, ctx?: { scope?: string; by?: string; voice?: boolean }) => Promise<{ outcome: "none" | "approved" | "modified" | "declined" | "feedback" | "clarify"; changes?: { field: string; value: unknown }[]; reply?: string }>; answerReaction: (emoji: string, ts: number, scope?: string, by?: string) => string };
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group?
   isOwner: (who: { from: string; fromUuid?: string }) => boolean;
@@ -266,9 +266,10 @@ export function createPipeline(deps: PipelineDeps) {
     let spoken = false;
     let speechFailed = false;
     // Safety net: the voice speaks only TTS_LANGUAGES; text in another language would get a wrong accent, so it goes out as text.
-    const foreign = chosen.voice ? unsupportedForVoice(chosen.voice, settings.ttsLanguages) : undefined;
-    if (foreign) console.error(`voice skipped: reply looks ${foreign}, the voice speaks ${settings.ttsLanguages.join("/")}; sending text`);
-    if (chosen.voice && !foreign && canSpeak() && chosen.voice.length <= MAX_SPOKEN_CHARS) speechFailed = !(spoken = await speak(conv, chosen.voice));
+    const speakable = !!chosen.voice && canSpeak() && chosen.voice.length <= MAX_SPOKEN_CHARS;
+    const foreign = speakable ? await deps.speech.foreign(chosen.voice!) : undefined;
+    if (foreign) console.error(`voice skipped: ${foreign === UNSURE ? "the language of the reply could not be told" : `reply looks ${foreign}`}, the voice speaks ${settings.ttsLanguages.join("/")}; sending text`);
+    if (speakable && !foreign) speechFailed = !(spoken = await speak(conv, chosen.voice!));
     // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
     const { reaction, text } = splitReaction(spoken ? "" : chosen.text);
     const said = SILENT.test(text) ? "" : text;

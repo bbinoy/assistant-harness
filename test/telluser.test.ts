@@ -55,7 +55,7 @@ function rig() {
     runOwner: async () => ({ text: "" }),
     picture: async () => assert.fail("no picture"),
     transcript: async () => "",
-    speech: { ready: () => false, synth: async () => "" },
+    speech: { ready: () => false, synth: async () => "", foreign: async () => undefined },
     approvals: { answer: async () => ({ outcome: "none" as const }), answerReaction: () => "ignored" },
     vouch: async () => true,
     isOwner: () => true,
