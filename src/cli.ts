@@ -7,7 +7,6 @@ import { doctor } from "./doctor.ts";
 import { settings } from "./settings.ts";
 import { agreement } from "./autojudge.ts";
 import { APPROVAL_DECISIONS, approvalLines } from "./approvalreport.ts";
-import { migrateLegacyLayout } from "./migrate.ts";
 
 // Small operator tools:
 //   npm run report [hours]        what the heartbeat archived / alerted / queued (default 24h)
@@ -15,7 +14,6 @@ import { migrateLegacyLayout } from "./migrate.ts";
 //   npm run doctor                is everything the agent depends on in place?
 //   npm run triage-check [n]      how the heartbeat would classify the newest n emails (acts on nothing)
 
-migrateLegacyLayout(settings.dataDir); // same one-time move as at agent start; a no-op once done
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 

@@ -119,7 +119,12 @@ export interface GroupMessage {
 export type PromptBuilder = (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] };
 export type Runner = (build: PromptBuilder, ctx: { conv: Conversation; now: Date; firstOutput?: () => void }) => Promise<string>;
 
-export const realRunner: Runner = async (build, { conv, now, firstOutput }) => (await runGroupTurn(conv, styleLines(now), build, firstOutput)).text.trim();
+// Chat replies and wake-ups both run here; the cost is logged as for an owner run.
+export const realRunner: Runner = async (build, { conv, now, firstOutput }) => {
+  const r = await runGroupTurn(conv, styleLines(now), build, firstOutput);
+  if (r.costUsd !== undefined) console.log(`group run: ${r.text.length} chars, $${r.costUsd.toFixed(4)}`);
+  return r.text.trim();
+};
 
 
 interface Brain {

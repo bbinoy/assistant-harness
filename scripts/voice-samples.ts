@@ -41,7 +41,7 @@ const variants: { name: string; voice: string; speed: number; text: string }[] =
 await mkdir(outDir, { recursive: true, mode: 0o700 });
 const files: { name: string; file: string }[] = [];
 for (const v of variants) {
-  const tmp = await synthesize(v.text, { dir: settings.ttsDir, voice: v.voice, speed: v.speed });
+  const tmp = await synthesize(v.text, { dir: settings.tts.kokoro.dir, voice: v.voice, speed: v.speed });
   const file = join(outDir, `${v.name.slice(0, 2)}.m4a`);
   await copyFile(tmp, file);
   await rm(dirname(tmp), { recursive: true, force: true });

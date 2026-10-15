@@ -47,12 +47,12 @@ function record(groupId: string | undefined, kind: Kind, ts: number, text: strin
   void compactIfNeeded(summarizeWithHaiku).catch((e) => console.error("messages: compaction failed:", e.message));
 }
 const out = createOutbound(signal, (kind, ts, text, groupId) => record(groupId, kind, ts, text));
-const approve: Approve = makeApprove((t) => out.replyPlain(t, "approval"), false);
+const approve: Approve = makeApprove((t) => out.replyPlain(t, "approval"));
 // Unattended runs (wake-ups, the brief, the radar, the mail handler) ask the same way, but only an explicit yes / no or a reply
 // to the question answers it: whatever else the owner types meanwhile is a chat message (approvals.ts).
 // A group asks in the group itself; any member may answer there (approvals.ts scopes every question to its conversation).
-setGroupApprover((groupId) => makeApprove((t) => out.reply(t, { plain: true, kind: "approval", groupId }), false, undefined, undefined, groupId));
-const approveBackground: Approve = makeApprove((t) => out.replyPlain(t, "approval"), true);
+setGroupApprover((groupId) => makeApprove((t) => out.reply(t, { plain: true, kind: "approval", groupId }), { scope: groupId }));
+const approveBackground: Approve = makeApprove((t) => out.replyPlain(t, "approval"), { background: true });
 // `say` is a plain message to the owner. `notify` is what the assistant sends on its own (mail
 // alerts, handled mail, setup problems) and is also remembered, so the chat knows what a reply
 // like "yes, do that" refers to (messages.ts). Memory announcements and chat answers use `say`.
@@ -110,25 +110,27 @@ const pipeline: Pipeline = createPipeline({
   isOwner: fromOwner,
   admitGroup: (_conv, m) => groupBrain(m),
   compact: (conv, mode) => compactChatIfNeeded(conv.sessionFile, conv.source, conv.notesDir, mode), // every conversation, after the reply is out and only when it grew far past the limit (urgent); the next message waits for it
-  // Warm process: one, for the owner's chat. Groups have none (bursty, many; a cold start per group turn is the price).
+  // The owner's chat is kept warm after each turn; the group that spoke last has its own warm process (group.ts).
   afterTurn: (conv) => void (conv.kind === "owner" && warmChat()),
 });
 const groupBrain = createGroupBrain({ pipeline, recent: (groupId) => logTail(group(groupId)) });
 
 // The linked device sees ALL of the owner's Signal traffic. Only their own Note to Self is
 // ever acted on; everything else is dropped here, before it can reach anything else.
+// A group's event goes to the group; anything else must be the owner's own chat (the caller has checked).
+const route = (w: { group?: { id: string } }, ev: Parameters<Pipeline["handleIncoming"]>[1]) =>
+  void pipeline.handleIncoming(w.group ? group(w.group.id) : owner(), ev).catch((e) => console.error(`${ev.type} error:`, e.message));
 signal.onMessage((m) => {
-  if (m.group) return void pipeline.handleIncoming(group(m.group.id), { type: "message", m }).catch((e) => console.error("group error:", e.message));
-  if (!acceptOwner(m, config.ownerNumber)) return void console.log(`ignored a message from ${mask(m.from)}`);
-  if (!m.edited && out.isOwnEcho(m)) return; // one of our own replies coming back (an edit is the owner's, never an echo)
-  pipeline.handleIncoming(owner(), { type: "message", m }).catch((e) => console.error("route error:", e.message));
+  if (!m.group) {
+    if (!acceptOwner(m, config.ownerNumber)) return void console.log(`ignored a message from ${mask(m.from)}`);
+    if (!m.edited && out.isOwnEcho(m)) return; // one of our own replies coming back (an edit is the owner's, never an echo)
+  }
+  route(m, { type: "message", m });
 });
 
-// A message deleted for everyone: the same door as a message (a group's goes to the group, anything else must be the owner's chat).
+// A message deleted for everyone: the same door as a message.
 signal.onDelete((d) => {
-  if (d.group) return void pipeline.handleIncoming(group(d.group.id), { type: "deletion", d }).catch((e) => console.error("group error:", e.message));
-  if (!acceptOwner(d, config.ownerNumber)) return;
-  pipeline.handleIncoming(owner(), { type: "deletion", d }).catch((e) => console.error("delete error:", e.message));
+  if (d.group || acceptOwner(d, config.ownerNumber)) route(d, { type: "deletion", d });
 });
 
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal
@@ -143,9 +145,7 @@ if (settings.mailProvider === "gmail") setGmailReaders(gmailReaders());
 // owner is feedback. Our own status icons come back as reactions and are dropped.
 signal.onReaction((r) => {
   if (r.isRemove || signal.isOwnReaction(r)) return;
-  if (r.group) return void pipeline.handleIncoming(group(r.group.id), { type: "reaction", r }).catch((e) => console.error("group error:", e.message));
-  if (!acceptOwner(r, config.ownerNumber)) return;
-  pipeline.handleIncoming(owner(), { type: "reaction", r }).catch((e) => console.error("reaction error:", e.message));
+  if (r.group || acceptOwner(r, config.ownerNumber)) route(r, { type: "reaction", r });
 });
 
 // Policy of this app, not of the signal package: if Signal goes away we exit, and launchd restarts the whole agent

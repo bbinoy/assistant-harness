@@ -29,17 +29,6 @@ test("settings: remote speech needs its keys and a safe address, or the agent do
   assert.throws(() => loadSettings({ TTS_FALLBACK: "elevenlabs" }), /TTS_FALLBACK/);
 });
 
-test("settings: a stale SCHEDULER=legacy does not stop the agent; it is ignored with one warning line", async () => {
-  const { spawnSync } = await import("node:child_process");
-  const run = (env: Record<string, string>) =>
-    spawnSync(process.execPath, ["--conditions=workspace-source", "-e", 'import("./src/settings.ts").then((m) => console.log("scheduler" in m.settings))'], { env: { ...process.env, ...env }, encoding: "utf8" });
-  const stale = run({ SCHEDULER: "legacy" });
-  assert.equal(stale.status, 0);
-  assert.equal(stale.stdout.trim(), "false"); // the setting is gone
-  assert.equal(stale.stderr.split("\n").filter((l) => l.includes("SCHEDULER=legacy")).length, 1);
-  assert.doesNotMatch(run({ SCHEDULER: "gate" }).stderr, /SCHEDULER/);
-});
-
 test("settings: the timing constants keep the values they had when they were hard-coded, and are validated", () => {
   const s = loadSettings({});
   const ms = { stickyMs: s.groupStickyMinutes * 60_000, noticeMs: s.groupNoticeMinutes * 60_000, memberMs: s.groupMemberCacheMinutes * 60_000, slowMs: s.slowReplySeconds * 1000, echoMs: s.echoWindowMinutes * 60_000, refreshMs: s.warmRefreshMinutes * 60_000, retryMs: s.briefRetryGapMinutes * 60_000, graceH: s.briefPendingGraceHours, seenMs: s.seenMailDays * 24 * 3600_000, noticeAgeMs: s.noticeAgeHours * 3600_000, backoffMs: s.compactBackoffMinutes * 60_000 };

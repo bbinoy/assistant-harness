@@ -1,6 +1,7 @@
 import { query, startup, type Options, type Query, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import { clockLine } from "./brief.ts";
 import { recordCost } from "./budget.ts";
+import { haikuOptions } from "./haiku.ts";
 import { AuthError, failure, RateLimitError } from "./errors.ts";
 import { fence } from "./fence.ts";
 import { groupNotesBlock } from "./groupstore.ts";
@@ -164,7 +165,7 @@ export function gatePrompt(input: Pick<GateInput, "trigger" | "now" | "tail" | "
 // ---- the real gate ----
 
 // Haiku, no tools, no connectors, no memory, one JSON answer.
-const gateOptions = (system: string): Options => ({ model: "haiku", systemPrompt: system, tools: [], settingSources: [], strictMcpConfig: true, mcpServers: {}, settings: { autoMemoryEnabled: false }, maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false });
+const gateOptions = (system: string): Options => haikuOptions(system, { maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false });
 
 // A spare Haiku process for the look that has to be fast: an untagged group message. A process is built from its options
 // alone (the system prompt: fixed per kind of look, plus the owner's style notes, which every group is shown anyway), and
@@ -207,6 +208,7 @@ export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<Ga
   const track = (q: Query): Query => (started.push(q), q);
   const cold = () => track((io.query ?? query)({ prompt, options: gateOptions(system) }));
   let api: number | undefined;
+  let cost: number | undefined;
   let out = NOTHING;
   let lastError: string | undefined; // the SDK reports a refused call (usage limit, expired login) as an assistant error code
   try {
@@ -219,7 +221,7 @@ export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<Ga
       if (m.type !== "result") continue;
       mark("result");
       api = m.duration_api_ms;
-      recordCost(m.total_cost_usd);
+      recordCost((cost = m.total_cost_usd));
       const p0 = Date.now();
       // A usage limit or an expired login is NOT "nothing to do": say so (group.ts decides whether anyone needs to hear it).
       const refused = failure(lastError, m.subtype);
@@ -230,7 +232,7 @@ export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<Ga
     }
   } finally {
     for (const q of started) q.close(); // the answer is in, or it failed
-    console.log(`timing gate ${input.trigger} ${spare ? "warm" : "cold"} prompt=${prompt.length} system=${system.length} ${Object.entries(at).map(([k, v]) => `${k}=${v}`).join(" ")}${api === undefined ? "" : ` api=${api}`} total=${Date.now() - t0}`);
+    console.log(`timing gate ${input.trigger} ${spare ? "warm" : "cold"} prompt=${prompt.length} system=${system.length} ${Object.entries(at).map(([k, v]) => `${k}=${v}`).join(" ")}${api === undefined ? "" : ` api=${api}`}${cost === undefined ? "" : ` cost=$${cost.toFixed(4)}`} total=${Date.now() - t0}`);
   }
   return out;
 }

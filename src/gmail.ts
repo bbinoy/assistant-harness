@@ -31,12 +31,13 @@ const RELAY_TOOLS = ["search_threads", "get_thread", "get_message", "get_draft",
 // a restore exactly "add INBOX to a thread"; whether archiving is live is decided by the caller (GmailMail), not here.
 export function relayAllowed(c: Call): boolean {
   if (!RELAY_TOOLS.includes(c.tool)) return false;
-  if (gmailVerdict(c.tool, c.input, "heartbeat", { archiveLive: true, self: undefined, briefEmail: false }) === "deny") return false;
-  if (c.tool.endsWith("label_thread") && !c.tool.endsWith("unlabel_thread")) {
+  const verdict = gmailVerdict(c.tool, c.input, "heartbeat", { archiveLive: true, self: undefined, briefEmail: false });
+  if (verdict === "deny") return false;
+  if (c.tool.endsWith("unlabel_thread")) return verdict === undefined;
+  if (c.tool.endsWith("label_thread")) {
     const ids = c.input.labelIds;
     return Array.isArray(ids) && ids.length === 1 && String(ids[0]).toUpperCase() === "INBOX" && typeof c.input.threadId === "string";
   }
-  if (c.tool.endsWith("unlabel_thread")) return gmailVerdict(c.tool, c.input, "heartbeat", { archiveLive: true, self: undefined, briefEmail: false }) === undefined;
   return true;
 }
 

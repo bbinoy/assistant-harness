@@ -76,7 +76,7 @@ export const runProfile = (name: OwnerProfile, prompt: string, approve: Approve,
 
 // The browse sub-run (browse.ts calls this through the entry tool): a fresh run with the browser, under the guard. A group's run is the same
 // as the owner's; only `approve` differs (the group's own approver).
-function browseRunOptions(guard: BrowseGuard, mode: BrowseMode): RunOptions {
+function browseRunOptions(guard: BrowseGuard): RunOptions {
   return {
     source: PROFILES.browse.source,
     systemPrompt: browseSystem(),
@@ -90,7 +90,16 @@ function browseRunOptions(guard: BrowseGuard, mode: BrowseMode): RunOptions {
 }
 
 // The `run` of a browse entry tool (browse.ts BrowseContext): the browse run under its guard, asking `approve` for commit steps.
-export const browseRunner = (mode: BrowseMode, approve: Approve) => (prompt: string, guard: BrowseGuard): Promise<AgentReply> => runAgent(prompt, approve, browseRunOptions(guard, mode));
+export const browseRunner = (approve: Approve) => (prompt: string, guard: BrowseGuard): Promise<AgentReply> => runAgent(prompt, approve, browseRunOptions(guard));
+
+// The built-in tools of a run (everything else is an MCP tool): the browse run only searches; a group edits its own notes and searches; the
+// owner's chat adds skills and opening pages; a background run has no notes; the rest only load skills.
+function builtinTools(opts: RunOptions, browsing: boolean, isolated: boolean): string[] {
+  if (browsing) return ["WebSearch"];
+  if (isolated) return ["Read", "Write", "Edit", "WebSearch"];
+  if (opts.memory) return ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"];
+  return opts.source === "background" ? ["Skill", "WebSearch", "WebFetch"] : ["Skill"];
+}
 
 export function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
   // After a successful tool call: announce a note change on the phone (chat), and report the
@@ -132,7 +141,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
   const mode: BrowseMode = opts.source === "group" ? "group" : "owner";
   const browseTool =
     settings.browse && (opts.source === "chat" || opts.source === "background" || opts.source === "group")
-      ? createBrowseServer({ mode, groupId: opts.memory?.groupId, run: browseRunner(mode, mode === "group" && opts.memory?.groupId ? approveInGroup(opts.memory.groupId) : approve) })
+      ? createBrowseServer({ mode, groupId: opts.memory?.groupId, run: browseRunner(mode === "group" && opts.memory?.groupId ? approveInGroup(opts.memory.groupId) : approve) })
       : undefined;
   const status = browsing ? browseStatus() : undefined;
   if (status && !status.ok) throw new Error(`browsing is not set up: ${status.reason}`);
@@ -165,7 +174,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     // Built-ins: Skill, and for chat Read / Write / Edit (confined to the notes folder by
     // policy.ts) and WebSearch / WebFetch (search freely, open a page only after approval). No Bash. Everything else the agent can do is an MCP tool (Mailbird,
     // Notion, Calendar...), gated by canUseTool.
-    tools: browsing ? ["WebSearch"] : isolated ? ["Read", "Write", "Edit", "WebSearch"] : opts.memory ? ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"] : opts.source === "background" ? ["Skill", "WebSearch", "WebFetch"] : ["Skill"],
+    tools: builtinTools(opts, browsing, isolated),
     // "user" loads user-scope MCP servers (Mailbird) and CLAUDE.md; the skills offered are
     // limited to the bundled ones below.
     // Not "project": there is no project here.
@@ -233,7 +242,7 @@ async function underCeiling<T>(source: Source, run: (c: Ceiling) => Promise<T>, 
 }
 
 export async function runAgent(prompt: string, approve: Approve, opts: RunOptions, io: { query?: typeof query } = {}): Promise<AgentReply> {
-  const { resume, previousCost } = opts.sessionFile ? chatResume(true, opts.sessionFile) : { resume: undefined, previousCost: 0 };
+  const { resume, previousCost } = opts.sessionFile ? chatResume(opts.sessionFile) : { resume: undefined, previousCost: 0 };
   // A background run is always cold, so the approval it waits on belongs to this run and does not count against its ceiling.
   return underCeiling(opts.source, (c) => consume((io.query ?? query)({ prompt, options: { ...buildOptions(pausing(c, approve), opts, resume), abortController: c.controller } }), opts, previousCost), opts.maxMinutes).catch((e) => {
     if (opts.sessionFile) forgetUnresumable(opts.sessionFile, e, opts.source);
@@ -307,7 +316,7 @@ const chatOptions = (notify: (text: string) => Promise<void>): RunOptions => ({
 
 export function prepareChat(approve: Approve, notify: (text: string) => Promise<void>, o: { refresh?: boolean } = {}): void {
   if (o.refresh && !spare.wants("owner")) return; // the timer renews a process in use; it does not keep an idle one alive
-  warmUp(spare, "owner", chatOptions(notify), chatResume(false), "chat", approve, startup, o.refresh);
+  warmUp(spare, "owner", chatOptions(notify), chatResume(), "chat", approve, startup, o.refresh);
 }
 
 // Interactive chat: resumes the persistent conversation, on the warm process when it fits.
@@ -315,7 +324,7 @@ export async function ask(prompt: string, approve: Approve, notify: (text: strin
   setChatOwnerMessage(ownerMessage ?? prompt);
   spare.touch("owner"); // in use: the idle period starts over
   const o = { ...chatOptions(notify), onFirstOutput: hooks?.firstOutput };
-  const r = chatResume(true);
+  const r = chatResume();
   const input = userInput(prompt, pictures);
   return runWarmOrCold(spare, "owner", o, r, "chat", input, (abortController) => query({ prompt: input, options: { ...buildOptions(approve, o, r.resume), abortController } }));
 }
@@ -337,7 +346,7 @@ export const groupRunOptions = (conv: GroupConv, systemPrompt: string): RunOptio
 
 // `build` makes the prompt once it is known whether the session resumes: a resumed one is told only what it has not seen (group.ts).
 export async function runGroupTurn(conv: GroupConv, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}): Promise<AgentReply> {
-  const r = chatResume(true, conv.sessionFile, "group");
+  const r = chatResume(conv.sessionFile);
   const { prompt, seenAt, pictures } = build(r.resume ? r.seenAt : undefined);
   const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
   const input = userInput(prompt, pictures);
@@ -352,14 +361,10 @@ export function prepareGroupChat(conv: GroupConv, style: () => string, opts: { f
   const id = conv.groupId;
   if (!settings.warm || !id) return;
   if (!opts.force && groupSpare.has(id)) return void groupSpare.touch(id); // active group, already warm: keep it so
-  warmUp(groupSpare, id, groupRunOptions(conv, groupSystem({ style: style() })), chatResume(false, conv.sessionFile, "group"), "group", approveInGroup(id), opts.start);
+  warmUp(groupSpare, id, groupRunOptions(conv, groupSystem({ style: style() })), chatResume(conv.sessionFile), "group", approveInGroup(id), opts.start);
 }
 
 // ---- the other owner runs ----
-
-// The owner profiles, as before (the legacy scheduler and the gate's presets both go through runProfile).
-export const runBriefTurn = (prompt: string, approve: Approve, onToolSuccess: (tool: string, input: unknown) => void): Promise<AgentReply> => runProfile("brief", prompt, approve, { onToolSuccess });
-export const runRadarTurn = (prompt: string, approve: Approve): Promise<AgentReply> => runProfile("radar", prompt, approve);
 
 // Background handling of heartbeat-flagged mail: fresh session, least privilege (see policy.ts).
 export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void): Promise<AgentReply> {

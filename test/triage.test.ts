@@ -29,3 +29,19 @@ test("triage prompt: a header field is bounded and free of control and text-dire
   assert.doesNotMatch(text, /[\u0000‮]/);
   assert.match(text, /From: A B </);
 });
+
+test("triage: a usage limit is thrown, not turned into a verdict on the mail", async () => {
+  const { triageBatch } = await import("../src/triage.ts");
+  const { RateLimitError } = await import("../src/errors.ts");
+  // The SDK reports a refused call as an assistant error and still a "success" result without structured output.
+  const limited = (async function* () {
+    yield { type: "assistant", error: "rate_limit" };
+    yield { type: "result", subtype: "success", is_error: false, total_cost_usd: 0 };
+  }) as any;
+  await assert.rejects(triageBatch([mail()], limited), RateLimitError);
+  const broken = (async function* () {
+    yield { type: "result", subtype: "success", is_error: false, total_cost_usd: 0 };
+  }) as any;
+  const [t] = await triageBatch([mail()], broken);
+  assert.equal(t!.reason, "classifier unavailable"); // other failures still keep the mail, as before
+});

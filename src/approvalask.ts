@@ -1,6 +1,6 @@
 import { audit, type Source } from "./audit.ts";
 import * as approvals from "./approvals.ts";
-import type { Approve } from "./permissions.ts";
+import { callKey, type Approve } from "./permissions.ts";
 import { recentChat } from "./recentchat.ts";
 import { composeQuestion } from "./approvalmodel.ts";
 
@@ -17,13 +17,12 @@ export const argsForAudit = (input: Record<string, unknown>): unknown => {
 };
 
 // Plain equality of two argument sets (key order does not matter).
-export const sameArgs = (a: unknown, b: unknown): boolean => {
-  const k = (v: unknown): unknown => (Array.isArray(v) ? v.map(k) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([n, x]) => [n, k(x)])) : v);
-  return JSON.stringify(k(a)) === JSON.stringify(k(b));
-};
+export const sameArgs = (a: Record<string, unknown>, b: Record<string, unknown>): boolean => callKey("", a) === callKey("", b);
 
 // `scope`: the conversation the question is asked in (a group id, or the owner's chat): only an answer there applies.
-export function makeApprove(send: (text: string) => Promise<number>, background: boolean, request: typeof approvals.request = approvals.request, compose: typeof composeQuestion = composeQuestion, scope: string = approvals.OWNER_SCOPE): Approve {
+// `request` and `compose` are the real ones unless a test supplies its own.
+export function makeApprove(send: (text: string) => Promise<number>, o: { background?: boolean; scope?: string; request?: typeof approvals.request; compose?: typeof composeQuestion } = {}): Approve {
+  const { background = false, scope = approvals.OWNER_SCOPE, request = approvals.request, compose = composeQuestion } = o;
   const source: Source = scope !== approvals.OWNER_SCOPE ? "group" : background ? "background" : "chat";
   return async (description, call, abort) => {
     // One model call writes it, code validates it. No question means no ask and no card: the agent gets the failure as the tool result.

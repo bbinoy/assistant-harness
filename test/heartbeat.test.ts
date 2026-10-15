@@ -117,3 +117,38 @@ for (const [name, write, expected] of [
     assert.match(sent[0]!, expected);
   });
 }
+
+test("heartbeat: a usage limit leaves the mail unseen, so the next tick classifies it", async () => {
+  const { RateLimitError } = await import("../src/errors.ts");
+  const { writeJson, readJson } = await import("../src/state.ts");
+  const s = settings as unknown as Record<string, unknown>;
+  const was = { quietStartHour: s.quietStartHour, quietEndHour: s.quietEndHour, heartbeatLive: s.heartbeatLive, mail: s.mail };
+  Object.assign(s, { quietStartHour: 0, quietEndHour: 0, heartbeatLive: true, mail: true });
+  const seenBefore = readJson("state/seen.json", undefined);
+  writeJson("state/seen.json", { seededAt: "2026-01-01T00:00:00.000Z", keys: {} });
+  const row = { conversationId: "c1", subject: "Contract", lastSender: "Dana", receivedAtUtc: "2026-10-14T09:00:00", lastMessageId: 7 };
+  const mail = {
+    inboxes: async () => [{ email: "me@x.org", folderId: "f", senderName: "Me" }],
+    call: async (n: string) => (n === "list_conversations" ? [row] : { body: "please sign", from: { displayName: "Dana", email: "d@x.org" } }),
+    close: async () => {},
+  } as unknown as MailSource;
+  let calls = 0;
+  const log = console.log;
+  const err = console.error;
+  console.log = () => {};
+  console.error = () => {};
+  try {
+    const hb = startHeartbeat(
+      { alert: async () => {}, handle: () => {}, briefDue: () => false, onTick: () => {} },
+      { mail, triage: async () => { calls++; throw new RateLimitError("rate_limit"); }, setTimeout: () => 0, setInterval: () => 0 },
+    );
+    await hb.mailCheck();
+    await hb.mailCheck();
+    assert.equal(calls, 2, "tried again on the next tick");
+  } finally {
+    console.log = log;
+    console.error = err;
+    Object.assign(s, was);
+    writeJson("state/seen.json", seenBefore ?? { keys: {} });
+  }
+});
