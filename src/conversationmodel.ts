@@ -6,7 +6,6 @@ import { FILE as OWNER_LOG, type Extra, type Kind } from "./messages.ts";
 import { NOTES_DIR } from "./notes.ts";
 import { type Picture } from "./image.ts";
 import { OWNER_SESSION_FILE } from "./session.ts";
-import type { TellSink } from "./telluser.ts";
 import { settings } from "./settings.ts";
 import { clean, LIMITS, oneLine } from "./sanitize.ts";
 import { type Timing } from "./timing.ts";
@@ -81,7 +80,6 @@ export type Incoming = { type: "message"; m: IncomingMessage } | { type: "reacti
 // What one run needs. The caller (the owner's path here, the group brain in group.ts) builds it.
 export interface RunHooks {
   firstOutput: () => void; // the model produced its first message (timing only)
-  tell?: TellSink; // the model's tell_user tool (telluser.ts), for a conversation, not a reaction or a wake-up: sends an interim text message at once
 }
 
 export interface Turn {

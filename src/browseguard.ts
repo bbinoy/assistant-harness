@@ -6,7 +6,7 @@ import { clickProblem, MAX_POINT_CLICKS, MAX_SHOTS, nodeOfPoint, screenshotInput
 import { audit } from "./audit.ts";
 import { clip } from "./format.ts";
 import { cleanText } from "./sanitize.ts";
-import { isJpeg, MAX_PICTURE_BYTES } from "./sendpicture.ts";
+import { isJpeg, MAX_PICTURE_BYTES } from "./shots.ts";
 import { settings } from "./settings.ts";
 
 // The guard of a browse run: it decides every call the browsing model makes (browserules.ts has the pure rules). One per run.
@@ -35,7 +35,7 @@ export interface GuardOptions {
   vision?: VisionMode; // the vision experiment (browsevision.ts); off: today's behaviour
   probe?: Probe; // click mode: what is under a point of the page, looked up by code (browsecdp.ts)
   cdpPort?: number; // click mode: the browser's debugging port on loopback (browseserver.ts starts the browser with it)
-  shotsDir?: string; // vision on: where each screenshot is kept as a small jpeg, for the chat to pass on (sendpicture.ts)
+  shotsDir?: string; // vision on: where each screenshot is kept as a small jpeg, for the chat to pass on (shots.ts)
 }
 
 const SNAPSHOT_CAP = 24_000; // characters (~7k tokens) of one page view: bigger ones are cut with a visible marker (MCP results over 25k tokens would be written to a file the run cannot read)
