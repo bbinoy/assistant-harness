@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Verdict } from "../src/autojudge.ts";
 import { browseSystem } from "../src/browse.ts";
 import { BrowseGuard, resultText, withText } from "../src/browseguard.ts";
-import { describePoint, freePort, openSession, type Cdp, type PointInfo } from "../src/browsecdp.ts";
+import { describePoint, freePort, openSession, pickPage, type Cdp, type PointInfo } from "../src/browsecdp.ts";
 import { browserServer } from "../src/browseserver.ts";
 import { hiddenBrowserTools, HIDDEN_BROWSER_TOOLS, isAllowedBrowserTool, type VisionMode } from "../src/browserules.ts";
 import { clickProblem, MAX_POINT_CLICKS, MAX_SHOTS, screenshotInput, validPoint } from "../src/browsevision.ts";
@@ -152,24 +152,56 @@ test("point clicks: the same commit classification and judge as a ref click", as
   assert.equal((await guard("click", at({ role: "generic", name: "Buy now", tag: "div" })).decide(`${B}mouse_click_xy`, click)).judge, true);
 });
 
-test("point clicks: what code cannot resolve asks the owner, not the judge", async () => {
+test("point clicks: what code cannot resolve goes to the judge with its context, not straight to the owner", async () => {
   const unresolved: [string, (x: number, y: number) => Promise<PointInfo | string>][] = [
-    ["the lookup says why not", async () => "the browser found no element at that point"],
     ["another page than the last page view", async () => info({ pageUrl: "https://evil.example.net/" })],
-    ["a canvas", async () => info({ role: "generic", name: "", tag: "canvas", opaque: "a canvas" })],
     ["an embedded frame", async () => info({ tag: "iframe", opaque: "an embedded frame (payment and login widgets live in one)" })],
-    ["a lookup that throws would be a string, so a rejected promise is the caller's: still no click", async () => "the lookup failed (boom)"],
+    ["a lookup that keeps failing", async () => "the lookup failed (boom)"],
+    ["tabs that cannot be told apart", async () => "2 tabs are open, so which one is shown is not certain"],
   ];
   for (const [why, probe] of unresolved) {
     const d = await guard("click", probe).decide(`${B}mouse_click_xy`, click);
     assert.equal(d.kind, "ask", why);
-    assert.equal(d.judge, false, `${why}: the owner is asked directly`);
+    assert.equal(d.judge, true, `${why}: the judge decides first`);
     assert.equal(d.once, true);
     assert.match(d.description!, /could not be identified/);
+    assert.match(d.description!, /\(100, 200\)/);
+    assert.match(d.description!, /find a table for two/);
+    assert.match(d.description!, /Controls on the page: button “Search”/);
   }
   // no page view yet
   const fresh = new BrowseGuard({ mode: "owner", task: "t", outDir: "/x", resolver: publicDns, vision: "click", probe: at() });
-  assert.equal((await fresh.decide(`${B}mouse_click_xy`, click)).judge, false);
+  assert.equal((await fresh.decide(`${B}mouse_click_xy`, click)).judge, true);
+  // a lookup that fails once is retried and then resolves
+  let n = 0;
+  const flaky = guard("click", async () => (n++ === 0 ? "the lookup failed (timed out)" : info()));
+  assert.equal((await flaky.decide(`${B}mouse_click_xy`, click)).kind, "defer");
+  assert.equal(n, 2);
+});
+
+test("point clicks: an empty area, a canvas or a map surface is a plain click, logged with what was hit", async () => {
+  for (const o of [{ role: "generic", name: "(empty area)", tag: "none", nothing: true }, { role: "generic", name: "(canvas)", tag: "canvas" }, { role: "generic", name: "(svg)", tag: "svg" }, { role: "generic", name: "", tag: "body" }]) {
+    const d = await guard("click", at(o)).decide(`${B}mouse_click_xy`, click);
+    assert.equal(d.kind, "defer", JSON.stringify(o));
+  }
+  // a canvas inside a link still follows the link rules
+  assert.equal((await guard("click", at({ role: "link", name: "Admin", tag: "canvas", href: "http://192.168.1.1/" })).decide(`${B}mouse_click_xy`, click)).kind, "deny");
+  // a canvas inside a booking button is that button
+  assert.equal((await guard("click", at({ role: "button", name: "Book now", tag: "canvas" })).decide(`${B}mouse_click_xy`, click)).judge, true);
+});
+
+test("point clicks: the judge asking (or failing) reaches the owner for an unresolved point", async () => {
+  const asked: string[] = [];
+  const mk = (verdict: () => Promise<Verdict>) => makeCanUseTool(async (d) => (asked.push(d), { approved: false }), "browse", undefined, "find a table", verdict, guard("click", async () => "the lookup failed (boom)"));
+  assert.equal(((await mk(async () => ({ decision: "ask", reason: "x" }))(`${B}mouse_click_xy`, click, opts)) as { behavior: string }).behavior, "deny");
+  assert.equal(asked.length, 1);
+  asked.length = 0;
+  await mk(async () => ({ decision: "ask", reason: "the judge failed" }))(`${B}mouse_click_xy`, click, opts); // autojudge turns an error or junk into ask
+  assert.equal(asked.length, 1, "a judge failure fails closed to the owner");
+  asked.length = 0;
+  const auto = await mk(async () => ({ decision: "auto", reason: "x" }))(`${B}mouse_click_xy`, { x: 301, y: 302 }, opts); // its own point: an auto-approved call is remembered by its input
+  assert.equal(asked.length, 0);
+  assert.equal((auto as { behavior: string }).behavior, "allow");
 });
 
 test("point clicks: payment and login fields always ask, no judge; the question names the kind, not a value", async () => {
@@ -195,7 +227,7 @@ test("point clicks: payment and login fields always ask, no judge; the question 
   assert.equal(judged, 0);
 });
 
-test("point clicks through the permission path: a commit is judged, then the owner is asked if the judge asks; an unidentified point skips the judge", async () => {
+test("point clicks through the permission path: a commit is judged, then the owner is asked if the judge asks; an unidentified point is judged too", async () => {
   const asked: string[] = [];
   const judgedFor: string[] = [];
   const mk = (probe: Parameters<typeof guard>[1], verdict: Verdict["decision"]) => makeCanUseTool(async (d) => (asked.push(d), { approved: false }), "browse", undefined, "find a table", async (i): Promise<Verdict> => (judgedFor.push(i.description), { decision: verdict, reason: "x" }), guard("click", probe));
@@ -206,9 +238,9 @@ test("point clicks through the permission path: a commit is judged, then the own
   const c2 = mk(async () => "no", "auto");
   asked.length = 0;
   judgedFor.length = 0;
-  assert.equal(((await c2(`${B}mouse_click_xy`, click, opts)) as { behavior: string }).behavior, "deny");
-  assert.equal(asked.length, 1, "the owner was asked");
-  assert.equal(judgedFor.length, 0, "the judge never saw it");
+  assert.equal(((await c2(`${B}mouse_click_xy`, { x: 401, y: 402 }, opts)) as { behavior: string }).behavior, "allow");
+  assert.equal(asked.length, 0, "the judge said auto");
+  assert.equal(judgedFor.length, 1, "the judge saw the unresolved point");
 });
 
 test("point clicks: links go through the address check, odd clicks and points are refused, caps hold", async () => {
@@ -305,15 +337,20 @@ test("describePoint: links, password fields, canvases and frames are described a
   const pw = (await describePoint(fakeCdp({ ...hit, ...one("textbox", "Secret"), ...world, ...described({ tag: "input", type: "password", hints: "pw password" }) }), 1, 1, PAGE)) as PointInfo;
   assert.equal(pw.password, true);
   const canvas = (await describePoint(fakeCdp({ ...hit, ...one("generic", ""), ...world, ...described({ tag: "canvas" }) }), 1, 1, PAGE)) as PointInfo;
-  assert.match(canvas.opaque ?? "", /canvas/);
+  assert.equal(canvas.opaque, undefined, "a canvas is a plain surface");
+  assert.equal(canvas.name, "(canvas)");
   const frame = (await describePoint(fakeCdp({ ...hit, ...one("generic", ""), ...world, ...described({ tag: "iframe" }) }), 1, 1, PAGE)) as PointInfo;
   assert.match(frame.opaque ?? "", /frame/);
-  assert.equal(typeof (await describePoint(fakeCdp({ "DOM.getNodeForLocation": {} }), 1, 1, PAGE)), "string", "no element");
+  assert.equal(((await describePoint(fakeCdp({ "DOM.getNodeForLocation": {} }), 1, 1, PAGE)) as PointInfo).nothing, true, "no element: an empty area");
+  assert.equal(((await describePoint(fakeCdp({ "DOM.getNodeForLocation": new Error("No node found for given location") }), 1, 1, PAGE)) as PointInfo).nothing, true, "the browser's own no node answer");
+  assert.match((await describePoint(fakeCdp({ "DOM.getNodeForLocation": new Error("getNodeForLocation timed out") }), 1, 1, PAGE)) as string, /lookup failed/, "a timeout is a failed lookup");
+  assert.match((await describePoint(fakeCdp({ "DOM.getNodeForLocation": new Error("Target closed") }), 1, 1, PAGE)) as string, /lookup failed/);
   assert.equal(typeof (await describePoint(fakeCdp({ "DOM.getNodeForLocation": new Error("gone") }), 1, 1, PAGE)), "string", "a protocol error");
   assert.equal(typeof (await describePoint(fakeCdp({ ...hit, ...one("button", "x"), ...world, "Runtime.callFunctionOn": { result: {} } }), 1, 1, PAGE)), "string", "the element could not be described");
+  assert.equal(((await describePoint(fakeCdp({ ...hit, ...one("generic", ""), ...world, "Runtime.callFunctionOn": { result: { value: null } } }), 1, 1, PAGE)) as PointInfo).nothing, true, "the document itself is the page background");
 });
 
-test("the connection: not exactly one page open means no answer; a port that answers nothing means no answer", async () => {
+test("the connection: with several tabs the worker's own is picked, else no answer; a port that answers nothing means no answer", async () => {
   const serve = (body: unknown) =>
     new Promise<{ port: number; close: () => void }>((res) => {
       const s = createServer((_q, r) => r.end(JSON.stringify(body))).listen(0, "127.0.0.1", () => res({ port: (s.address() as { port: number }).port, close: () => s.close() }));
@@ -321,6 +358,11 @@ test("the connection: not exactly one page open means no answer; a port that ans
   const two = await serve([{ type: "page", url: "https://a.example/", webSocketDebuggerUrl: "ws://127.0.0.1:1/x" }, { type: "page", url: "https://b.example/", webSocketDebuggerUrl: "ws://127.0.0.1:1/y" }]);
   assert.match((await openSession(two.port, 1000)) as string, /2 tabs/);
   two.close();
+  const tab = (url: string) => ({ type: "page", url, webSocketDebuggerUrl: "ws://x/" + url });
+  assert.equal((pickPage([tab("https://a.example/"), tab("https://b.example/")], "https://b.example/") as { url: string }).url, "https://b.example/", "two tabs: the one the worker sees");
+  assert.equal((pickPage([tab("https://a.example/"), tab("https://b.example/#x")], "https://b.example/") as { url: string }).url, "https://b.example/#x", "a fragment does not matter");
+  assert.match(pickPage([tab("https://a.example/"), tab("https://b.example/")], "https://c.example/") as string, /2 tabs/, "no tab matches");
+  assert.match(pickPage([tab("https://a.example/"), tab("https://a.example/")], "https://a.example/") as string, /2 tabs/, "two tabs on one address cannot be told apart");
   const none = await serve([{ type: "service_worker", url: "x" }]);
   assert.match((await openSession(none.port, 1000)) as string, /no page/);
   none.close();

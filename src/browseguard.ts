@@ -78,6 +78,12 @@ export class BrowseGuard {
     this.shotsDir = o.shotsDir;
   }
 
+  // The names of the buttons, links and fields of the last page view (cheap context for the judge when a point could not be resolved).
+  private controlsSeen(): string {
+    const names = [...this.nodes.values()].filter((n) => n.name && /^(button|link|textbox|searchbox|combobox|checkbox|radio|menuitem|tab|switch)$/.test(n.role)).slice(0, 15).map((n) => `${n.role} “${clip(n.name, 40)}”`);
+    return names.length ? `Controls on the page: ${names.join(", ")}` : "Controls on the page: none listed";
+  }
+
   // After a screenshot call succeeded: keeps its picture as a jpeg file (only real jpeg bytes, a size limit, a name code chooses) and returns its id.
   keepShot(response: unknown): string | undefined {
     if (!this.shotsDir) return undefined;
@@ -141,7 +147,7 @@ export class BrowseGuard {
   }
 
   // Every step the classifier takes for a commit goes to the approval judge with this text; the judge (or, failing that, the owner) decides.
-  // `judge` false: the owner is asked directly (a click code could not identify).
+  // `judge` false: the owner is asked directly.
   private commit(tool: string, input: Record<string, unknown>, node: Node | undefined, why: string, control: string, extraValues: [string, string][] = [], judge = true): Decision {
     if (this.commits >= this.maxCommits) return this.deny(tool, input, `This run already took its ${this.maxCommits} confirmed step(s). Stop and report what is left for the owner.`, { commit: true, cap: true });
     this.log(tool, judge ? "judge" : "ask-owner", input, { commit: true, why, role: node?.role, name: node?.name?.slice(0, 80) });
@@ -273,7 +279,7 @@ export class BrowseGuard {
   }
 
   // A click at a point (BROWSE_VISION=click). The model's idea of what is there counts for nothing: code asks the browser what the click
-  // would hit (browsecdp.ts), turns that into a Node and decides it as it decides a ref click. What it cannot resolve asks the owner;
+  // would hit (browsecdp.ts), turns that into a Node and decides it as it decides a ref click. What it cannot resolve goes to the judge;
   // payment and login fields always ask; a link must pass the address check.
   private async clickAt(tool: string, input: Record<string, unknown>): Promise<Decision> {
     const bad = clickProblem(input);
@@ -283,8 +289,12 @@ export class BrowseGuard {
     if (!this.probe) return this.deny(tool, input, "Clicking at a point is not available in this run. Click by ref.");
     if (++this.pointClicks > MAX_POINT_CLICKS) return this.deny(tool, input, `This run already made ${MAX_POINT_CLICKS} clicks at points. Stop and report.`);
     const at = `(${Math.round(pt.x)}, ${Math.round(pt.y)})`;
-    const info = await this.probe(pt.x, pt.y);
-    const unknown = (why: string) => this.commit(tool, input, undefined, `the element at the point could not be identified: ${why}`, `Click at ${at} on something code could not identify`, [], false);
+    const where = this.url || undefined;
+    let info = await this.probe(pt.x, pt.y, where);
+    if (typeof info === "string") info = await this.probe(pt.x, pt.y, where); // one retry: a lookup can fail once while the page settles
+    // What code cannot resolve goes to the approval judge (the point, why, the task and the controls the page shows), not to the owner directly;
+    // a judge that asks or fails asks the owner. Payment and login fields are not this path: they always ask.
+    const unknown = (why: string) => this.commit(tool, input, undefined, `the element at the point could not be identified: ${why}`, `Click at ${at} on something code could not identify\n${this.controlsSeen()}`);
     if (typeof info === "string") return unknown(info);
     if (!this.url || info.pageUrl !== this.url) return unknown("the page is not the one in the last page view");
     if (info.opaque) return unknown(info.opaque);
@@ -296,7 +306,8 @@ export class BrowseGuard {
     if (kind) return this.sensitive(tool, input, [{ name: info.name || info.hints || `the field at ${at}`, kind }]);
     const node = nodeOfPoint(info, pt.x, pt.y);
     const c = classifyClick(node);
-    this.log(tool, c.commit ? "commit-check" : "click", input, { role: node.role, name: node.name.slice(0, 80), commit: c.commit, point: true });
+    // An empty area, or a canvas/svg/map surface with no link, button, field or form around it, is a plain click: logged with what was hit.
+    this.log(tool, c.commit ? "commit-check" : "click", input, { role: node.role, name: node.name.slice(0, 80), commit: c.commit, point: true, tag: info.tag, ...(info.nothing ? { hit: "nothing" } : {}) });
     if (c.commit) return this.commit(tool, input, node, c.why, `Click at ${at}: “${clip(node.name || "(no label)", 120)}” (${node.role})`);
     return { kind: "defer", description: `🖱️ Browser: click at ${at}: “${clip(node.name || node.role, 80)}” (${node.role})` };
   }
