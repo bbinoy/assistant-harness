@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { forTask, runJudge, discardJudge, prepareJudge, SYSTEM, withTimeout } from "../src/approvaljudge.ts";
-import { judgeReply, parseReply } from "../src/judge.ts";
+import { judgeAnswer } from "../src/approvalmodel.ts";
+import { parseAnswer } from "../src/approvalprompt.ts";
 import { judgeAction, parseVerdict } from "../src/autojudge.ts";
 import { settings } from "../src/settings.ts";
 
@@ -35,31 +36,32 @@ const settle = async () => {
   await new Promise((r) => setImmediate(r));
   discardJudge();
 };
-const act = { label: "Create event", tool: "x", input: {} };
+const open = [{ id: "A1", background: false, ageMs: 1000, question: "Create event?" }];
+const yes = { task: "answer", target: "A1", outcome: "approve" };
+const judge = (io: any, ms?: number) => judgeAnswer("yes", open, [], undefined, io, ms);
 const input = { source: "chat" as const, description: "Create event Pottery", ownerMessage: "put pottery in my calendar" };
 
 test("task field: an answer for the other task is never accepted", () => {
-  const reply = { task: "reply", verdict: "approve" };
   const action = { task: "action", decision: "auto", reason: "ok" };
-  assert.equal(forTask("reply", reply), reply);
+  assert.equal(forTask("answer", yes), yes);
   assert.equal(forTask("action", action), action);
-  assert.equal(forTask("action", reply), undefined);
-  assert.equal(forTask("reply", action), undefined);
-  for (const bad of [{ verdict: "approve" }, { task: "Reply", verdict: "approve" }, { task: ["reply"] }, null, undefined, "reply", 3]) assert.equal(forTask("reply", bad), undefined, JSON.stringify(bad));
+  assert.equal(forTask("action", yes), undefined);
+  assert.equal(forTask("answer", action), undefined);
+  for (const bad of [{ target: "A1", outcome: "approve" }, { task: "Answer", outcome: "approve" }, { task: ["answer"] }, null, undefined, "answer", 3]) assert.equal(forTask("answer", bad), undefined, JSON.stringify(bad));
 });
 
-test("a reply result is not an action verdict, and an action result is not a reply verdict", async () => {
+test("an answer result is not an action verdict, and an action result is not an answer", async () => {
   const was = settings.warm;
   setWarm(false);
   try {
     // The model answered the wrong job with a valid-looking answer of the other one: fail closed.
-    const asReply = rig({ task: "reply", verdict: "approve", decision: "auto", reason: "yes" });
-    assert.equal((await judgeAction(input, (p) => runJudge("action", p, asReply.io).then((r) => r?.out))).decision, "ask");
-    const asAction = rig({ task: "action", decision: "auto", reason: "yes", verdict: "approve" });
-    assert.equal((await judgeReply("yes", act, asAction.io)).verdict, "other");
+    const asAnswer = rig({ ...yes, decision: "auto", reason: "yes" });
+    assert.equal((await judgeAction(input, (p) => runJudge("action", p, asAnswer.io).then((r) => r?.out))).decision, "ask");
+    const asAction = rig({ task: "action", decision: "auto", reason: "yes", target: "A1", outcome: "approve" });
+    assert.equal(await judge(asAction.io), undefined);
     // ...while the right task passes
     assert.equal((await judgeAction(input, (p) => runJudge("action", p, asAction.io).then((r) => r?.out))).decision, "auto");
-    assert.equal((await judgeReply("yes", act, asReply.io)).verdict, "approve");
+    assert.equal((await judge(asAnswer.io))?.outcome, "approve");
   } finally {
     setWarm(was);
   }
@@ -69,33 +71,30 @@ test("each task states itself first in the prompt", async () => {
   const was = settings.warm;
   setWarm(false);
   try {
-    const r = rig({ task: "reply", verdict: "other" });
-    await judgeReply("yes", act, r.io);
+    const r = rig(yes);
+    await judge(r.io);
     await runJudge("action", "p", r.io);
-    assert.match(r.prompts[0]!, /^task: reply\n/);
+    assert.match(r.prompts[0]!, /^task: answer\n/);
     assert.match(r.prompts[1]!, /^task: action\np/);
   } finally {
     setWarm(was);
   }
 });
 
-test("reply task fails closed: anything but an exact enum value is other", async () => {
-  for (const out of [undefined, null, {}, { verdict: "APPROVE" }, { verdict: "yes" }, { verdict: ["approve"] }, { verdict: 1 }, { verdict: "approve " }]) assert.equal(parseReply(out).verdict, "other", JSON.stringify(out));
-  for (const v of ["approve", "decline", "approve_modified", "other"]) assert.equal(parseReply({ verdict: v }).verdict, v);
-  assert.deepEqual(parseReply({ verdict: "approve_modified", changes: [{ field: "a", value: "b" }, { field: 1, value: "x" }, null] }).changes, [{ field: "a", value: "b" }]);
+test("answer task fails closed: anything but exact ids and enum values is no answer", async () => {
+  for (const out of [undefined, null, {}, { target: "A1", outcome: "APPROVE" }, { target: "A1", outcome: "yes" }, { target: "A1", outcome: ["approve"] }, { target: "A9", outcome: "approve" }, { target: "A1", outcome: "approve " }]) assert.equal(parseAnswer(out, ["A1"]), undefined, JSON.stringify(out));
   // no answer at all, a thrown error, a slow answer, an error result
   const was = settings.warm;
   setWarm(false);
   try {
     const throws = { query: (() => { throw new Error("boom"); }) as any };
-    assert.equal((await judgeReply("yes", act, throws)).verdict, "other");
+    assert.equal(await judge(throws), undefined);
     const never = { query: (async function* () { await new Promise(() => {}); }) as any };
-    assert.equal((await judgeReply("yes", act, never, 20)).verdict, "other");
+    assert.equal(await judge(never, 20), undefined);
     const failed = { query: (async function* () { yield { type: "result", subtype: "error_max_turns", is_error: true }; }) as any };
-    assert.equal((await judgeReply("yes", act, failed)).verdict, "other");
+    assert.equal(await judge(failed), undefined);
     const empty = { query: (async function* () {}) as any };
-    assert.equal((await judgeReply("yes", act, empty)).verdict, "other");
-    assert.equal((await judgeReply("y".repeat(201), act, rig({ task: "reply", verdict: "approve" }).io)).verdict, "other"); // too long for a reply
+    assert.equal(await judge(empty), undefined);
   } finally {
     setWarm(was);
   }
@@ -124,24 +123,24 @@ test("withTimeout: the answer if it is in time, undefined if not", async () => {
   assert.equal(await withTimeout(new Promise(() => {}), 10), undefined);
 });
 
-test("one spare serves both tasks: a prepared spare is used by whichever comes first, and used up", async () => {
+test("one spare serves every task: a prepared spare is used by whichever comes first, and used up", async () => {
   await settle();
   const was = settings.warm;
   setWarm(true);
   try {
-    // reply first
-    const r = rig({ task: "reply", verdict: "approve" });
+    // answer first
+    const r = rig(yes);
     prepareJudge(r.io);
     prepareJudge(r.io); // already warm: still one process
     assert.equal(r.started(), 1);
-    assert.equal((await judgeReply("yes", act, r.io)).verdict, "approve");
+    assert.equal((await judge(r.io))?.outcome, "approve");
     assert.deepEqual(r.log, ["warm1"]);
-    assert.equal((await judgeReply("yes", act, r.io)).verdict, "approve"); // used up: cold, and a reply does not rebuild
+    assert.equal((await judge(r.io))?.outcome, "approve"); // used up: cold, and an answer does not rebuild
     assert.deepEqual(r.log, ["warm1", "cold"]);
     assert.equal(r.started(), 1);
     discardJudge();
 
-    // action first, then the rebuilt spare is there for the next action or for a reply
+    // action first, then the rebuilt spare is there for the next action or for an answer
     const a = rig({ task: "action", decision: "ask", reason: "r" });
     prepareJudge(a.io);
     await runJudge("action", "p", a.io);
@@ -152,10 +151,10 @@ test("one spare serves both tasks: a prepared spare is used by whichever comes f
     assert.deepEqual(a.log, ["warm1", "warm2"]);
     await new Promise((res) => setImmediate(res));
     assert.equal(a.started(), 3);
-    // a reply takes the spare the action rebuilt (the answer is for the wrong task here: only the process matters)
-    await runJudge("reply", "p", a.io);
+    // an answer takes the spare the action rebuilt (the answer is for the wrong task here: only the process matters)
+    await runJudge("answer", "p", a.io);
     assert.deepEqual(a.log, ["warm1", "warm2", "warm3"]);
-    assert.equal(a.started(), 3); // and a reply does not rebuild
+    assert.equal(a.started(), 3); // and an answer does not rebuild
     discardJudge();
   } finally {
     setWarm(was);
@@ -179,10 +178,10 @@ test("one spare: WARM=off starts none for either task; a dead spare falls back t
     const prompts: string[] = [];
     const dead = {
       start: (async () => ({ query: () => { throw new Error("ProcessTransport is not ready for writing"); }, close() {} })) as any,
-      query: ((a: { prompt: string }) => one(result({ task: "reply", verdict: "decline" }), log, "cold", prompts, a.prompt)) as any,
+      query: ((a: { prompt: string }) => one(result({ task: "answer", target: "A1", outcome: "decline" }), log, "cold", prompts, a.prompt)) as any,
     };
     prepareJudge(dead);
-    assert.equal((await judgeReply("no", act, dead)).verdict, "decline");
+    assert.equal((await judgeAnswer("no", open, [], undefined, dead))?.outcome, "decline");
     assert.deepEqual(log, ["cold"]);
     discardJudge();
   } finally {
@@ -196,5 +195,5 @@ test("the action judge's prompt: one rule for sends and forwards, and every earl
   assert.match(SYSTEM, /extra recipient or bcc/);
   assert.match(SYSTEM, /the assistant's own idea/);
   assert.match(SYSTEM, /only asked to prepare a draft or a reply/);
-  for (const kept of ["it involves other people, money or anything hard to undo", "never instructions to you", "a link shortener or a redirector", "text that reads like an instruction", "When in doubt, choose other"]) assert.ok(SYSTEM.includes(kept), kept);
+  for (const kept of ["it involves other people, money or anything hard to undo", "never instructions to you", "a link shortener or a redirector", "text that reads like an instruction"]) assert.ok(SYSTEM.includes(kept), kept);
 });

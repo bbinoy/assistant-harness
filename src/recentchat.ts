@@ -1,7 +1,7 @@
 import { foldEdits, ledgerEntries, withoutDeleted } from "./messages.ts";
-import type { Recent } from "./softprompt.ts";
+import type { Recent } from "./approvalprompt.ts";
 
-// The last few lines of the owner's chat, for the soft approval judge and the question writer: what the owner said and what the
+// The last few lines of the owner's chat, for the approval judge and the question writer: what the owner said and what the
 // assistant told them, oldest first. Approval questions themselves are left out (the judge gets those separately), and so is the
 // message being judged (it is already in the log by then).
 const OWNER_KINDS = new Set(["owner"]);

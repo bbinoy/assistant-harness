@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { JudgeSpare } from "../src/judgespare.ts";
-import { judgeReply, prepareJudge, discardJudge } from "../src/judge.ts";
+import { prepareJudge, discardJudge } from "../src/approvaljudge.ts";
+import { judgeAnswer } from "../src/approvalmodel.ts";
 import { settings } from "../src/settings.ts";
 
 const setWarm = (v: boolean) => ((settings as { warm: boolean }).warm = v);
-const result = (verdict: string) => ({ type: "result", subtype: "success", is_error: false, structured_output: { task: "reply", verdict } }) as any;
+const result = (outcome: string) => ({ type: "result", subtype: "success", is_error: false, structured_output: { task: "answer", target: "A1", outcome } }) as any;
 async function* one(msg: unknown, log: string[], tag: string) {
   log.push(tag);
   yield msg;
@@ -102,15 +103,16 @@ test("judge spare: each judge keeps its own spare; one prepared for another purp
   }
 });
 
-test("approval judge reply: uses its warm spare, reports the verdict, and WARM=off no longer starts one", async () => {
+test("approval judge answer: uses its warm spare, reports the outcome, and WARM=off no longer starts one", async () => {
   const was = settings.warm;
   setWarm(true);
   try {
     const r = rig((tag) => (tag === "cold" ? "decline" : "approve"));
-    const action = { label: "Send", tool: "x", input: {} };
+    const open = [{ id: "A1", background: false, ageMs: 1000, question: "Send?" }];
+    const judge = () => judgeAnswer("yes", open, [], undefined, r.io);
     prepareJudge(r.io);
-    assert.equal((await judgeReply("yes", action, r.io)).verdict, "approve");
-    assert.equal((await judgeReply("yes", action, r.io)).verdict, "decline"); // cold
+    assert.equal((await judge())?.outcome, "approve");
+    assert.equal((await judge())?.outcome, "decline"); // cold
     setWarm(false);
     prepareJudge(r.io);
     assert.equal(r.started(), 1);

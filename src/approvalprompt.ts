@@ -3,10 +3,10 @@ import type { Change } from "./policy.ts";
 import { ASSISTANT, OWNER } from "./settings.ts";
 
 // The prompts and strict parsers of the three extra tasks of the one approval judge (approvaljudge.ts): "answer" (what a reply
-// means among ALL open approvals), "write" (the question, in APPROVAL_STYLE=conversational; validated by code, questionfacts.ts). Pure: no model call here (softjudge.ts makes them).
+// means among ALL open approvals), "write" (the question, validated by code, questionfacts.ts). Pure: no model call here (approvalmodel.ts makes them).
 // Every parser takes only exact values; anything else is the safe answer (no approval, "inaccurate", no text).
 
-export const SOFT_SYSTEM = `Two further jobs exist, with the same rule: the first line of the prompt says which ("task: answer" or "task: write"), set the "task" field to that word and fill only that job's fields.
+export const APPROVAL_SYSTEM = `Two further jobs exist, with the same rule: the first line of the prompt says which ("task: answer" or "task: write"), set the "task" field to that word and fill only that job's fields.
 
 task: answer. ${OWNER} was asked on their phone to approve one or more actions and may have several questions open. You get the open approvals as JSON (id, who asked, how long ago, the exact question text that was shown, sometimes the arguments), the last few messages, and ${OWNER}'s NEW message. Decide what the new message is. Fields: target, outcome, reason, changes, reply.
 target: the id of the ONE approval the message answers; "none" if it is not about any open approval; "unclear" if it could answer more than one and you cannot tell which.
