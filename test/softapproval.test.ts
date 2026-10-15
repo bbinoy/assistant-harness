@@ -460,7 +460,7 @@ test("scope: free text in a group is read by the judge against that group's ques
     assert.deepEqual(seen.views[0]!.map((v) => v.question), ["Post the notes", "Post the photos"]); // not the owner's
     assert.equal(g1.d.approved, true);
     assert.deepEqual([g2.d, o.d], [undefined, undefined]);
-    assert.equal(answerReaction("👎", g2.ts, "groupA", "+15555550106"), "declined");
+    assert.equal(answerReaction("👎", g2.ts, "groupA", "+15555550105"), "declined");
     await g2.p;
     assert.equal(g2.d.approved, false);
     await end(o);
