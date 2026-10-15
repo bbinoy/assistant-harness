@@ -142,7 +142,7 @@ export function loadSettings(env: Env) {
     browseMaxTurns: num(env, "BROWSE_MAX_TURNS", 40, 3, 200),
     browseMaxUsd: num(env, "BROWSE_MAX_USD", 1.5, 0.05, 50),
     browseMaxMinutes: num(env, "BROWSE_MAX_MINUTES", 10, 1, 120),
-    browseMaxCommits: num(env, "BROWSE_MAX_COMMITS", 2, 0, 10),
+    browseMaxCommits: num(env, "BROWSE_MAX_COMMITS", 8, 0, 20),
     browseLocale: env.BROWSE_LOCALE?.trim() || "en-GB", // the browser's language (Accept-Language, navigator.language): an ordinary one, not the headless default en-US
     browseBrowserPath: env.BROWSE_BROWSER_PATH?.trim() || undefined, // advanced: a Chromium or Chrome executable instead of the one npm run setup:browse installs
 
