@@ -3,7 +3,9 @@ import { query, startup, type HookCallbackMatcher, type Options, type SDKMessage
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
 import { createTellServer, OWNER_TELL, withTell, type TellSink } from "./telluser.ts";
-import { browseStatus, browserServer, browseSystem, createBrowseServer, resultText, withText, type BrowseGuard, type BrowseMode } from "./browse.ts";
+import { browseSystem, createBrowseServer } from "./browse.ts";
+import { resultText, withText, type BrowseGuard, type BrowseMode } from "./browseguard.ts";
+import { browseStatus, browserServer } from "./browseserver.ts";
 import { HIDDEN_BROWSER_TOOLS } from "./browserules.ts";
 import { pausing, RunTimeout, withCeiling, type Ceiling } from "./ceiling.ts";
 import { chatResume, forgetUnresumable, type Resume } from "./chatsession.ts";

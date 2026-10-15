@@ -9,7 +9,7 @@ import { spentToday } from "./budget.ts";
 import { inQuietHours } from "./actions.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused, localTime } from "./pause.ts";
-import { browseStatus, PLAYWRIGHT_MCP_VERSION, type BrowseStatus } from "./browse.ts";
+import { browseStatus, PLAYWRIGHT_MCP_VERSION, type BrowseStatus } from "./browseserver.ts";
 import { settings } from "./settings.ts";
 import { disconnected, NAMES, readConnectors } from "./connectors.ts";
 import { missingSetup, readNotes } from "./notes.ts";

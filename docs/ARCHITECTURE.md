@@ -178,7 +178,9 @@ src/markdown.ts      Markdown → Signal text styles (UTF-16 offsets)
 src/outbound.ts      sending, chunking, echo guard
 src/guards.ts        owner allowlist (pure, tested)
 src/agent.ts         Agent SDK runs: chat / group / brief / handler, the options of a run, the warm processes
-src/browse.ts        the browse sub-task: guard, entry tool, browser server config, result
+src/browse.ts        the browse sub-task: its prompt, schema, result and entry tool
+src/browseguard.ts   BrowseGuard: decides every call of a browse run
+src/browseserver.ts  is browsing set up, and the browser server's command line
 src/browserules.ts   its pure rules: addresses, snapshots, commit classifier, payment fields
 src/ceiling.ts       the wall-clock ceiling of one run (pausable while an approval waits)
 src/profiles.ts      the run profiles (brief, radar, background, group) and the skills offered

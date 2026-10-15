@@ -4,7 +4,8 @@
 // Commit steps are DECLINED here (the approval callback says no), so the form is filled but never submitted.
 import { browseRunner } from "../src/agent.ts";
 import { readAudit } from "../src/audit.ts";
-import { browse, browseStatus } from "../src/browse.ts";
+import { browse } from "../src/browse.ts";
+import { browseStatus } from "../src/browseserver.ts";
 import { settings } from "../src/settings.ts";
 
 const status = browseStatus();
