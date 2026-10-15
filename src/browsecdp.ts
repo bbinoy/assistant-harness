@@ -16,17 +16,21 @@ export interface PointInfo {
   formName: string;
   hints: string; // name, id, autocomplete, type, placeholder, label of the element at the point: what kind of field it is
   password: boolean; // an input of type password
-  opaque?: string; // what the point is, when code cannot read what a click there does (canvas, embedded frame, video...)
+  opaque?: string; // what the point is, when code cannot read what a click there does (an embedded frame, object, embed)
+  nothing?: boolean; // the hit test found no element at the point (empty area): a click there reaches nothing that can submit
 }
 
-export type Probe = (x: number, y: number) => Promise<PointInfo | string>; // a string: why the point could not be resolved
+// `pageUrl`: the address of the page the worker sees (the tab the browser server has selected), which picks the tab when several are open.
+export type Probe = (x: number, y: number, pageUrl?: string) => Promise<PointInfo | string>; // a string: why the point could not be resolved
 
 export interface Cdp {
   send: (method: string, params?: Record<string, unknown>) => Promise<Record<string, any>>; // rejects on a protocol error
 }
 
 const INTERACTIVE = new Set(["button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "switch", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "tab", "slider", "spinbutton", "listbox", "treeitem", "DisclosureTriangle", "PopUpButton", "ComboBoxSelect", "TextField"]);
-const OPAQUE = new Set(["canvas", "iframe", "frame", "embed", "object", "video", "audio"]);
+const OPAQUE = new Set(["iframe", "frame", "embed", "object"]); // a canvas, svg or video with no interactive ancestor is a plain surface: a click cannot submit anything
+const SURFACE = new Set(["canvas", "svg", "video", "audio"]);
+const NO_NODE = /no node found|no element/i; // the browser's own answer for an empty point: not a failed lookup
 
 // Fixed. Runs in an isolated world on the element under the point (`this`).
 const DESCRIBE = `function () {
@@ -47,6 +51,8 @@ const DESCRIBE = `function () {
 
 interface AxNode { nodeId: string; parentId?: string; backendDOMNodeId?: number; role?: { value?: string }; name?: { value?: string }; ignored?: boolean }
 
+const nothingAt = (pageUrl: string): PointInfo => ({ pageUrl, role: "generic", name: "(empty area)", tag: "none", href: "", inForm: false, formName: "", hints: "", password: false, nothing: true });
+
 // Resolve the point on an open session. Pure apart from the calls on `cdp`.
 export async function describePoint(cdp: Cdp, x: number, y: number, pageUrl: string): Promise<PointInfo | string> {
   try {
@@ -54,7 +60,7 @@ export async function describePoint(cdp: Cdp, x: number, y: number, pageUrl: str
     await cdp.send("DOM.getDocument", { depth: 0 });
     const hit = await cdp.send("DOM.getNodeForLocation", { x: Math.round(x), y: Math.round(y), includeUserAgentShadowDOM: false, ignorePointerEventsNone: false });
     const backendNodeId = hit.backendNodeId as number | undefined;
-    if (typeof backendNodeId !== "number") return "the browser found no element at that point";
+    if (typeof backendNodeId !== "number") return nothingAt(pageUrl);
 
     const ax = ((await cdp.send("Accessibility.getPartialAXTree", { backendNodeId, fetchRelatives: true })).nodes ?? []) as AxNode[];
     const self = ax.find((n) => n.backendDOMNodeId === backendNodeId);
@@ -64,13 +70,14 @@ export async function describePoint(cdp: Cdp, x: number, y: number, pageUrl: str
     const interactive = chain.find((n) => INTERACTIVE.has(n.role?.value ?? ""));
     const text = self ? ax.filter((n) => n.parentId === self.nodeId && n.role?.value === "StaticText").map((n) => n.name?.value ?? "").join(" ").trim() : "";
     const role = interactive?.role?.value ?? "generic";
-    const name = (interactive?.name?.value ?? text ?? "").trim();
+    let name = (interactive?.name?.value ?? text ?? "").trim();
 
     const world = await cdp.send("Page.createIsolatedWorld", { frameId: hit.frameId, worldName: "ted-guard" });
     const node = await cdp.send("DOM.resolveNode", { backendNodeId, executionContextId: world.executionContextId });
     const ran = await cdp.send("Runtime.callFunctionOn", { objectId: node.object?.objectId, functionDeclaration: DESCRIBE, returnByValue: true });
     const d = ran.result?.value as { tag: string; type: string; hints: string; href: string; inForm: boolean; formName: string } | null | undefined;
     if (!d || typeof d.tag !== "string") return "the element at that point could not be described";
+    if (!name && SURFACE.has(d.tag)) name = `(${d.tag})`;
 
     return {
       pageUrl,
@@ -82,9 +89,11 @@ export async function describePoint(cdp: Cdp, x: number, y: number, pageUrl: str
       formName: d.formName,
       hints: d.hints,
       password: d.type === "password",
-      ...(OPAQUE.has(d.tag) ? { opaque: d.tag === "canvas" ? "a canvas (drawn by the page; code cannot read what a click there does)" : d.tag === "iframe" || d.tag === "frame" ? "an embedded frame (payment and login widgets live in one)" : `an embedded ${d.tag}` } : {}),
+      ...(OPAQUE.has(d.tag) ? { opaque: d.tag === "iframe" || d.tag === "frame" ? "an embedded frame (payment and login widgets live in one)" : `an embedded ${d.tag}` } : {}),
     };
   } catch (e) {
+    // "No node found for given location": the point is on nothing. A timeout, a closed target or any other error is a failed lookup.
+    if (NO_NODE.test(String((e as Error)?.message ?? e))) return nothingAt(pageUrl);
     return `the lookup failed (${String((e as Error)?.message ?? e).slice(0, 80)})`;
   }
 }
@@ -96,13 +105,25 @@ const withTimeout = <T>(p: Promise<T>, ms: number, what: string): Promise<T> => 
   return Promise.race([p, new Promise<never>((_, rej) => (t = setTimeout(() => rej(new Error(`${what} timed out`)), ms)))]).finally(() => clearTimeout(t));
 };
 
-// A session on the one open page. More or fewer than one page: the point cannot be tied to the page the worker sees, so no answer.
-export async function openSession(port: number, timeoutMs = 4000): Promise<{ cdp: Cdp; pageUrl: string; close: () => void } | string> {
+// Which of the browser's tabs the worker sees: one page is that one; with several, the one at `pageUrl`. Else why not.
+export function pickPage<T extends { type: string; url: string; webSocketDebuggerUrl?: string }>(list: T[], pageUrl?: string): T | string {
+  const all = list.filter((t) => t.type === "page");
+  const bare = (u: string) => u.split("#")[0];
+  const same = pageUrl ? all.filter((t) => t.url === pageUrl) : [];
+  const pages = all.length <= 1 ? all : same.length ? same : pageUrl ? all.filter((t) => bare(t.url) === bare(pageUrl)) : all;
+  if (pages.length !== 1 || !pages[0]!.webSocketDebuggerUrl) return all.length === 0 ? "no page is open" : `${all.length} tabs are open, so which one is shown is not certain`;
+  return pages[0]!;
+}
+
+// A session on the page the worker sees. One page: that one. Several: the one whose address is `pageUrl` (the address the browser server shows
+// for its selected tab: its tab list marks the selected one "(current)" and every page view is of that tab). Two tabs on the very same
+// address, or none matching, cannot be told apart: no answer.
+export async function openSession(port: number, timeoutMs = 4000, pageUrl?: string): Promise<{ cdp: Cdp; pageUrl: string; close: () => void } | string> {
   try {
     const list = (await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(timeoutMs) })).json()) as { type: string; url: string; webSocketDebuggerUrl?: string }[];
-    const pages = list.filter((t) => t.type === "page");
-    if (pages.length !== 1 || !pages[0]!.webSocketDebuggerUrl) return pages.length === 0 ? "no page is open" : `${pages.length} tabs are open, so which one is shown is not certain`;
-    const ws = new WebSocket(pages[0]!.webSocketDebuggerUrl);
+    const pick = pickPage(list, pageUrl);
+    if (typeof pick === "string") return pick;
+    const ws = new WebSocket(pick.webSocketDebuggerUrl!);
     await withTimeout(new Promise<void>((res, rej) => ((ws.onopen = () => res()), (ws.onerror = () => rej(new Error("connection failed"))))), timeoutMs, "connect");
     let id = 0;
     const pending = new Map<number, { res: (v: Record<string, any>) => void; rej: (e: Error) => void }>();
@@ -115,7 +136,7 @@ export async function openSession(port: number, timeoutMs = 4000): Promise<{ cdp
       else p.res(m.result ?? {});
     };
     const send: Cdp["send"] = (method, params = {}) => withTimeout(new Promise((res, rej) => (pending.set(++id, { res, rej }), ws.send(JSON.stringify({ id, method, params })))), timeoutMs, method);
-    return { cdp: { send }, pageUrl: pages[0]!.url, close: () => ws.close() };
+    return { cdp: { send }, pageUrl: pick.url, close: () => ws.close() };
   } catch (e) {
     return `the browser could not be reached (${String((e as Error)?.message ?? e).slice(0, 80)})`;
   }
@@ -132,8 +153,8 @@ export const freePort = (): Promise<number> =>
     });
   });
 
-export const cdpProbe = (port: number): Probe => async (x, y) => {
-  const s = await openSession(port);
+export const cdpProbe = (port: number): Probe => async (x, y, pageUrl) => {
+  const s = await openSession(port, 4000, pageUrl);
   if (typeof s === "string") return s;
   try {
     return await describePoint(s.cdp, x, y, s.pageUrl);
