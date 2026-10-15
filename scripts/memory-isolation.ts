@@ -1,5 +1,5 @@
 // Proves, against the real SDK (haiku, a few cents), that a group run built EXACTLY as production builds it
-// (agent.ts buildOptions + groupRunOptions: autoMemoryDirectory is the group's notes folder, the group policy,
+// (agentrun.ts buildOptions + groupRunOptions: autoMemoryDirectory is the group's notes folder, the group policy,
 // the scoped memory tools, no user settings; only the persona text is replaced by a model that never refuses,
 // so the tools and policy are what is tested) cannot see or touch the owner's notes or logs.
 // Not part of `npm test`. Run: npm run check:isolation   (needs Claude login auth)
@@ -9,7 +9,8 @@ import { join } from "node:path";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "isolation-")));
 process.env.HARNESS_DATA_DIR = join(root, "data"); // before the modules read their settings: audit lines etc. land here, not in the real data
-const { buildOptions, groupRunOptions } = await import("../src/agent.ts");
+const { groupRunOptions } = await import("../src/agent.ts");
+const { buildOptions } = await import("../src/agentrun.ts");
 
 const ownerDir = join(root, "data", "memory", "notes");
 const groupDir = join(root, "data", "memory", "groups", "g1", "notes");

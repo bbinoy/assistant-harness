@@ -1,7 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseLanguages } from "./lang.ts";
 import { isSafeUrl, type TtsProviderConfig } from "@ted-personal-assistant/signal/tts";
 
 // Every tunable in one place, read from the environment (see .env.example) and validated
@@ -78,6 +77,12 @@ function ttsProvider(env: Env, kokoro: { dir: string; voice: string; speed: numb
   }
   return { provider, fallback, kokoro };
 }
+
+// The configured list, e.g. "en, de" -> ["en","de"]. Region suffixes are dropped ("en-US" -> "en"). Empty means en.
+export const parseLanguages = (raw: string | undefined): string[] => {
+  const l = (raw ?? "").split(",").map((s) => s.trim().toLowerCase().split(/[-_]/)[0]!).filter(Boolean);
+  return l.length ? [...new Set(l)] : ["en"];
+};
 
 export function loadSettings(env: Env) {
   const kokoro = {

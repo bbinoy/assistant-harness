@@ -1,62 +1,19 @@
-import { readFileSync } from "node:fs";
-import { query, startup, type HookCallbackMatcher, type Options, type SDKMessage, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
-import { audit, type Source } from "./audit.ts";
-import { recordCost } from "./budget.ts";
-import { createTellServer, OWNER_TELL, withTell, type TellSink } from "./telluser.ts";
-import { browseStatus, browserServer, browseSystem, createBrowseServer, resultText, withText, type BrowseGuard, type BrowseMode } from "./browse.ts";
-import { HIDDEN_BROWSER_TOOLS } from "./browserules.ts";
-import { pausing, RunTimeout, withCeiling, type Ceiling } from "./ceiling.ts";
-import { chatResume, forgetUnresumable, type Resume } from "./chatsession.ts";
-import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
+import { query, startup } from "@anthropic-ai/claude-agent-sdk";
+import { buildOptions, runAgent, type AgentReply, type RunOptions } from "./agentrun.ts";
+import { groupSpare, runWarmOrCold, spare, warmUp } from "./agentwarm.ts";
+import { OWNER_TELL, withTell, type TellSink } from "./telluser.ts";
+import { chatResume } from "./chatsession.ts";
+import { disconnected, readConnectors } from "./connectors.ts";
 import type { Conversation } from "./conversation.ts";
-import { noteSuccess, observeRateLimit } from "./cooldown.ts";
-import { failure } from "./errors.ts";
 import { userInput, type Picture } from "./image.ts";
-import { createMemoryServer } from "./memory-tools.ts";
-import { announceMemoryChanges, noteWritten, recordMemoryChange } from "./memorynotice.ts";
 import { LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, readNotes } from "./notes.ts";
-import { approveInGroup, makeCanUseTool, setChatOwnerMessage, type Approve } from "./permissions.ts";
+import { approveInGroup, setChatOwnerMessage, type Approve } from "./permissions.ts";
 import { backgroundSystem, briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem } from "./persona.ts";
-import { hiddenTools } from "./policy.ts";
-import { OFFERED_SKILLS, PROFILES, type OwnerProfile } from "./profiles.ts";
-import { changesCalendar, nudgeRadar } from "./radar-nudge.ts";
+import { PROFILES, type OwnerProfile } from "./profiles.ts";
 import { recentNotices } from "./messages.ts";
-import { OWNER_SESSION_FILE, type ChatSession } from "./session.ts";
+import { OWNER_SESSION_FILE } from "./session.ts";
 import { settings } from "./settings.ts";
-import { cleanToolOutput } from "./toolclean.ts";
-import { readJson, readText, writeJson } from "./state.ts";
-import { recordToolsSeen, toolsSeen } from "./toolsseen.ts";
-import { firstWarm, SpareSlot } from "./warmslot.ts";
-
-interface AgentReply {
-  text: string;
-  costUsd: number;
-  structured?: unknown; // the run's constrained JSON output, when it asked for one
-}
-
-interface RunOptions {
-  source: Source; // audit tag: who is acting
-  systemPrompt: string;
-  sessionFile?: string; // chat and groups: continue + save the conversation here; brief and the rest: fresh every run
-  // Turns on the SDK's auto-memory: notes in `dir`, the only place the file tools may write (policy.ts).
-  // `notify` announces every change on the phone: the owner's chat only; a group's reply says what was saved.
-  memory?: { dir: string; groupId?: string; notify?: (text: string) => Promise<void> };
-  seenAt?: string; // groups: stored with the session, see ChatSession.seenAt
-  skills?: readonly string[]; // the skills offered (default: all bundled ones, OFFERED_SKILLS)
-  maxTurns: number;
-  maxBudgetUsd: number; // hard per-run spend cap. Per RUN, not per session: the SDK does not count the cost a resumed session already had (checked), so owner and groups alike need no adjustment here. The previous total is subtracted only when reporting cost (consume)
-  outputFormat?: Options["outputFormat"]; // constrained JSON output
-  // Fires after a tool call succeeds. Used to capture the brief the agent sends.
-  onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void;
-  onFirstOutput?: () => void; // the model's first message arrived (timing only)
-  guard?: BrowseGuard; // the browse run: decides each browser call and remembers the page (browse.ts)
-  maxMinutes?: number; // a wall-clock ceiling of its own (the browse run), else the chat or background one
-  judgeContext?: string; // an unattended job: the instructions it was given, shown to the approval judge (autojudge.ts)
-}
-
-// Context size of one model call: everything it was sent.
-const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }) =>
-  (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+import { readText } from "./state.ts";
 
 const down = () => disconnected(readConnectors());
 
@@ -75,240 +32,6 @@ function profileOptions(name: OwnerProfile, extra: { onToolSuccess?: RunOptions[
 // One run under a named owner profile: always a fresh session.
 export const runProfile = (name: OwnerProfile, prompt: string, approve: Approve, extra: { onToolSuccess?: RunOptions["onToolSuccess"]; judgeContext?: string } = {}): Promise<AgentReply> =>
   runAgent(prompt, approve, profileOptions(name, extra));
-
-// The browse sub-run (browse.ts calls this through the entry tool): a fresh run with the browser, under the guard. A group's run is the same
-// as the owner's; only `approve` differs (the group's own approver).
-function browseRunOptions(guard: BrowseGuard): RunOptions {
-  return {
-    source: PROFILES.browse.source,
-    systemPrompt: browseSystem(),
-    maxTurns: PROFILES.browse.maxTurns,
-    maxBudgetUsd: PROFILES.browse.maxBudgetUsd,
-    maxMinutes: settings.browseMaxMinutes,
-    outputFormat: PROFILES.browse.outputSchema,
-    judgeContext: guard.task,
-    guard,
-  };
-}
-
-// The `run` of a browse entry tool (browse.ts BrowseContext): the browse run under its guard, asking `approve` for commit steps.
-export const browseRunner = (approve: Approve) => (prompt: string, guard: BrowseGuard): Promise<AgentReply> => runAgent(prompt, approve, browseRunOptions(guard));
-
-// The built-in tools of a run (everything else is an MCP tool): the browse run only searches; a group edits its own notes and searches; the
-// owner's chat adds skills and opening pages; a background run has no notes; the rest only load skills.
-function builtinTools(opts: RunOptions, browsing: boolean, isolated: boolean): string[] {
-  if (browsing) return ["WebSearch"];
-  if (isolated) return ["Read", "Write", "Edit", "WebSearch"];
-  if (opts.memory) return ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"];
-  return opts.source === "background" ? ["Skill", "WebSearch", "WebFetch"] : ["Skill"];
-}
-
-export function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
-  // After a successful tool call: announce a note change on the phone (chat), and report the
-  // call to whoever asked (the brief captures what it sent).
-  const afterTool = async (tool: string, input: Record<string, unknown>, response?: unknown) => {
-    if (opts.memory?.notify) noteWritten(tool, input);
-    if (changesCalendar(tool)) nudgeRadar();
-    opts.onToolSuccess?.(tool, input, response);
-  };
-  const hooks: Partial<Record<"PostToolUse", HookCallbackMatcher[]>> = {
-    PostToolUse: [
-      {
-        hooks: [
-          async (input) => {
-            if (input.hook_event_name !== "PostToolUse") return {};
-            await afterTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, input.tool_response);
-            // The browse run: a page view is read into the result (the server only links its snapshot file), cut to size and remembered
-            // by the guard (the refs, the real names of the controls, what was typed) before it is cleaned like any other result.
-            let response: unknown = input.tool_response;
-            if (opts.guard && input.tool_name.startsWith("mcp__browser__")) {
-              const shaped = opts.guard.shape(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, resultText(response));
-              if (shaped !== undefined) response = withText(response, shaped);
-            }
-            // Clean at the door: the model reads the cleaned result, not the original (counts only in the log).
-            const cleaned = cleanToolOutput(input.tool_name, response);
-            if (!cleaned) return response === input.tool_response ? {} : { hookSpecificOutput: { hookEventName: "PostToolUse" as const, updatedToolOutput: response } };
-            console.log(`clean: tool result ${input.tool_name}: ${cleaned.removed} hidden character(s) removed, ${cleaned.hidden} hidden HTML part(s) left out, ${cleaned.cut} cut`);
-            return { hookSpecificOutput: { hookEventName: "PostToolUse" as const, updatedToolOutput: cleaned.output } };
-          },
-        ],
-      },
-    ],
-  };
-
-  // A group run: no connectors, no user settings, no skills; its memory server is the only MCP server.
-  const browsing = opts.source === "browse"; // the browse sub-run: the browser and web search, nothing of the owner's
-  const isolated = opts.source === "group" || browsing;
-  // The entry tool (browse.ts) for the runs that may browse: the owner's chat, a wake-up and a group. It starts a separate browse run.
-  const mode: BrowseMode = opts.source === "group" ? "group" : "owner";
-  const browseTool =
-    settings.browse && (opts.source === "chat" || opts.source === "background" || opts.source === "group")
-      ? createBrowseServer({ mode, groupId: opts.memory?.groupId, run: browseRunner(mode === "group" && opts.memory?.groupId ? approveInGroup(opts.memory.groupId) : approve) })
-      : undefined;
-  // tell_user (telluser.ts): the owner's chat and groups, never an unattended run (a wake-up included).
-  const tellKey = opts.source === "chat" ? OWNER_TELL : opts.source === "group" ? opts.memory?.groupId : undefined;
-  const tellServer = tellKey ? createTellServer(tellKey) : undefined;
-  const status = browsing ? browseStatus() : undefined;
-  if (status && !status.ok) throw new Error(`browsing is not set up: ${status.reason}`);
-  const mcpServers: Options["mcpServers"] = browsing && opts.guard && status?.ok
-    ? { browser: browserServer(status, opts.guard.outDir) }
-    : opts.memory || browseTool || tellServer
-      ? { ...(tellServer ? { tell: tellServer } : {}), ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
-      : undefined;
-  return {
-    model: settings.model,
-    outputFormat: opts.outputFormat,
-    // Wait for every connector before the first model call. By default they connect in the
-    // background, and a slow one (seen: ~30s) means the first call runs without its tools,
-    // then the tool list changes mid-session, which also throws away the prompt cache. With
-    // chat's warm process (below) this wait happens before the message arrives.
-    env: { ...process.env, MCP_CONNECTION_NONBLOCKING: "false", ...(browsing ? { MAX_MCP_OUTPUT_TOKENS: "60000" } : {}) }, // a browse page view is cut by code (browse.ts) well below this, so the SDK never writes one to a file the run cannot read
-    // Rendered fresh on every request (not recorded once per session): the prompt carries
-    // today's date and the last brief, and a change must apply to the very next message.
-    // Chat uses Claude Code's preset prompt because that is where the SDK's auto-memory
-    // instructions live (with a custom prompt the model says "noted" and saves nothing);
-    // our persona and rules are appended. The unattended runs keep a custom prompt and
-    // get their notes injected as data (notes.ts).
-    systemPrompt: opts.memory
-      ? { type: "preset", preset: "claude_code", append: opts.systemPrompt, snapshot: false }
-      : { type: "custom", prompt: opts.systemPrompt, snapshot: false },
-    settings: opts.memory ? { autoMemoryEnabled: true, autoMemoryDirectory: opts.memory.dir } : { autoMemoryEnabled: false },
-    mcpServers,
-    strictMcpConfig: isolated || undefined, // nothing private is even loaded
-    resume,
-    // Built-ins: Skill, and for chat Read / Write / Edit (confined to the notes folder by
-    // policy.ts) and WebSearch / WebFetch (search freely, open a page only after approval). No Bash. Everything else the agent can do is an MCP tool (Mailbird,
-    // Notion, Calendar...), gated by canUseTool.
-    tools: builtinTools(opts, browsing, isolated),
-    // "user" loads user-scope MCP servers (Mailbird) and CLAUDE.md; the skills offered are
-    // limited to the bundled ones below.
-    // Not "project": there is no project here.
-    settingSources: isolated ? [] : ["user"],
-    // The bundled skills, loaded from the repo; only these are offered to the model (the owner's
-    // other skills would cost context on every call and are none of its business).
-    plugins: isolated ? undefined : [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
-    skills: isolated ? undefined : (opts.skills ? [...opts.skills] : OFFERED_SKILLS),
-    disallowedTools: browsing ? HIDDEN_BROWSER_TOOLS : isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
-    canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir, opts.judgeContext, undefined, opts.guard),
-    hooks,
-    maxTurns: opts.maxTurns,
-    maxBudgetUsd: opts.maxBudgetUsd,
-  };
-}
-
-// The stream yields many message types (system, assistant, tool use...).
-// The one we want is the single "result" message that ends the turn.
-async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOptions, previousCost: number): Promise<AgentReply> {
-  let lastError: string | undefined;
-  let first = false;
-  let lastContext: number | undefined; // the last model call of the main loop shows how big the context is
-  for await (const message of stream) {
-    observeRateLimit(message);
-    if (message.type === "system" && message.subtype === "init" && opts.source !== "group" && opts.source !== "browse") { // a group run has no connectors: its tool list says nothing about them
-      recordToolsSeen(message.tools);
-      recordConnectors(message.tools, message.mcp_servers);
-    }
-    if (message.type === "assistant") {
-      if (!first && !message.parent_tool_use_id) (first = true), opts.onFirstOutput?.();
-      if (message.error) lastError = message.error;
-      if (!message.parent_tool_use_id) lastContext = contextTokens(message.message.usage);
-    }
-    if (message.type !== "result") continue;
-    if (opts.memory?.notify) announceMemoryChanges(opts.memory.notify, message.subtype === "success" ? message.result : "");
-    if (opts.sessionFile) {
-      // The first turn of a session shows what tools, skills and prompts alone cost; later turns keep that baseline (a compaction keeps it too).
-      const before = readJson<ChatSession>(opts.sessionFile, { costUsd: 0 });
-      const baseTokens = before.sessionId === message.session_id ? before.baseTokens : lastContext; // a session from before this existed has none: the absolute limit applies until it starts fresh
-      const next: ChatSession = { sessionId: message.session_id, costUsd: message.total_cost_usd, lastTurnAt: new Date().toISOString(), lastContextTokens: lastContext, ...(baseTokens !== undefined ? { baseTokens } : {}), ...(opts.seenAt ? { seenAt: opts.seenAt } : {}) };
-      writeJson(opts.sessionFile, next);
-    }
-    recordCost(message.total_cost_usd - previousCost); // failures cost money too
-    if (message.subtype === "success" && !message.is_error) {
-      noteSuccess();
-      return { text: message.result, costUsd: message.total_cost_usd - previousCost, structured: message.structured_output };
-    }
-    throw failure(lastError, message.subtype);
-  }
-  throw new Error("agent stream ended without a result");
-}
-
-// The one place every run passes: chat, groups, wake-ups, brief, radar, the mail handler. On the ceiling the query is aborted, the
-// timeout is logged and audited, and the rejection takes the usual error path (a notice, rate-limited in groups; the queue moves on).
-// A chat run (the owner's chat and groups alike) and a background run have their own limits (settings.ts).
-async function underCeiling<T>(source: Source, run: (c: Ceiling) => Promise<T>, minutes?: number): Promise<T> {
-  const chat = source === "chat" || source === "group";
-  try {
-    return await withCeiling((minutes ?? (chat ? settings.runMaxMinutesChat : settings.runMaxMinutesBackground)) * 60_000, run);
-  } catch (e) {
-    if (e instanceof RunTimeout) {
-      console.error(`run: timed out after ${e.minutes} minutes (${source})`);
-      audit("run", "timeout", source, { minutes: e.minutes });
-    }
-    throw e;
-  }
-}
-
-export async function runAgent(prompt: string, approve: Approve, opts: RunOptions, io: { query?: typeof query } = {}): Promise<AgentReply> {
-  const { resume, previousCost } = opts.sessionFile ? chatResume(opts.sessionFile) : { resume: undefined, previousCost: 0 };
-  // A background run is always cold, so the approval it waits on belongs to this run and does not count against its ceiling.
-  return underCeiling(opts.source, (c) => consume((io.query ?? query)({ prompt, options: { ...buildOptions(pausing(c, approve), opts, resume), abortController: c.controller } }), opts, previousCost), opts.maxMinutes).catch((e) => {
-    if (opts.sessionFile) forgetUnresumable(opts.sessionFile, e, opts.source);
-    throw e;
-  });
-}
-
-// --- warm processes for the next message ---
-// Starting Claude Code (process, config, skills, connectors) takes ~3s before the model is even asked. After a reply the
-// next process is started in the background, so the next message only waits for the model. It is used only if nothing it
-// was built from has changed (session, prompt, memory index), and only while fresh; otherwise a normal start.
-// One mechanism (SpareSlot, warmslot.ts), one idle setting (WARM_IDLE_MINUTES), one switch (WARM): a slot each for the owner's
-// chat and the group that spoke last, and the gate's Haiku spare (gate.ts), so at most three processes. A group's is built from
-// that group's own options only (its notes folder, session, memory server, no connectors) and is handed to nobody else; the
-// owner's has the owner's connectors and is never handed to a group. Options (system prompt, tools, MCP servers, output schema)
-// are fixed when a process starts, which is why a slot is keyed by them.
-const idleMs = () => settings.warmIdleMinutes * 60_000;
-const slotOptions = { maxAgeMs: idleMs(), idleMs }; // fresh while not idle-expired: a process that died meanwhile is detected on use (firstWarm) and replaced
-const spare = new SpareSlot<WarmQuery>(slotOptions);
-const groupSpare = new SpareSlot<WarmQuery>(slotOptions);
-
-const memoryIndex = (dir: string) => {
-  try {
-    return readFileSync(`${dir}/MEMORY.md`, "utf8");
-  } catch {
-    return "";
-  }
-};
-const spareKey = (id: string, o: RunOptions, r: Resume) => JSON.stringify([id, r.resume ?? "", o.systemPrompt, o.memory?.dir ?? "", memoryIndex(o.memory?.dir ?? NOTES_DIR)]);
-
-// Starts the next process for a conversation and keeps it as the slot's spare (replacing, and closing, the previous one).
-function warmUp(slot: SpareSlot<WarmQuery>, id: string, o: RunOptions, r: Resume, label: string, approve: Approve, start: typeof startup = startup, refresh = false): void {
-  if (!settings.warm) return;
-  const warm = start({ options: buildOptions(approve, o, r.resume) });
-  warm.catch((e) => console.error(`${label} warm-up failed:`, (e as Error).message));
-  slot.put(id, spareKey(id, o, r), warm, { refresh });
-}
-
-// One turn: on the slot's warm process when it still fits, else a cold start. A warm process serves one query; one that no
-// longer fits is closed. Fall back to a cold start if the warm process is dead or never came up (an idle process can die
-// silently): once the turn has produced a message, an error is the turn's error, and running it again could repeat what it did.
-async function runWarmOrCold(slot: SpareSlot<WarmQuery>, id: string | undefined, o: RunOptions, r: Resume, label: string, input: ReturnType<typeof userInput>, cold: (abort: AbortController) => AsyncIterable<SDKMessage>): Promise<AgentReply> {
-  try {
-    return await underCeiling(o.source, async (c) => {
-      const warm = id ? await slot.take(id, spareKey(id, o, r))?.catch((e: Error) => console.error(`${label}: warm process unavailable, starting normally:`, e.message)) : undefined;
-      // A warm process is stopped through its query: its abort controller was fixed when it started.
-      const onWarm = () => {
-        const q = warm!.query(input);
-        c.signal.addEventListener("abort", () => q.close(), { once: true });
-        return q;
-      };
-      return consume(warm ? firstWarm(onWarm, () => cold(c.controller), (e) => console.error(`${label}: warm process failed, starting normally:`, e.message)) : cold(c.controller), o, r.previousCost);
-    });
-  } catch (e) {
-    if (e instanceof RunTimeout && id && slot.holder === id) slot.drop(); // after an abort the conversation gets no spare built meanwhile
-    if (o.sessionFile) forgetUnresumable(o.sessionFile, e, o.source);
-    throw e;
-  }
-}
 
 // ---- the owner's chat ----
 
@@ -383,3 +106,4 @@ export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?:
     onToolSuccess,
   });
 }
+

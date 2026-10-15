@@ -10,7 +10,8 @@ import { RateLimitError } from "../src/errors.ts";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildOptions, groupRunOptions } from "../src/agent.ts";
+import { groupRunOptions } from "../src/agent.ts";
+import { buildOptions } from "../src/agentrun.ts";
 import { compactOptions } from "../src/chatsession.ts";
 import { owner } from "../src/conversation.ts";
 import { NOTES_DIR } from "../src/notes.ts";
@@ -120,7 +121,7 @@ const rig = (over: object = {}) => {
     runOwner: async () => assert.fail("not the owner's chat"),
     picture: (over as any).picture ?? (async () => ({ mediaType: "image/jpeg" as const, data: "QUJD" })),
     transcript: async () => "voice words",
-    speech: (over as any).speech ?? { ready: () => false, synth: async () => assert.fail("no speech") },
+    speech: (over as any).speech ?? { ready: () => false, synth: async () => assert.fail("no speech"), foreign: async () => undefined },
     approvals: { answer: async () => ({ outcome: "none" as const }), answerReaction: () => "ignored" },
     vouch: (over as any).vouch ?? (async () => true),
     isOwner: (w) => w.from === OWNER,
@@ -172,7 +173,7 @@ test("groups: every message is judged; the gate decides, and a delay is waited o
 test("groups: the voice option is offered in every branch when speech is set up, and a [[voice]] reply is spoken", async () => {
   const dir = mkdtempSync(join(tmpdir(), "grp-tts-"));
   const spoken: string[] = [];
-  const speech = { ready: () => true, synth: async (w: string) => (spoken.push(w), mkdirSync(join(dir, String(spoken.length))), writeFileSync(join(dir, String(spoken.length), "v.wav"), "x"), join(dir, String(spoken.length), "v.wav")) };
+  const speech = { ready: () => true, foreign: async () => undefined, synth: async (w: string) => (spoken.push(w), mkdirSync(join(dir, String(spoken.length))), writeFileSync(join(dir, String(spoken.length), "v.wav"), "x"), join(dir, String(spoken.length), "v.wav")) };
   const prompts: string[] = [];
   const run = async (build: (s?: string) => { prompt: string }) => (prompts.push(build().prompt), "[[voice]] Sounds good, see you there");
   const g = gid();

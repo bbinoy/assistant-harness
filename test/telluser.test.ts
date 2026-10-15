@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildOptions } from "../src/agent.ts";
+import { buildOptions } from "../src/agentrun.ts";
 import { createPipeline, group, owner } from "../src/conversation.ts";
 import { createOutbound } from "../src/outbound.ts";
 import { classify } from "../src/policy.ts";
@@ -55,7 +55,7 @@ function rig() {
     runOwner: async () => ({ text: "" }),
     picture: async () => assert.fail("no picture"),
     transcript: async () => "",
-    speech: { ready: () => false, synth: async () => "" },
+    speech: { ready: () => false, synth: async () => "", foreign: async () => undefined },
     approvals: { answer: async () => ({ outcome: "none" as const }), answerReaction: () => "ignored" },
     vouch: async () => true,
     isOwner: () => true,

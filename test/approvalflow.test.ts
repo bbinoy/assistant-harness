@@ -263,7 +263,7 @@ test("a background approval is judged too, and marked as such", async () => {
 });
 
 // ---- conversational wording: one write call, validated in code ----
-const q = { tool: MAIL, args: { to: ["alice@example.com"], cc: ["bob@example.com"], bcc: ["carol@example.com"], subject: "Offsite agenda", body: "See below. Mail me at ceo@example.org" }, details: "✉️ Send email\nTo: alice@example.com\nCc: bob@example.com\nBcc: carol@example.com", recent: [], background: false, source: "chat" as const };
+const q = { tool: MAIL, args: { to: ["alice@example.com"], cc: ["bob@example.com"], bcc: ["carol@example.com"], subject: "Offsite agenda", body: "See below. Mail me at ceo@example.org" }, details: `✉️ Send email\nTo: alice@example.com\nCc: bob@example.com\nBcc: carol@example.com\n\n${"A long body that needs a summary. ".repeat(30)}`, recent: [], background: false, source: "chat" as const };
 const GOOD = "Send “Offsite agenda” to alice@example.com, with bob@example.com on Cc and carol@example.com on Bcc?";
 
 test("factsOf / validateQuestion: every address, title and role word must be there; no invented address", () => {

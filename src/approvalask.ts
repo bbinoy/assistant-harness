@@ -4,7 +4,7 @@ import { callKey, type Approve } from "./permissions.ts";
 import { recentChat } from "./recentchat.ts";
 import { composeQuestion } from "./approvalmodel.ts";
 
-// Asking the owner: a model writes the question in one call and code validates it against the exact arguments (approvalmodel.ts,
+// Asking the owner: code words a simple question from the exact arguments (questiontemplate.ts), otherwise a model writes it in one call. Either way code validates it against the exact arguments (approvalmodel.ts,
 // questionfacts.ts); if that fails nothing is asked. The ask is audited with the FULL arguments, the exact text sent and, afterwards,
 // the outcome and whether the call that ran has the arguments the question was written for, so a divergence between intent and
 // behaviour can be investigated.
@@ -30,7 +30,7 @@ export function makeApprove(send: (text: string) => Promise<number>, o: { backgr
     if (c.text === undefined) return { approved: false, failure: `no question could be written that states the exact arguments (${c.failure})` };
     const question = c.text;
     const asked = structuredClone(call.input);
-    audit(call.tool, "approval-asked", source, { args: argsForAudit(asked), question, details: description, writeMs: c.ms });
+    audit(call.tool, "approval-asked", source, { args: argsForAudit(asked), question, details: description, writeMs: c.ms, by: c.by });
     const d = await request(send, description, call, abort, { background, question, scope });
     // Post-hoc, never blocking: is what will run what the question was written for?
     audit(call.tool, "approval-outcome", source, { approved: d.approved, modified: !!d.updatedInput, argsEqual: sameArgs(asked, d.updatedInput ?? call.input), ...(d.feedback ? { feedback: d.feedback.slice(0, 300) } : {}), ...(d.updatedInput ? { executed: argsForAudit(d.updatedInput) } : {}) });

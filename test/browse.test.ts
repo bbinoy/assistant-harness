@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SOURCES } from "../src/audit.ts";
 import { judgeAction, type Verdict } from "../src/autojudge.ts";
-import { BrowseGuard, browse, browserServer, desktopUserAgent, browseSystem, resultMessage, resultText, sanitizeResult, startRefusal, withText, type BrowseStatus } from "../src/browse.ts";
+import { browse, browseSystem, resultMessage, sanitizeResult, startRefusal } from "../src/browse.ts";
+import { BrowseGuard, resultText, withText } from "../src/browseguard.ts";
+import { browserServer, desktopUserAgent, type BrowseStatus } from "../src/browseserver.ts";
 import { addressProblem, classifyClick, isAllowedBrowserTool, isRef, looksLikeCardNumber, luhnValid, parseSnapshot, resolvesPublic, sensitiveField, sensitiveKind } from "../src/browserules.ts";
 import { makeCanUseTool } from "../src/permissions.ts";
 import { classify } from "../src/policy.ts";
@@ -508,8 +510,8 @@ test("the run's prompt says pages are data and what to do at a payment (one text
 // ---- the options of the runs ----
 
 test("options: chat, wake-up and group runs get the entry tool; the browse run gets the browser and web search and nothing of the owner's", async () => {
-  const { buildOptions } = await import("../src/agent.ts");
-  const { browseStatus } = await import("../src/browse.ts");
+  const { buildOptions } = await import("../src/agentrun.ts");
+  const { browseStatus } = await import("../src/browseserver.ts");
   const deny = async () => ({ approved: false });
   const base = { systemPrompt: "x", maxTurns: 1, maxBudgetUsd: 1 };
   const chat = buildOptions(deny, { ...base, source: "chat", memory: { dir: "/tmp/notes" } }, undefined);
@@ -529,8 +531,8 @@ test("options: chat, wake-up and group runs get the entry tool; the browse run g
 });
 
 test("options: a browse run cannot be built without the browser, with a clear reason", async () => {
-  const { buildOptions } = await import("../src/agent.ts");
-  const { browseStatus } = await import("../src/browse.ts");
+  const { buildOptions } = await import("../src/agentrun.ts");
+  const { browseStatus } = await import("../src/browseserver.ts");
   if (browseStatus().ok) return;
   assert.throws(() => buildOptions(async () => ({ approved: false }), { source: "browse", systemPrompt: "x", maxTurns: 1, maxBudgetUsd: 1, guard: guard() }, undefined), /browsing is not set up/);
 });
