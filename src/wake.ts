@@ -3,7 +3,8 @@ import { inQuietHours } from "./actions.ts";
 import { clockLine } from "./brief.ts";
 import { budgetSpent } from "./budget.ts";
 import { fence } from "./fence.ts";
-import { askGate, logTail, NOTHING, type Gate } from "./gate.ts";
+import { skipForCooldown } from "./cooldown.ts";
+import { askGate, idleFingerprint, logTail, NOTHING, type Gate } from "./gate.ts";
 import { KEY_TTL_MS, lookDue, lookState, notesChangedAt, recordWake, type LookState } from "./ledger.ts";
 import { groupContext, listGroups } from "./groupstore.ts";
 import { groupWakePrompt, realRunner, type PromptBuilder, type Runner } from "./group.ts";
@@ -15,6 +16,7 @@ import { isPaused } from "./pause.ts";
 import type { OwnerProfile } from "./profiles.ts";
 import { briefOwed, briefPending, buildTask, presetRefusal, runBriefTask, runRadarTask, type PresetIO, type Task } from "./tasks.ts";
 import { OWNER, settings } from "./settings.ts";
+import { MIN_GAP_MINUTES } from "./radar-rules.ts";
 
 // The clock half of the gate (gate.ts). On every heartbeat tick, for the owner's chat and for every group the owner
 // is in, whose next look has come (or where something was said or a note changed since the last look), the gate is
@@ -141,7 +143,7 @@ export function createWakeups(deps: WakeDeps) {
   // session file); the tick does not wait for it, and the tick's guards (paused, over budget) have already passed.
   function quietCompact(conv: Conversation): void {
     const key = `compact:${conv.key}`;
-    if (!deps.compact || running.has(key) || !deps.compact.due(conv)) return;
+    if (!deps.compact || running.has(key) || !deps.compact.due(conv) || skipForCooldown("compaction")) return;
     const run = deps.compact.run;
     const job = pipeline.enqueue(conv, () => run(conv)).then(
       () => "compact-done",
@@ -158,6 +160,7 @@ export function createWakeups(deps: WakeDeps) {
   async function backstop(conv: Conversation, st: LookState, now: Date): Promise<string | undefined> {
     if (conv.kind !== "owner" || !briefOwed(st, now)) return undefined;
     if (paused(clock()) || spent()) return "guarded";
+    if (skipForCooldown("brief")) return "cooldown"; // usage limit: the next tick after it lifts retries
     return runPreset(conv, briefTask(), st, now);
   }
 
@@ -175,6 +178,15 @@ export function createWakeups(deps: WakeDeps) {
     return st;
   }
 
+  // The last quiet decision per conversation (in memory: a restart asks the model once more): what the model was shown, as a
+  // fingerprint (gate.ts idleFingerprint), and the next look it chose. An unchanged fingerprint repeats that decision without a call.
+  const quietLooks = new Map<string, { print: string; nextCheckMinutes: number }>();
+  // What code knows about the owner's jobs that the prompt does not spell out: when the radar may run again, and the brief's state.
+  const idleFacts = (st: LookState, now: Date): string => {
+    const age = st.lastRadarAt ? now.getTime() - Date.parse(st.lastRadarAt) : Infinity;
+    return JSON.stringify([age >= MIN_GAP_MINUTES * 60_000, age >= settings.radarMinutes * 60_000, briefPending(st, now), briefOwed(st, now) ?? null, st.radarPostsToday >= settings.maxProactivePerDay]);
+  };
+
   // One conversation, one look. Returns what happened (for the log and tests).
   async function look(conv: Conversation, now: Date): Promise<string> {
     const st = stateOf(conv, now);
@@ -185,15 +197,32 @@ export function createWakeups(deps: WakeDeps) {
     const tagged = conv.kind === "group" && settings.groupParticipation === "tagged"; // there only a tag counts as news
     if (!lookDue(st, now, { notesChangedMs: changed(conv.notesDir), messagesCount: !tagged })) return "not-due";
 
+    if (skipForCooldown(`${conv.kind} look`)) return "cooldown"; // usage limit: no model call, nothing recorded, the next tick looks again
+
+    // Nothing relevant changed since the model last found nothing to do: its answer would be the same, so keep that look time.
+    const tail = logTail(conv);
+    const print = idleFingerprint({ conv, now, tail }, conv.kind === "owner" ? idleFacts(st, now) : "");
+    const quiet = quietLooks.get(conv.key);
+    if (quiet && quiet.print === print) {
+      recordWake(pipeline, conv, quiet.nextCheckMinutes, now);
+      return "idle";
+    }
+    quietLooks.delete(conv.key);
+
     let out = NOTHING;
+    let answered = false;
     try {
-      out = await gate({ conv, trigger: "clock", now, tail: logTail(conv) });
+      out = await gate({ conv, trigger: "clock", now, tail });
+      answered = true;
     } catch (e) {
       console.error(`wake: gate failed (${conv.kind}):`, (e as Error).message); // fail closed; the default delay stops a retry on every tick
     }
     // Written BEFORE acting: a crash in the run must not mean a retry on every tick.
     recordWake(pipeline, conv, out.nextCheckMinutes, now);
-    if (!out.act) return "no";
+    if (!out.act) {
+      if (answered) quietLooks.set(conv.key, { print, nextCheckMinutes: out.nextCheckMinutes }); // only a real answer counts as a quiet decision
+      return "no";
+    }
     const task = buildTask(conv.kind, out); // presets only for the owner; anything else is the plain task, or nothing
     if (!task) return "no-instructions"; // a free-form look must say what to do
     if (paused(clock()) || spent()) return "guarded"; // re-checked: the gate call itself took time and money

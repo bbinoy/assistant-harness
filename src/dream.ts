@@ -1,3 +1,4 @@
+import { skipForCooldown } from "./cooldown.ts";
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -195,5 +196,5 @@ export function createDreamer(deps: { run?: Runner } = {}) {
   }
 
   // One run at a time; a second caller waits for the first.
-  return { run: (now = new Date()) => (inFlight ??= once(now).finally(() => (inFlight = undefined))) };
+  return { run: (now = new Date()) => (skipForCooldown("dream") ? Promise.resolve() : (inFlight ??= once(now).finally(() => (inFlight = undefined)))) }; // usage limit: no attempt, the day stays open
 }

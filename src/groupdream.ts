@@ -1,3 +1,4 @@
+import { skipForCooldown } from "./cooldown.ts";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { audit } from "./audit.ts";
@@ -52,6 +53,6 @@ export function createGroupDreamer(deps: { run?: DreamRunner } = {}) {
     }
   }
 
-  return { run: (now = new Date()) => (inFlight ??= once(now).finally(() => (inFlight = undefined))) };
+  return { run: (now = new Date()) => (skipForCooldown("group dream") ? Promise.resolve() : (inFlight ??= once(now).finally(() => (inFlight = undefined)))) }; // usage limit: no attempt, the day stays open
 }
 

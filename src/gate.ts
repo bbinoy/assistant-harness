@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { query, startup, type Options, type Query, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import { clockLine } from "./brief.ts";
 import { recordCost } from "./budget.ts";
+import { noteSuccess, observeRateLimit } from "./cooldown.ts";
 import { haikuOptions } from "./haiku.ts";
 import { AuthError, failure, RateLimitError } from "./errors.ts";
 import { fence } from "./fence.ts";
@@ -132,6 +134,18 @@ export function tailLine(m: Sent): string {
 
 export const logTail = (conv: Pick<Conversation, "logFile">, n = 40): string[] => withoutDeleted(ledgerEntries(conv.logFile)).slice(-n).map(tailLine); // what its author took back is not shown
 
+// What the clock look would be shown, as a hash: used to skip a look when nothing relevant changed since the last quiet
+// answer (wake.ts). The model's own ledger lines ("you looked") are left out, they change on every look. The hour is part
+// of it. A note that names a time of day could come due inside the hour, so then the minute is part of it and nothing is
+// skipped. `extra` is what code knows that the prompt does not spell out (the radar's age, the brief's state).
+const TIME_OF_DAY = /\d{1,2}[:.]\d{2}|\b\d{1,2}\s?(am|pm|h|uhr)\b|\b(at|um|ab|from|until|by|before|after)\s+\d{1,2}\b|o'clock|noon|midnight|mittag/i;
+export function idleFingerprint(input: Pick<GateInput, "conv" | "now" | "tail">, extra = ""): string {
+  const notes = notesText(input.conv, input.now);
+  const when = TIME_OF_DAY.test(notes) ? Math.floor(input.now.getTime() / 60_000) : `${localDay(input.now)}T${input.now.getHours()}`;
+  const log = input.tail.filter((l) => !/^\[[^\]]*\] \(you looked/.test(l));
+  return createHash("sha1").update(JSON.stringify([notes, log, when, extra])).digest("hex");
+}
+
 // "typing…" is already showing while a delay runs, so a long one only makes the answer late; the cap is enforced in parseGate.
 const delayText = (max: number = settings.gateMaxDelaySeconds): string =>
   max === 0
@@ -216,6 +230,7 @@ export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<Ga
     const it = (spare ? firstWarm(() => track(spare.query(prompt)), cold, (e) => console.error("gate: warm process failed, starting normally:", e.message)) : cold())[Symbol.asyncIterator]();
     for (let n = await it.next(); !n.done; n = await it.next()) {
       const m = n.value;
+      observeRateLimit(m);
       mark("init");
       if (m.type === "assistant" && m.error) lastError = m.error;
       if (m.type !== "result") continue;
@@ -227,6 +242,7 @@ export async function askGateWith(input: GateInput, io: GateIO = {}): Promise<Ga
       const refused = failure(lastError, m.subtype);
       if (refused instanceof RateLimitError || refused instanceof AuthError) throw refused;
       out = m.subtype === "success" && !m.is_error ? parseGate(m.structured_output) : NOTHING;
+      if (m.subtype === "success" && !m.is_error) noteSuccess();
       at.parse = Date.now() - p0;
       break;
     }

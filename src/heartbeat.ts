@@ -6,6 +6,7 @@ import { audit } from "./audit.ts";
 import type { HandleItem } from "./handler.ts";
 import { GmailMail } from "./gmail.ts";
 import { Mailbird } from "./mailbird.ts";
+import { skipForCooldown } from "./cooldown.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";
@@ -279,7 +280,7 @@ export function startHeartbeat(hooks: HeartbeatHooks, env: { triage?: typeof tri
       if (mail.seeding) {
         console.log("heartbeat: baseline recorded, existing inbox treated as seen");
       } else {
-        if (mail.fresh.length > 0) for (const m of await processNewMail(mb, mail.fresh, hooks, env.triage)) mail.unsee(m);
+        if (mail.fresh.length > 0) for (const m of skipForCooldown("mail triage") ? mail.fresh : await processNewMail(mb, mail.fresh, hooks, env.triage)) mail.unsee(m); // usage limit: no model call, the mail waits unseen (cooldown.ts)
         if (settings.heartbeatLive && !archiveLogOnly() && mail.staleBriefs.length > 0) await archiveStaleBriefs(mb, mail.staleBriefs);
       }
       mail.commit(); // only now are these messages "seen"

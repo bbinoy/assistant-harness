@@ -1,3 +1,4 @@
+import { noteRateLimit } from "./cooldown.ts";
 import { OWNER } from "./settings.ts";
 
 // The two failures that have their own message for the owner, instead of "something broke".
@@ -25,6 +26,6 @@ export function groupErrorNotice(e: unknown): string {
 // The SDK reports a failed turn as an assistant error code and an error result.
 export function failure(lastError: string | undefined, subtype: string): Error {
   if (lastError === "authentication_failed") return new AuthError("authentication_failed");
-  if (lastError === "rate_limit") return new RateLimitError("rate_limit");
+  if (lastError === "rate_limit") return noteRateLimit(), new RateLimitError("rate_limit"); // also starts the shared cooldown of background jobs (cooldown.ts)
   return new Error(`agent turn ended with ${subtype}${lastError ? ` (${lastError})` : ""}`);
 }
