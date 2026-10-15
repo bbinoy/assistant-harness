@@ -35,7 +35,7 @@ export interface Conversation {
   readonly notesDir: string; // this conversation's notes (the SDK auto-memory folder; the only place its file tools may write)
   readonly sessionFile: string; // the resumed SDK session (session.ts): idle reset and compaction work on it
   readonly gate: boolean; // is the participation gate in front of it
-  readonly approvals: boolean; // can an approval be asked and answered here (the owner only)
+  readonly approvals: boolean; // the owner's own turn path (an approval answer is read before the queue); groups read it in intake() before the gate, and any member's answer counts there
   readonly vouch: boolean; // is the owner's membership checked before anything is read (groups: a stranger cannot add us to a group and use us)
   readonly attention: "always" | "addressed"; // who gets a read receipt and an explanation of an unusable voice message or picture: everyone (the owner's chat) or only someone who spoke to us
   readonly optionalPictures: boolean; // a picture is opened only when it will be used, and an unopenable one is dropped (the caption stays); otherwise it is required
@@ -129,7 +129,7 @@ interface PipelineDeps {
   picture: (m: IncomingMessage) => Promise<Picture>; // throws a sentence the sender can be told
   transcript: (m: IncomingMessage) => Promise<string>; // throws a sentence the sender can be told
   speech: { ready: () => boolean; synth: (words: string) => Promise<string> }; // spoken replies: local TTS, a file
-  approvals: { answer: (text: string, working: () => void, quote?: { timestamp: number }) => Promise<{ outcome: "none" | "approved" | "modified" | "declined" | "feedback" | "clarify"; changes?: { field: string; value: unknown }[]; reply?: string; note?: string }>; answerReaction: (emoji: string, ts: number) => string };
+  approvals: { answer: (text: string, working: () => void, quote?: { timestamp: number }, deps?: undefined, ctx?: { scope?: string; by?: string; voice?: boolean }) => Promise<{ outcome: "none" | "approved" | "modified" | "declined" | "feedback" | "clarify"; changes?: { field: string; value: unknown }[]; reply?: string }>; answerReaction: (emoji: string, ts: number, scope?: string, by?: string) => string };
   vouch: (groupId: string) => Promise<boolean>; // is the owner in this group?
   isOwner: (who: { from: string; fromUuid?: string }) => boolean;
   admitGroup: (conv: Conversation, m: GroupMessage) => Promise<void>; // the participation gate (group.ts)
@@ -407,7 +407,12 @@ export function createPipeline(deps: PipelineDeps) {
     }
     // The line for the history: searchable, and what the dream learns from (never the picture itself).
     const line = original.audio ? `🎙️ ${m.text}` : original.image ? `🖼️ ${m.text || "image"}` : m.text;
-    if (!conv.approvals) return deps.admitGroup(conv, { groupId: conv.groupId!, arrivedAt: arrived, text: line, picture: m.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
+    if (!conv.approvals) {
+      // A question asked in this group is answered here by ANY member (their message, a quoted reply or a reaction); the model reads it
+      // like the owner's. Only this group's approvals can be answered; an edit and a caption never answer.
+      if (await approvalAnswer(conv, m, author)) return;
+      return deps.admitGroup(conv, { groupId: conv.groupId!, arrivedAt: arrived, text: line, picture: m.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
+    }
     return ownerTurn(conv, m, line, arrived);
   }
 
@@ -439,23 +444,29 @@ export function createPipeline(deps: PipelineDeps) {
     return ownerTurn(conv, held, m.text, arrived, { of: targetTs });
   }
 
+  // Is this message the answer to a question open in THIS conversation? Then it is consumed (and the owner or group is told what happened).
+  // Never an edit (an approval is answered by a new message, a reaction or a quoted reply, so "no" edited into "yes" changes nothing)
+  // and never a picture caption. A voice message is a message like any other for the model styles, which are told it is an automatic
+  // transcript; the strict style keeps the older rule that a spoken "yes" is not an approval.
+  async function approvalAnswer(conv: Conversation, m: Held, by: string | undefined): Promise<boolean> {
+    if (m.picture || m.edit || (m.voice && settings.approvalStyle === "strict")) return false;
+    const target = { author: m.from, timestamp: m.timestamp };
+    const { outcome, changes, reply } = await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote, undefined, { scope: conv.key, by, voice: !!m.voice });
+    if (outcome === "none") return false;
+    answeredApproval(m.timestamp);
+    console.log(`approval ${outcome}${changes ? ` (${changes.map((c) => c.field).join(", ")})` : ""}`);
+    const say = (text: string) => out.reply(text, { plain: true, groupId: conv.groupId });
+    void signal.react({ approved: "👍", modified: "👍", declined: "👎", feedback: "💬", clarify: "💬" }[outcome], target, conv.groupId);
+    if (reply) await say(reply); // clarify: the approval stays open and this message was an answer, not a request; approved / declined with a reply: the parts of a multi-answer that are still open
+    // An edited call runs without a second look, so say exactly what changed.
+    if (outcome === "modified" && changes) await say(`Applied your change: ${changes.map((c) => `${c.field} → ${c.value}`).join(", ")}`);
+    return true;
+  }
+
   async function ownerTurn(conv: Conversation, m: Held, line: string, arrived: number, edited?: { of: number }): Promise<void> {
     record(conv, edited ? "edit" : "owner", m.timestamp, line, { by: m.from || m.fromUuid, ...(edited ? { of: edited.of } : {}) });
     // While an approval is pending, a message may be its answer. That must skip the queue.
-    // A spoken "yes" is never an approval, nor is a caption. Nor is an edit: an approval is answered by a new message, a reaction
-    // or a quoted reply, so "no" edited into "yes" (or back) changes nothing.
-    const target = { author: m.from, timestamp: m.timestamp };
-    const { outcome, changes, reply, note } = edited || m.voice || m.picture ? { outcome: "none" as const, changes: undefined, reply: undefined, note: undefined } : await deps.approvals.answer(m.text, () => status(conv, "⏳", target), m.quote);
-    if (outcome === "none" && note) await out.replyPlain(note).catch(() => {}); // soft styles: the judge failed; the approvals stay open and the message goes on as chat
-    if (outcome !== "none") {
-      answeredApproval(m.timestamp);
-      console.log(`approval ${outcome}${changes ? ` (${changes.map((c) => c.field).join(", ")})` : ""}`);
-      void signal.react({ approved: "👍", modified: "👍", declined: "👎", feedback: "💬", clarify: "💬" }[outcome], target, conv.groupId);
-      // An edited call runs without a second look, so say exactly what changed.
-      if (outcome === "clarify" && reply) await out.replyPlain(reply); // the approval stays open; this message was the answer to a question, not a request
-      if (outcome === "modified" && changes) await out.replyPlain(`Applied your change: ${changes.map((c) => `${c.field} → ${c.value}`).join(", ")}`);
-      return;
-    }
+    if (!edited && (await approvalAnswer(conv, m, m.from || m.fromUuid))) return;
     await burst(conv, m, async (b) => {
       const typing = holdTyping(conv, b.timing); // the owner is always answered: show it now, even while an earlier turn still runs
       try {
@@ -485,7 +496,7 @@ export function createPipeline(deps: PipelineDeps) {
   // Any reaction that is not an approval answer is feedback on a message. The model is told which message
   // it was on (looked up by timestamp in the log) and decides what, if anything, it means.
   async function ownerReaction(conv: Conversation, r: IncomingReaction): Promise<void> {
-    const outcome = deps.approvals.answerReaction(r.emoji, r.targetTimestamp);
+    const outcome = deps.approvals.answerReaction(r.emoji, r.targetTimestamp, conv.key, r.from || r.fromUuid);
     if (outcome !== "ignored") return void console.log(`approval ${outcome} (by reaction)`);
     await enqueue(conv, async () => {
       console.log(`owner reacted ${r.emoji}`);
@@ -499,6 +510,8 @@ export function createPipeline(deps: PipelineDeps) {
   async function groupReaction(conv: Conversation, r: IncomingReaction): Promise<void> {
     const groupId = conv.groupId!;
     if (!(await deps.vouch(groupId))) return;
+    const answered = deps.approvals.answerReaction(r.emoji, r.targetTimestamp, conv.key, r.from || r.fromUuid); // a reaction on a question asked in this group
+    if (answered !== "ignored") return void console.log(`approval ${answered} (by reaction, in a group)`);
     const on = findMessage(r.targetTimestamp, conv.logFile)?.text ?? "an older message";
     return deps.admitGroup(conv, { groupId, text: "", timestamp: now(), isOwner: deps.isOwner(r), fromName: r.fromName && oneLine("group member name", r.fromName, LIMITS.name), addressedToMe: false, reaction: { emoji: oneLine("reaction", r.emoji, 16), on } });
   }

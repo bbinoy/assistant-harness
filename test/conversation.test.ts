@@ -7,6 +7,7 @@ import { createPipeline, group, owner, type Incoming } from "../src/conversation
 import { createOutbound } from "../src/outbound.ts";
 import { AuthError, RateLimitError } from "../src/errors.ts";
 import { SLOW_REPLY_MS } from "../src/quote.ts";
+import { settings } from "../src/settings.ts";
 import type { Picture } from "../src/image.ts";
 import type { IncomingMessage, IncomingReaction } from "@ted-personal-assistant/signal";
 import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal/tts";
@@ -28,7 +29,7 @@ interface Rig {
   spoken: string[];
 }
 
-function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: string; transcript?: (m: IncomingMessage) => Promise<string>; picture?: (m: IncomingMessage) => Promise<Picture>; pictures?: Picture[][]; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; admitGroup?: any; settleMs?: number; settleMaxMs?: number } = {}) {
+function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: any; transcript?: (m: IncomingMessage) => Promise<string>; picture?: (m: IncomingMessage) => Promise<Picture>; pictures?: Picture[][]; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; admitGroup?: any; settleMs?: number; settleMaxMs?: number } = {}) {
   const r: Rig = { sent: [], reacts: [], typing: [], reads: [], records: [], prompts: [], spoken: [] };
   let ts = 5000;
   const signal = {
@@ -53,7 +54,10 @@ function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) =>
       ready: () => over.ready ?? false,
       synth: over.synth ?? (async (words) => (r.spoken.push(words), writeFileSync(join(dir, "v.wav"), "x"), join(dir, "v.wav"))),
     },
-    approvals: { answer: async (text: string) => (typeof over.approval === "function" ? over.approval(text) : over.approval) ?? { outcome: "none" }, answerReaction: () => over.reactionApproval ?? "ignored" },
+    approvals: {
+      answer: async (text: string, _w: unknown, _q: unknown, _d: unknown, ctx: unknown) => (typeof over.approval === "function" ? over.approval(text, ctx) : over.approval) ?? { outcome: "none" },
+      answerReaction: (...a: unknown[]) => (typeof over.reactionApproval === "function" ? (over.reactionApproval as any)(...a) : over.reactionApproval) ?? "ignored",
+    },
     vouch: async () => over.vouch ?? true,
     isOwner: (w) => w.from === OWNER,
     admitGroup: over.admitGroup ?? (async () => {}),
@@ -189,15 +193,36 @@ test("private chat: voice falls back to text when speech is off, too long, or fa
   assert.ok(long.r.sent.every((s) => !s.text.includes("voice didn't work")));
 });
 
-test("private chat: a voice message that cannot be understood is explained, and a spoken yes is never an approval", async () => {
+const withStyle = async (style: "strict" | "soft" | "conversational", f: () => Promise<void>) => {
+  const was = settings.approvalStyle;
+  (settings as { approvalStyle: string }).approvalStyle = style;
+  try {
+    await f();
+  } finally {
+    (settings as { approvalStyle: string }).approvalStyle = was;
+  }
+};
+
+test("private chat: a voice message that cannot be understood is explained, and in strict a spoken yes is never an approval", async () => {
   const bad = rig({ separate: false, transcript: async () => { throw new Error("I couldn't hear any words in that voice message."); } });
   await bad.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 10 } }));
   assert.deepEqual(bad.r.sent.map((s) => s.text), ["I couldn't hear any words in that voice message."]);
   assert.deepEqual(bad.r.reacts.map((x) => x.emoji), ["👂", "⚠️"]);
   assert.equal(bad.r.prompts.length, 0);
-  const yes = rig({ approval: { outcome: "approved" }, transcript: async () => "yes" });
-  await yes.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 10 } }));
-  assert.equal(yes.r.prompts.length, 1); // skipped the approval check, went to the chat
+  await withStyle("strict", async () => {
+    const yes = rig({ approval: { outcome: "approved" }, transcript: async () => "yes" });
+    await yes.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 10 } }));
+    assert.equal(yes.r.prompts.length, 1); // skipped the approval check, went to the chat
+  });
+  // the model styles: the transcript is a message like any other, and the judge is told it is an automatic transcript
+  await withStyle("conversational", async () => {
+    const seen: unknown[] = [];
+    const spoken = rig({ approval: (_t: string, ctx: unknown) => (seen.push(ctx), { outcome: "approved" }), transcript: async () => "yes go ahead" });
+    await spoken.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 10 } }));
+    assert.equal(spoken.r.prompts.length, 0);
+    assert.deepEqual(seen, [{ scope: "owner", by: OWNER, voice: true }]);
+    assert.deepEqual(spoken.r.reacts.map((x) => x.emoji).slice(-1), ["👍"]);
+  });
 });
 
 test("private chat: an approval answer is handled before the queue and never reaches the chat", async () => {
@@ -210,16 +235,16 @@ test("private chat: an approval answer is handled before the queue and never rea
   assert.deepEqual(modified.r.sent.map((s) => s.text), ["Applied your change: start → 15:00"]);
 });
 
-test("private chat (soft approvals): a clarifying reply is sent and consumes the message; a judge failure notes it and the message still goes to the chat", async () => {
+test("private chat (soft approvals): a clarifying reply is sent and consumes the message; the reply parts of a multi-answer are sent too", async () => {
   const clarify = rig({ approval: { outcome: "clarify", reply: "Without Bob? Say so and I will redo it." } });
   await clarify.pipeline.handleIncoming(owner(), msg({ text: "yes but not Bob" }));
   assert.equal(clarify.r.prompts.length, 0); // not a chat message
   assert.deepEqual(clarify.r.sent.map((s) => s.text), ["Without Bob? Say so and I will redo it."]);
   assert.deepEqual(clarify.r.reacts.map((x) => x.emoji), ["💬"]);
-  const note = rig({ approval: { outcome: "none", note: "I couldn't tell whether that answers it, so it is still open." } });
-  await note.pipeline.handleIncoming(owner(), msg({ text: "hmm" }));
-  assert.equal(note.r.prompts.length, 1); // flows on as a normal message
-  assert.match(note.r.sent[0]!.text, /still open/);
+  const partly = rig({ approval: { outcome: "approved", reply: "Okay. Should I do the third one now?" } });
+  await partly.pipeline.handleIncoming(owner(), msg({ text: "yes to the first two" }));
+  assert.deepEqual(partly.r.sent.map((x) => x.text), ["Okay. Should I do the third one now?"]);
+  assert.deepEqual(partly.r.reacts.map((x) => x.emoji), ["👍"]);
   // an edit never answers an approval: the answer check is not even called
   const asked: string[] = [];
   const edited = rig({ approval: (t: string) => (asked.push(t), { outcome: "approved" }) });
@@ -302,7 +327,7 @@ test("private chat: a run in progress finishes and sends; messages that arrive m
   assert.match(r.sent[0]!.text, /answer to: one/);
 });
 
-test("private chat: approval answers skip the settling pause and the burst; a spoken yes is no approval", async () => {
+test("private chat: approval answers skip the settling pause and the burst; in strict a spoken yes is no approval", async () => {
   const h = hold();
   const { r, pipeline } = rig({ wait: h.wait, approval: (text: string) => ({ outcome: text === "yes" ? "approved" : "none" }) });
   const a = pipeline.handleIncoming(owner(), msg({ text: "check my calendar", timestamp: 111 }));
@@ -312,9 +337,11 @@ test("private chat: approval answers skip the settling pause and the burst; a sp
   h.release();
   await a;
   assert.deepEqual(r.prompts, ["check my calendar"]); // the "yes" is not part of the prompt
-  const spoken = rig({ approval: { outcome: "approved" }, transcript: async () => "yes" });
-  await spoken.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 3 } }));
-  assert.equal(spoken.r.prompts.length, 1); // a voice "yes" is a message, not an approval
+  await withStyle("strict", async () => {
+    const spoken = rig({ approval: { outcome: "approved" }, transcript: async () => "yes" });
+    await spoken.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 3 } }));
+    assert.equal(spoken.r.prompts.length, 1); // a voice "yes" is a message, not an approval
+  });
 });
 
 test("groups: a burst is one run through the shared burst; messages during a run wait for the next one", async () => {
@@ -576,4 +603,55 @@ test("log: a finished turn says which conversation kind replied or failed", asyn
   assert.ok(lines.includes("owner: run failed: boom"));
   assert.ok(lines.includes("group replied (2 chars, $0.0100)"));
   assert.ok(lines.includes("group: run failed: boom"));
+});
+
+// ---- approvals in groups: the same code, scoped to the group, answered by any member ----
+
+test("groups: a question asked in the group is answered by ANY member's message (the owner's check is not needed), and the answer is not a group message", async () => {
+  const seen: any[] = [];
+  const got: any[] = [];
+  const { r, pipeline } = rig({
+    approval: (text: string, ctx: any) => (seen.push([text, ctx]), ctx.scope === GID ? { outcome: "approved" } : { outcome: "none" }),
+    admitGroup: async (_c: unknown, m: unknown) => void got.push(m),
+  });
+  await pipeline.handleIncoming(group(GID), gmsg({ from: "+15555550105", text: "yes please", addressedToMe: false }));
+  assert.deepEqual(seen, [["yes please", { scope: GID, by: "+15555550105", voice: false }]]); // scoped to this group, with who answered
+  assert.deepEqual(got, []); // consumed as the answer: the group brain never sees it
+  assert.deepEqual(r.reacts.map((x) => [x.emoji, x.groupId]), [["👍", GID]]);
+  // a message that is not an answer goes on to the group as always
+  const admitted: unknown[] = [];
+  const other = rig({ approval: { outcome: "none" }, admitGroup: async (_c: unknown, m: unknown) => void admitted.push(m) });
+  await other.pipeline.handleIncoming(group(GID), gmsg({ text: "hello", timestamp: 31 }));
+  assert.equal(admitted.length, 1);
+});
+
+test("groups: a clarifying reply and a reaction go to the group; a reaction on a question of another conversation is ignored", async () => {
+  const reactions: any[] = [];
+  const { r, pipeline } = rig({
+    approval: { outcome: "clarify", reply: "Which one?" },
+    reactionApproval: (emoji: string, ts: number, scope: string, by: string) => (reactions.push([emoji, ts, scope, by]), scope === GID && ts === 700 ? "approved" : "ignored"),
+  });
+  await pipeline.handleIncoming(group(GID), gmsg({ text: "yes but not Bob", timestamp: 40 }));
+  assert.deepEqual(r.sent.map((x) => [x.text, x.groupId]), [["Which one?", GID]]);
+  await pipeline.handleIncoming(group(GID), { type: "reaction", r: { from: "+15555550105", emoji: "👍", targetTimestamp: 700, isRemove: false, direct: false, group: { id: GID } } as any });
+  await pipeline.handleIncoming(group(GID), { type: "reaction", r: { from: "+15555550105", emoji: "👍", targetTimestamp: 701, isRemove: false, direct: false, group: { id: GID } } as any });
+  assert.deepEqual(reactions, [["👍", 700, GID, "+15555550105"], ["👍", 701, GID, "+15555550105"]]);
+  // the owner's chat asks about its own scope only
+  const own = rig({ reactionApproval: (_e: string, _t: number, scope: string) => (scope === "owner" ? "approved" : "ignored") });
+  await own.pipeline.handleIncoming(owner(), react({ targetTimestamp: 700 }));
+  assert.equal(own.r.prompts.length, 0);
+});
+
+test("groups: an edit never answers an approval, a picture caption neither, and a voice message does (as a message for the model)", async () => {
+  const asked: any[] = [];
+  const got: any[] = [];
+  const { r, pipeline } = rig({ approval: (t: string, ctx: any) => (asked.push([t, ctx.voice]), { outcome: "approved" }), admitGroup: async (_c: unknown, m: unknown) => void got.push(m), transcript: async () => "yes do it" });
+  await withStyle("conversational", async () => {
+    await pipeline.handleIncoming(group(GID), gmsg({ text: "yes", timestamp: 50, edited: { targetTimestamp: 49 } } as any));
+    await pipeline.handleIncoming(group(GID), gmsg({ text: "yes", timestamp: 51, image: { id: "p.jpg", size: 3 } } as any));
+    assert.deepEqual(asked, []);
+    await pipeline.handleIncoming(group(GID), gmsg({ text: "", timestamp: 52, audio: { id: "a.aac", size: 3 }, addressedToMe: false }));
+    assert.deepEqual(asked, [["yes do it", true]]);
+  });
+  void r;
 });

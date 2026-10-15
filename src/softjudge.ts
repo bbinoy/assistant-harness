@@ -1,16 +1,17 @@
 import { audit, type Source } from "./audit.ts";
 import { runJudge, withTimeout } from "./approvaljudge.ts";
 import type { JudgeIO } from "./judgespare.ts";
-import { answerPrompt, checkPrompt, parseAnswer, parseCheck, parseWrite, writePrompt, type AnswerJudgement, type OpenView, type Recent } from "./softprompt.ts";
+import { factsOf, validateQuestion } from "./questionfacts.ts";
+import { answerPrompt, parseAnswer, parseWrite, writePrompt, type AnswerJudgement, type OpenView, type Recent } from "./softprompt.ts";
 
 // The model calls of APPROVAL_STYLE soft / conversational. Each one fails closed: a thrown error, a timeout, an error result, an
 // answer for the wrong task or one that is not an exact enum value is "no answer" (undefined / inaccurate), never an approval.
 
 // Resolves undefined when the judge gave no usable answer; the caller then treats the reply as a normal chat message.
-export async function judgeAnswer(reply: string, open: readonly OpenView[], recent: readonly Recent[], quotedId?: string, io: JudgeIO = {}, timeoutMs = 20_000): Promise<AnswerJudgement | undefined> {
+export async function judgeAnswer(reply: string, open: readonly OpenView[], recent: readonly Recent[], quote?: { id?: string; ended?: boolean; voice?: boolean }, io: JudgeIO = {}, timeoutMs = 20_000): Promise<AnswerJudgement | undefined> {
   const started = Date.now();
   try {
-    const r = await withTimeout(runJudge("answer", answerPrompt(reply, open, recent, quotedId), io), timeoutMs);
+    const r = await withTimeout(runJudge("answer", answerPrompt(reply, open, recent, quote), io), timeoutMs);
     const j = r && parseAnswer(r.out, open.map((o) => o.id));
     console.log(`judge: answer ${j ? `-> ${j.target} ${j.outcome}` : "no usable result"} (${Date.now() - started}ms${r?.warm ? ", warm" : ", cold"})`);
     return j;
@@ -23,48 +24,34 @@ export async function judgeAnswer(reply: string, open: readonly OpenView[], rece
 export interface QuestionInput {
   tool: string;
   args: Record<string, unknown>;
-  details: string; // the deterministic text (format.ts): ground truth, and the fallback
+  details: string; // the code-rendered text: ground truth for the facts the question must carry; never sent in conversational style
   recent: readonly Recent[];
   background: boolean;
   source: Source;
 }
-export interface Composed {
-  text: string; // what is sent as the question
-  written: boolean; // model-written (false: the code text)
-  attempts: number;
-  mismatches: string[]; // why the check refused a written question, one per try
-  failure?: string; // why the code text was used
-}
+export type Composed = { text: string; ms: number } | { text?: undefined; failure: string; ms: number };
 
-type Run = (task: "write" | "check", prompt: string) => Promise<unknown>;
-const viaJudge = (io: JudgeIO, ms: number): Run => async (task, prompt) => (await withTimeout(runJudge(task, prompt, io), ms))?.out;
+type Run = (prompt: string) => Promise<unknown>;
+const viaJudge = (io: JudgeIO, ms: number): Run => async (prompt) => (await withTimeout(runJudge("write", prompt, io), ms))?.out;
 
-// Conversational wording: a model writes the question, a second call that sees only the arguments and the question checks it. A
-// refused or failed write is retried once with the reason; after that the code text is used, so a divergence never reaches the
-// owner silently. Every mismatch is audited (with the full arguments) so the writer prompt can be tightened. Never throws.
+// Conversational wording: ONE model call writes the question; code checks that every address, URL, id, title, time, date, amount
+// and the words Cc / Bcc from the exact arguments appear in it (questionfacts.ts) and that no other address does. If anything
+// fails (error, timeout, junk, a missing fact) there is NO question and no retry: the caller does not ask, the action is not
+// approved, and the failure is audited with the full arguments. Never throws.
 export async function composeQuestion(q: QuestionInput, io: JudgeIO = {}, timeoutMs = 15_000, run: Run = viaJudge(io, timeoutMs)): Promise<Composed> {
-  const out: Composed = { text: q.details, written: false, attempts: 0, mismatches: [] };
-  let rejected: string | undefined;
-  for (let i = 0; i < 2; i++) {
-    out.attempts++;
-    try {
-      const text = parseWrite(await run("write", writePrompt({ ...q, rejected })));
-      if (!text) {
-        out.failure = "no usable question from the writer";
-        rejected = "the answer was empty or unusable";
-        continue;
-      }
-      const verdict = parseCheck(await run("check", checkPrompt({ tool: q.tool, args: q.args, details: q.details, question: text })));
-      if (verdict.accurate) return { ...out, text, written: true, failure: undefined };
-      rejected = verdict.reason ?? "the check could not confirm it";
-      out.mismatches.push(rejected);
-      out.failure = `check refused the question: ${rejected}`;
-      audit(q.tool, "question-mismatch", q.source, { attempt: i + 1, reason: rejected, question: text, details: q.details });
-    } catch (e) {
-      out.failure = (e as Error).message;
-      rejected = undefined;
-    }
+  const started = Date.now();
+  const facts = factsOf(q.args, q.details);
+  let failure: string;
+  try {
+    const text = parseWrite(await run(writePrompt({ ...q, required: facts.must })));
+    const wrong = text ? validateQuestion(text, facts) : "no usable question from the writer";
+    if (text && !wrong) return { text, ms: Date.now() - started };
+    failure = wrong!;
+    audit(q.tool, "question-failed", q.source, { reason: failure, question: text, details: q.details });
+  } catch (e) {
+    failure = (e as Error).message;
+    audit(q.tool, "question-failed", q.source, { reason: failure, details: q.details });
   }
-  console.log(`question: using the code text (${out.failure})`);
-  return out;
+  console.log(`question: not asked (${failure})`);
+  return { failure, ms: Date.now() - started };
 }

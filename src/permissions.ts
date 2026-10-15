@@ -19,6 +19,12 @@ export type Approve = (
 // A group run never asks the owner for anything.
 export const DENY_ALL: Approve = async () => ({ approved: false });
 
+// A group asks in its own group, and any member may answer there (approvals.ts scopes it). Set by main.ts; until then (and in tests)
+// a group asks nobody. Which tools a group run has at all is policy.ts, unchanged: today none of them asks.
+let groupApprover: (groupId: string) => Approve = () => DENY_ALL;
+export const setGroupApprover = (fn: typeof groupApprover) => void (groupApprover = fn);
+export const approveInGroup = (groupId: string): Approve => groupApprover(groupId);
+
 // Pulls id-like fields (id, conversationId, messageId...) out of tool input for the audit log.
 export function idsOf(input: Record<string, unknown>): Record<string, unknown> | undefined {
   const ids = Object.fromEntries(
@@ -38,6 +44,10 @@ const MAIL_OUT = new Set(["send", "reply", "forward"]); // actions that put mail
 // slow status check). A DECLINED call can still be asked again.
 const DONE_WINDOW_MS = 30 * 60_000;
 const done = new Map<string, number>();
+// A call whose approval could not be confirmed (no question could be written, a reply could not be read) may be asked again by the
+// agent, but only this many times in total, so the loop cannot spin.
+const MAX_FAILED_ASKS = 2;
+const failures = new Map<string, number>();
 // Keys sorted at every depth. (A JSON.stringify key-list replacer also filters NESTED keys, so two events that differ only
 // in start.dateTime had the same key and the second was refused as "already done".)
 const stable = (v: unknown): unknown => (Array.isArray(v) ? v.map(stable) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, stable(x)])) : v);
@@ -103,8 +113,18 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
         return { behavior: "allow", updatedInput: input };
       }
     }
+    if ((failures.get(key) ?? 0) >= MAX_FAILED_ASKS) {
+      audit(tool, "deny-reask-cap", source);
+      return { behavior: "deny", message: `Asking ${OWNER} about this exact call failed ${MAX_FAILED_ASKS} times, so it is not asked again. Do not retry it; tell ${OWNER} in your own words what you could not do, and drop it unless they bring it up again.` };
+    }
     audit(tool, "ask-sent", source); // logged before the wait, so a stuck approval is visible
     const d = await approve(description, { tool, input }, signal);
+    if (d.failure) {
+      failures.set(key, (failures.get(key) ?? 0) + 1);
+      audit(tool, "ask-failed", source, { reason: d.failure });
+      return { behavior: "deny", message: `The approval could not be confirmed: ${d.failure}. Nothing was executed.${d.feedback ? ` ${OWNER} had replied: ${JSON.stringify(d.feedback)}.` : ""} Decide yourself: ask ${OWNER} again in your own words (at most ${MAX_FAILED_ASKS - (failures.get(key) ?? 0)} more time(s) for this call), rephrase the request, or drop the action.` };
+    }
+    failures.delete(key);
     if (judged) audit(tool, "judge-vs-owner", source, { judge: judged.decision, ownerApproved: d.approved });
     audit(
       tool,

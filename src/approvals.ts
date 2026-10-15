@@ -35,13 +35,13 @@ export interface Decision {
   approved: boolean;
   feedback?: string;
   updatedInput?: Record<string, unknown>; // set when approved with an accepted edit
+  failure?: string; // the approval could not be run (no question could be written, the reply could not be read): nothing was approved, the agent is told why and decides what to do
 }
 
 export interface Answer {
   outcome: "none" | "approved" | "declined" | "feedback" | "modified" | "clarify";
   changes?: Change[]; // for "modified": what was applied
   reply?: string; // for "clarify": what to tell the owner (the message was consumed; the approval stays open)
-  note?: string; // for "none" in soft styles: say this to the owner, and the message still goes on as a normal one
 }
 
 // One open question. Kept in `open` keyed by the timestamp of its "Approve?" message (known once the send resolved).
@@ -54,8 +54,9 @@ interface Open {
   done: boolean;
   shown: string; // the question text as sent (soft styles: what the judge is shown)
   askedAt: number;
-  source: "chat" | "background";
+  source: "chat" | "background" | "group";
   warmed: boolean; // counted in openChat (holds the shared judge)
+  scope: string; // the conversation it was asked in (Conversation.key): an answer from another conversation never applies
 }
 const open = new Map<number, Open>();
 let openChat = 0; // approvals that hold the warm judge (chat ones; in soft styles background ones too): they share the one warm judge
@@ -72,24 +73,22 @@ const REACT_YES = new Set(["👍", "✅"]);
 const REACT_NO = new Set(["👎", "❌"]);
 
 // A reaction counts only if it is on an open "Approve?" message itself; it answers that one.
-export function answerReaction(emoji: string, targetTimestamp: number): "approved" | "declined" | "ignored" {
+export const OWNER_SCOPE = "owner";
+export function answerReaction(emoji: string, targetTimestamp: number, scope: string = OWNER_SCOPE, by?: string): "approved" | "declined" | "ignored" {
   const current = open.get(targetTimestamp);
-  if (!current || current.done) return "ignored";
+  if (!current || current.done || current.scope !== scope) return "ignored";
   const e = emoji.replace(/[︎️]/g, ""); // drop variation selectors
-  if (REACT_YES.has(e)) {
-    current.resolve({ approved: true });
-    return "approved";
-  }
-  if (REACT_NO.has(e)) {
-    current.resolve({ approved: false });
-    return "declined";
+  if (REACT_YES.has(e) || REACT_NO.has(e)) {
+    if (settings.approvalStyle !== "strict") audit(current.call.tool, "answer-reaction", current.source, { by, scope, approved: REACT_YES.has(e), question: current.shown });
+    current.resolve({ approved: REACT_YES.has(e) });
+    return REACT_YES.has(e) ? "approved" : "declined";
   }
   return "ignored";
 }
 
-function newestChat(): Open | undefined {
+function newestChat(mine: readonly Open[]): Open | undefined {
   let best: Open | undefined;
-  for (const o of open.values()) if (!o.background && !o.done && (!best || o.ts > best.ts)) best = o;
+  for (const o of mine) if (!o.background && !o.done && (!best || o.ts > best.ts)) best = o;
   return best;
 }
 
@@ -103,18 +102,26 @@ export interface SoftDeps {
   judge?: typeof judgeAnswer;
   recent?: (reply: string) => Recent[];
 }
-export async function answer(text: string, onJudging: () => void, quote?: { timestamp: number }, deps: SoftDeps = {}): Promise<Answer> {
-  if (open.size === 0) return { outcome: "none" };
-  if (settings.approvalStyle !== "strict") return answerSoft(text, onJudging, quote, deps);
+// `scope`: the conversation the message arrived in; only approvals asked there can be answered. `by`: who wrote it (audit).
+// `voice`: the text is an automatic transcript of a voice message.
+export interface Ctx {
+  scope?: string;
+  by?: string;
+  voice?: boolean;
+}
+export async function answer(text: string, onJudging: () => void, quote?: { timestamp: number }, deps: SoftDeps = {}, ctx: Ctx = {}): Promise<Answer> {
+  const scope = ctx.scope ?? OWNER_SCOPE;
+  const mine = [...open.values()].filter((o) => o.scope === scope && !o.done);
+  if (mine.length === 0) return { outcome: "none" };
+  if (settings.approvalStyle !== "strict") return answerSoft(text, onJudging, quote, deps, ctx, mine);
   const t = normalise(text);
   const yn = YES.has(t) || NO.has(t);
   let target = quote && quote.timestamp !== 0 ? open.get(quote.timestamp) : undefined;
-  if (target?.done) target = undefined;
+  if (target?.done || target?.scope !== scope) target = undefined;
   if (!target) {
-    target = newestChat();
+    target = newestChat(mine);
     if (!target && yn) {
-      const all = [...open.values()].filter((o) => !o.done);
-      if (all.length === 1) target = all[0];
+      if (mine.length === 1) target = mine[0];
     }
   }
   if (!target) return { outcome: "none" };
@@ -152,79 +159,98 @@ export async function answer(text: string, onJudging: () => void, quote?: { time
   return { outcome: "feedback" };
 }
 
-const DEFAULT_CLARIFY = (label: string) => `I'm not sure that was a yes, so "${label}" is still open. Say yes or no (or react 👍 / 👎).`;
-const whichOne = (os: readonly Open[]) => `Which one do you mean? ${os.map((o, i) => `${i + 1}) ${o.label}`).join("  ")}. Reply to the question itself, or react to it.`;
+const CLARIFY = (label: string) => `I'm not sure that was a yes, so "${label}" is still open. Say yes or no (or react 👍 / 👎).`;
+const WHICH = "Which one do you mean? Reply to the question itself, or react to it.";
 
-// APPROVAL_STYLE soft / conversational. The judge reads the reply against ALL open approvals; code keeps only what is unambiguous and
-// cheap to check: a quoted reply routes to its approval, and an exact yes / no with exactly one approval open is taken as is.
-// Fails closed: no usable judgement means no approval, the message goes on as chat and the owner is told the approvals are still open.
-async function answerSoft(text: string, onJudging: () => void, quote: { timestamp: number } | undefined, deps: SoftDeps): Promise<Answer> {
-  const live = [...open.values()].filter((o) => !o.done).sort((a, b) => a.ts - b.ts);
-  if (live.length === 0) return { outcome: "none" };
+// APPROVAL_STYLE soft / conversational. Code decides only two things: an exact plain yes / no that unambiguously targets the one
+// open approval (it is the single open one, or the reply quotes it), and the safety invariants below. Every other message is read by
+// the judge against ALL open approvals (which one(s), yes / no / an allowed edit / something else); nothing is matched by words
+// here and there is no length rule. Invariants kept in code: only this function (a message after the ask) or a reaction resolves an
+// approval; an edit applies only through applyChanges (the allow-list); any judge failure or unusable answer approves nothing, is
+// logged and is silent: the message goes on as a normal chat message.
+async function answerSoft(text: string, onJudging: () => void, quote: { timestamp: number } | undefined, deps: SoftDeps, ctx: Ctx, mine: readonly Open[]): Promise<Answer> {
+  const live = [...mine].sort((a, b) => a.ts - b.ts);
   const t = normalise(text);
-  const yn = YES.has(t) || NO.has(t);
-  const quoted = quote && quote.timestamp !== 0 ? open.get(quote.timestamp) : undefined;
-  if (quote && !quoted && closed.has(quote.timestamp) && yn) {
-    // A yes to a question that is already gone must not become the answer to another one.
-    return { outcome: "clarify", reply: `That question is no longer open. Still open: ${live.map((o) => `"${o.label}"`).join(", ")}.` };
-  }
+  const found = quote && quote.timestamp !== 0 ? open.get(quote.timestamp) : undefined;
+  const quoted = found?.scope === (ctx.scope ?? OWNER_SCOPE) ? found : undefined;
   const direct = quoted && !quoted.done ? quoted : live.length === 1 && !quote ? live[0] : undefined;
-  if (direct && yn) {
-    audit(direct.call.tool, "answer-fast", direct.source, { reply: text, approved: YES.has(t), question: direct.shown });
+  if (direct && (YES.has(t) || NO.has(t))) {
+    audit(direct.call.tool, "answer-fast", direct.source, { by: ctx.by, scope: direct.scope, reply: text, approved: YES.has(t), question: direct.shown });
     direct.resolve({ approved: YES.has(t) });
     return { outcome: YES.has(t) ? "approved" : "declined" };
   }
-  if (text.length > 600) return { outcome: "none" }; // a long message is a new request, not an answer
-  const cands = quoted && !quoted.done ? [quoted] : live;
-  const ids = new Map(cands.map((o, i) => [`A${i + 1}`, o]));
-  const views: OpenView[] = cands.map((o, i) => ({
+  const ids = new Map(live.map((o, i) => [`A${i + 1}`, o]));
+  const views: OpenView[] = live.map((o, i) => ({
     id: `A${i + 1}`,
     background: o.background,
     ageMs: Date.now() - o.askedAt,
     question: o.shown,
     args: isModifiable(o.call.tool) ? o.call.input : undefined,
   }));
+  const quotedId = quoted && [...ids].find(([, o]) => o === quoted)?.[0];
   onJudging();
   const started = Date.now();
-  const j = await (deps.judge ?? judgeAnswer)(text, views, (deps.recent ?? recentChat)(text), quoted && !quoted.done ? "A1" : undefined);
-  const stillOpen = () => cands.filter((o) => !o.done);
-  const record = (what: string, o?: Open) => audit(o?.call.tool ?? "approval", `answer-${what}`, o?.source ?? "chat", { reply: text, question: o?.shown, verdict: j && `${j.target} ${j.outcome}`, reason: j?.reason, ms: Date.now() - started });
-  if (!j) {
-    record("failed");
+  const j = await (deps.judge ?? judgeAnswer)(text, views, (deps.recent ?? (ctx.scope === undefined || ctx.scope === OWNER_SCOPE ? recentChat : () => []))(text), quote && quote.timestamp !== 0 || ctx.voice ? { id: quotedId, ended: !!quote && !quoted && closed.has(quote.timestamp), voice: ctx.voice } : undefined);
+  const stillOpen = () => live.filter((o) => !o.done);
+  const record = (what: string, o?: Open) => audit(o?.call.tool ?? "approval", `answer-${what}`, o?.source ?? "chat", { by: ctx.by, scope: o?.scope ?? ctx.scope, reply: text, question: o?.shown, verdict: j && `${j.target} ${j.outcome}`, reason: j?.reason, ms: Date.now() - started });
+  // "Yes to both": each part is applied to its own approval; only the parts that are not a plain yes / no stay open, and the
+  // reply asks about those alone. An unknown or ended approval is skipped, never guessed.
+  const multi = (parts: readonly { target: string; outcome: "approve" | "decline" | "other" }[], reply?: string): Answer => {
+    let approved = 0;
+    let declined = 0;
+    for (const p of parts) {
+      const o = ids.get(p.target);
+      if (!o || o.done || p.outcome === "other") continue;
+      record(p.outcome === "approve" ? "approved" : "declined", o);
+      o.resolve({ approved: p.outcome === "approve" });
+      if (p.outcome === "approve") approved++;
+      else declined++;
+    }
     const left = stillOpen();
-    return left.length ? { outcome: "none", note: left.length === 1 ? `I couldn't tell whether that answers "${left[0]!.label}", so it is still open. Reply yes or no, or react 👍 / 👎.` : `I couldn't tell whether that answers one of the ${left.length} open questions, so they are still open. Reply to one, or react 👍 / 👎.` } : { outcome: "none" };
+    const ask = left.length ? (reply ?? WHICH) : undefined;
+    if (approved + declined === 0) return { outcome: "clarify", reply: ask };
+    return { outcome: approved ? "approved" : "declined", ...(ask ? { reply: ask } : {}) };
+  };
+  if (!j) {
+    // Not approved, and not silent for the agent: every open chat approval returns the owner's words as feedback, so the agent
+    // decides itself whether to ask again, rephrase or drop the action (permissions.ts caps the re-asks). Background ones stay open.
+    record("failed");
+    const chat = live.filter((o) => !o.background && !o.done);
+    for (const o of chat) o.resolve({ approved: false, feedback: text, failure: "the owner's reply could not be read as a yes or no" });
+    return chat.length ? { outcome: "feedback" } : { outcome: "none" };
   }
   if (j.outcome === "unrelated") return record("unrelated"), { outcome: "none" };
+  if (j.outcome === "multi") return multi(j.answers ?? [], j.reply);
   if (j.target === "unclear") {
     record("unclear");
-    return { outcome: "clarify", reply: j.reply ?? whichOne(stillOpen()) };
+    return { outcome: "clarify", reply: j.reply ?? WHICH };
   }
   const current = ids.get(j.target);
   if (!current || current.done) return { outcome: "none" }; // resolved or expired while the judge thought
-  const clarify = (reply?: string): Answer => (record("clarify", current), { outcome: "clarify", reply: reply ?? DEFAULT_CLARIFY(current.label) });
   const call = current.call;
   if (j.outcome === "decline") {
     record("declined", current);
     current.resolve({ approved: false });
     return { outcome: "declined" };
   }
-  if (j.outcome === "other") return clarify(j.reply);
-  // Only a short message can consent: a long one is not a yes, whatever the judge made of it.
-  if (text.length > 200) return clarify(j.reply);
   if (j.outcome === "approve") {
     record("approved", current);
     current.resolve({ approved: true });
     return { outcome: "approved" };
   }
-  const patched = applyChanges(call.tool, call.input, j.changes ?? []);
-  if (patched) {
-    record("modified", current);
-    current.resolve({ approved: true, updatedInput: patched });
-    return { outcome: "modified", changes: j.changes };
+  if (j.outcome === "approve_modified") {
+    const patched = applyChanges(call.tool, call.input, j.changes ?? []);
+    if (patched) {
+      record("modified", current);
+      current.resolve({ approved: true, updatedInput: patched });
+      return { outcome: "modified", changes: j.changes };
+    }
+    record("feedback", current); // a change code does not allow (a recipient): not approved, the agent gets the words and re-proposes
+    current.resolve({ approved: false, feedback: text });
+    return { outcome: "feedback" };
   }
-  record("feedback", current); // a change code does not allow (a recipient): not approved, the agent gets the words and re-proposes
-  current.resolve({ approved: false, feedback: text });
-  return { outcome: "feedback" };
+  record("clarify", current); // other: a condition, a delay, a question...; the approval stays open
+  return { outcome: "clarify", reply: j.reply ?? CLARIFY(current.label) };
 }
 
 // Ask the owner. Resolves "not approved" on no, timeout, or an aborted turn. Several may be open at once.
@@ -234,7 +260,7 @@ export function request(
   description: string,
   call: { tool: string; input: Record<string, unknown> },
   signal?: AbortSignal,
-  opts: { background?: boolean; question?: string } = {},
+  opts: { background?: boolean; question?: string; scope?: string } = {},
 ): Promise<Decision> {
   if (signal?.aborted) return Promise.resolve({ approved: false });
   const background = !!opts.background;
@@ -258,7 +284,7 @@ export function request(
       resolve(d);
     };
     const warmed = !background || settings.approvalStyle !== "strict"; // soft styles judge every reply, background approvals included
-    const entry: Open = { resolve: finish, label, call, background, ts: 0, done: false, shown, askedAt: Date.now(), source: background ? "background" : "chat", warmed };
+    const entry: Open = { resolve: finish, label, call, background, ts: 0, done: false, shown, askedAt: Date.now(), source: opts.scope && opts.scope !== OWNER_SCOPE ? "group" : background ? "background" : "chat", warmed, scope: opts.scope ?? OWNER_SCOPE };
     const onAbort = () => finish({ approved: false });
     const timer = setTimeout(
       () => finish({ approved: false }, `expired after ${formatWait(minutes)}${background ? " (background)" : ""}`),

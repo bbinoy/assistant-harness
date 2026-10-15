@@ -11,7 +11,7 @@ import { userInput, type Picture } from "./image.ts";
 import { createMemoryServer } from "./memory-tools.ts";
 import { announceMemoryChanges, noteWritten, recordMemoryChange } from "./memorynotice.ts";
 import { LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, readNotes } from "./notes.ts";
-import { DENY_ALL, makeCanUseTool, setChatOwnerMessage, type Approve } from "./permissions.ts";
+import { approveInGroup, makeCanUseTool, setChatOwnerMessage, type Approve } from "./permissions.ts";
 import { backgroundSystem, briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem } from "./persona.ts";
 import { hiddenTools } from "./policy.ts";
 import { OFFERED_SKILLS, PROFILES, type OwnerProfile } from "./profiles.ts";
@@ -299,7 +299,7 @@ export async function runGroupTurn(conv: GroupConv, style: string, build: (since
   const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
   const input = userInput(prompt, pictures);
   // The group's own warm process, if it is the one kept and nothing it was built from has changed (same group, session, prompt, notes index).
-  return runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, (abortController) => (io.query ?? query)({ prompt: input, options: { ...buildOptions(DENY_ALL, o, r.resume), abortController } }));
+  return runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, (abortController) => (io.query ?? query)({ prompt: input, options: { ...buildOptions(approveInGroup(conv.groupId!), o, r.resume), abortController } }));
 }
 
 // Keep ONE warm process for the group that spoke last, replacing another group's. Called when a message arrives for a
@@ -309,7 +309,7 @@ export function prepareGroupChat(conv: GroupConv, style: () => string, opts: { f
   const id = conv.groupId;
   if (!settings.warm || !id) return;
   if (!opts.force && groupSpare.has(id)) return void groupSpare.touch(id); // active group, already warm: keep it so
-  warmUp(groupSpare, id, groupRunOptions(conv, groupSystem({ style: style() })), chatResume(false, conv.sessionFile, "group"), "group", DENY_ALL, opts.start);
+  warmUp(groupSpare, id, groupRunOptions(conv, groupSystem({ style: style() })), chatResume(false, conv.sessionFile, "group"), "group", approveInGroup(id), opts.start);
 }
 
 // ---- the other owner runs ----
