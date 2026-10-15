@@ -29,16 +29,18 @@ export function createTellServer(key: string) {
   return createSdkMcpServer({
     name: "tell",
     version: "1.0.0",
+    alwaysLoad: true, // its schema is in the prompt from the first call: a deferred tool is only found by searching for it, and the model never does
     tools: [
       tool(
         "tell_user",
-        "Send a short message to the person right now while you keep working, for example \"On it, researching now.\" Use it once at the start of a longer task (research, browsing, several lookups), in their language and your usual voice, and again only if the work is genuinely long. Not for quick answers, not for trivial steps, and never for the result itself: that is your final reply.",
+        "Send a short message to the person right now while you keep working, for example \"On it, researching now.\" Call it BEFORE your first other tool call on any task that will take more than about ten seconds (research, browsing, several lookups, retrying or continuing earlier work), once, in their language and your usual voice, and again only if the work is genuinely long. Not for quick answers, not for trivial steps, and never for the result itself: that is your final reply.",
         { message: z.string().min(1).max(500).describe("One short line, as you would write it in the chat.") },
         async ({ message }) => {
           const sink = sinks.get(key);
           const text = sink ? await sink(message).catch(() => "Could not send it; carry on.") : "Nobody to tell right now; carry on.";
           return { content: [{ type: "text" as const, text }] };
         },
+        { alwaysLoad: true },
       ),
     ],
   });
