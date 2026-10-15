@@ -1,0 +1,36 @@
+// Downloads the headless Chromium that the browse tool uses (src/browse.ts), into state/browse/browsers inside the data folder:
+// nothing global, and deleting that folder removes it. Runs after `npm install` (never fails the install) and as `npm run setup:browse`.
+// Skipped with BROWSE=off or BROWSE_SKIP_INSTALL=1. About 100 MB.
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const quiet = process.argv.includes("--quiet");
+const say = (m: string) => (quiet ? undefined : console.log(m));
+const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
+const dataDir = process.env.HARNESS_DATA_DIR ? resolve(process.env.HARNESS_DATA_DIR) : root;
+const browsers = join(dataDir, "state", "browse", "browsers");
+
+if (process.env.BROWSE === "off" || process.env.BROWSE_SKIP_INSTALL === "1") {
+  say("browse: skipped (BROWSE=off or BROWSE_SKIP_INSTALL=1)");
+  process.exit(0);
+}
+try {
+  const have = existsSync(browsers) && readdirSync(browsers).some((d) => d.startsWith("chromium_headless_shell-"));
+  if (have) {
+    say(`browse: browser already in ${browsers}`);
+    process.exit(0);
+  }
+  const mcp = createRequire(import.meta.url).resolve("@playwright/mcp/package.json");
+  const cli = join(dirname(createRequire(mcp).resolve("playwright/package.json")), "cli.js");
+  mkdirSync(browsers, { recursive: true });
+  console.log(`browse: downloading the headless browser into ${browsers} ...`);
+  execFileSync(process.execPath, [cli, "install", "chromium-headless-shell"], { stdio: quiet ? "ignore" : "inherit", env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: browsers } });
+  console.log("browse: ready");
+} catch (e) {
+  // An install without network, or without the package yet, must not break npm install: doctor and the tool say what is missing.
+  console.warn(`browse: could not set up the browser (${(e as Error).message.split("\n")[0]}). Run npm run setup:browse later; until then the browse tool says it is not set up.`);
+  if (!quiet) process.exit(1);
+}

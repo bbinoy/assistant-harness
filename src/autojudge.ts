@@ -37,7 +37,7 @@ const PEOPLE_FIELD = /^(attendees?|guests?|invitees?|recipients?)$/i;
 const LOCAL_HOST = /(^|\.)(localhost|local|internal|lan|home|corp|test|invalid|example|localdomain|intranet|private)$/i;
 // Public names that resolve to a private or loopback address anyway (127.0.0.1.nip.io, 192-168-1-5.sslip.io, localtest.me), so a
 // "named public host" can still point inside this machine's network.
-const REBINDING_HOST = /(^|\.)(nip\.io|sslip\.io|xip\.io|localtest\.me|lvh\.me|vcap\.me|lacolhost\.com|traefik\.me)$|(^|[.-])\d{1,3}([.-])\d{1,3}\2\d{1,3}\2\d{1,3}($|[.-])/i;
+export const REBINDING_HOST = /(^|\.)(nip\.io|sslip\.io|xip\.io|localtest\.me|lvh\.me|vcap\.me|lacolhost\.com|traefik\.me)$|(^|[.-])\d{1,3}([.-])\d{1,3}\2\d{1,3}\2\d{1,3}($|[.-])/i;
 export function isPlainWebAddress(raw: unknown): boolean {
   if (typeof raw !== "string" || raw.length > 300) return false;
   let u: URL;
@@ -59,6 +59,9 @@ export function isJudgeable(tool: string, input: Record<string, unknown>, source
   switch (actionOf(tool)) {
     case "web-fetch":
       return isPlainWebAddress(input.url);
+    case "browser-nav": // the browse run (browse.ts) already vetoed private and non-web addresses; the judge asks whether the page fits the task
+    case "browser-input": // typed text: payment and login fields were already denied by code
+      return true;
     case "calendar-write":
       return Object.entries(input).every(([k, v]) => !PEOPLE_FIELD.test(k) || v === undefined || v === null || (Array.isArray(v) && v.length === 0) || v === "");
     case "send":

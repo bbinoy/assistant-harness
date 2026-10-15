@@ -16,6 +16,7 @@ const TOOLS: Record<string, { icon: string; title: string; labels?: Record<strin
   mcp__claude_ai_Gmail__forward: { icon: "✉️", title: "Forward email" },
   mcp__claude_ai_Gmail__reply: { icon: "✉️", title: "Reply to email" },
   mcp__claude_ai_Google_Drive__share_file: { icon: "🔗", title: "Share a Drive file" },
+  mcp__browse__browse: { icon: "🌐", title: "Start a browser task", labels: { task: "Task" } },
   WebFetch: { icon: "🌐", title: "Open a web page", labels: { url: "Address", prompt: "To find out" } },
 };
 

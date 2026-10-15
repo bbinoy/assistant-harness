@@ -37,6 +37,7 @@ Built with [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) o
 
 - **Daily brief.** A short version on Signal (a pep talk and a focus), the full one by email.
 - **Calendar radar.** It looks at your calendar every few hours and about an hour before your next meeting, and messages you only for a meeting about to start (with its prep) or a clash. Capped per day.
+- **A browser for forms and bookings.** A separate, sandboxed browser worker (headless, no logins, no cookies, no access to your mail, calendar or notes) can look things up behind a web form and fill one in for you, in your chat, in a background job or in a group. Anything that books, buys or sends is shown first with the real button and the values entered; card, password and code fields are never filled (it hands you the link instead). `BROWSE=off` switches it off. [Safety](docs/SAFETY.md).
 - **Schedules in plain notes.** "Every morning post a fun fact", "nudge us on Friday", "brief at 6:30", "no radar on weekends": write it in chat (or in a group) and it works.
 - **One gate.** A small model checks the clock, the notes and the recent log and decides whether to act. It chooses only *when*. What a run may do is fixed in code, and a daily spend limit applies.
 

@@ -64,9 +64,28 @@ export interface GmailReaders {
 let gmailReaders: GmailReaders | undefined;
 export const setGmailReaders = (r: GmailReaders | undefined) => void (gmailReaders = r);
 
-export function makeCanUseTool(approve: Approve, source: Source, memoryDir: string | undefined, judgeContext?: string, judge: typeof judgeAction = judgeAction): CanUseTool {
+// A run that needs rules a flag cannot say per call (the browse run: which element a click is, which address is fine) passes a guard.
+// It sees every call first: deny it, allow it, turn it into a question with code-built text (`ask`), or leave it to the manifest
+// (`defer`; `description` is then what the owner and the judge read).
+export interface GuardDecision {
+  kind: "deny" | "allow" | "ask" | "defer";
+  reason?: string;
+  description?: string;
+  once?: boolean; // an approved call is not repeated
+}
+export interface CallGuard {
+  decide: (tool: string, input: Record<string, unknown>) => Promise<GuardDecision>;
+}
+
+export function makeCanUseTool(approve: Approve, source: Source, memoryDir: string | undefined, judgeContext?: string, judge: typeof judgeAction = judgeAction, guard?: CallGuard): CanUseTool {
   return async (tool, input, { signal }) => {
-    const verdict = classify(tool, input, source, memoryDir);
+    const g = guard ? await guard.decide(tool, input) : undefined;
+    if (g?.kind === "deny") {
+      audit(tool, "deny-guard", source);
+      return { behavior: "deny", message: g.reason ?? `${tool} is blocked and cannot be used.` };
+    }
+    const base = classify(tool, input, source, memoryDir);
+    const verdict = g?.kind === "allow" && base !== "deny" ? "allow" : g?.kind === "ask" && base !== "deny" ? "ask" : base;
     if (verdict === "allow") {
       // Reads log tool + decision only. Writes also log the ids they touch (ids, never
       // content), so "what did it archive?" can always be answered from the audit log.
@@ -85,12 +104,13 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     // A small model's second opinion, only for what code puts on the floor (autojudge.ts). In shadow
     // mode it only logs; the owner is asked either way.
     const key = callKey(tool, input);
-    const doneAt = once(tool) ? done.get(key) : undefined;
+    const onceOnly = g ? !!g.once : once(tool);
+    const doneAt = onceOnly ? done.get(key) : undefined;
     if (doneAt !== undefined && Date.now() - doneAt < DONE_WINDOW_MS) {
       audit(tool, "deny-already-done", source);
       return { behavior: "deny", message: "That exact call was already approved and done a moment ago. Do not repeat it; check its result once if you need to be sure it went through." };
     }
-    let description = describeCall(tool, input);
+    let description = g?.description ?? describeCall(tool, input);
     let view: MailView | undefined;
     if (MAIL_OUT.has(actionOf(tool))) {
       // Show what the mail client holds right now, not what the model says it is sending (a send of a draft), and the same view for
@@ -111,12 +131,12 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     let judged: Verdict | undefined;
     const [ownerMessage, ...earlier] = [...chatOwnerMessages].reverse();
     // A chat send is judged against the owner's words; with none on record there is nothing to judge it against.
-    if (settings.autoApprove !== "off" && isJudgeable(tool, input, source, view) && (view === undefined || (source === "chat" && ownerMessage !== undefined))) {
+    if (settings.autoApprove !== "off" && g?.kind !== "ask" && isJudgeable(tool, input, source, view) && (view === undefined || (source === "chat" && ownerMessage !== undefined))) {
       judged = await judge({ source, description, ownerMessage: source === "chat" ? ownerMessage : undefined, earlier: source === "chat" ? earlier.reverse() : undefined, task: source === "chat" ? undefined : judgeContext });
       audit(tool, `judge-${judged.decision}`, source, { reason: judged.reason, mode: settings.autoApprove });
       if (mayAutoApprove(settings.autoApprove, source, judged)) {
         audit(tool, "auto-approved", source, { reason: judged.reason }); // silent on purpose: logged, never announced (npm run report shows them)
-        if (once(tool)) remember(key);
+        if (onceOnly) remember(key);
         return { behavior: "allow", updatedInput: input };
       }
     }
@@ -128,7 +148,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       d.approved ? (d.updatedInput ? "ask-approved-modified" : "ask-approved") : d.feedback ? "ask-feedback" : "ask-declined",
       source,
     );
-    if (d.approved && once(tool)) remember(key);
+    if (d.approved && onceOnly) remember(key);
     if (d.approved) return { behavior: "allow", updatedInput: d.updatedInput ?? input };
     return {
       behavior: "deny",

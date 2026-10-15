@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { query, startup, type HookCallbackMatcher, type Options, type SDKMessage, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
+import { browseStatus, browserServer, browseSystem, createBrowseServer, resultText, withText, type BrowseGuard, type BrowseMode } from "./browse.ts";
+import { HIDDEN_BROWSER_TOOLS } from "./browserules.ts";
 import { pausing, RunTimeout, withCeiling, type Ceiling } from "./ceiling.ts";
 import { chatResume, forgetUnresumable, type Resume } from "./chatsession.ts";
 import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
@@ -45,6 +47,8 @@ interface RunOptions {
   // Fires after a tool call succeeds. Used to capture the brief the agent sends.
   onToolSuccess?: (tool: string, input: unknown, response?: unknown) => void;
   onFirstOutput?: () => void; // the model's first message arrived (timing only)
+  guard?: BrowseGuard; // the browse run: decides each browser call and remembers the page (browse.ts)
+  maxMinutes?: number; // a wall-clock ceiling of its own (the browse run), else the chat or background one
   judgeContext?: string; // an unattended job: the instructions it was given, shown to the approval judge (autojudge.ts)
 }
 
@@ -70,6 +74,25 @@ function profileOptions(name: OwnerProfile, extra: { onToolSuccess?: RunOptions[
 export const runProfile = (name: OwnerProfile, prompt: string, approve: Approve, extra: { onToolSuccess?: RunOptions["onToolSuccess"]; judgeContext?: string } = {}): Promise<AgentReply> =>
   runAgent(prompt, approve, profileOptions(name, extra));
 
+// The browse sub-run (browse.ts calls this through the entry tool): a fresh run with the browser, under the guard. A group's run has
+// smaller limits and no one to ask (commit steps are refused by the guard).
+function browseRunOptions(guard: BrowseGuard, mode: BrowseMode): RunOptions {
+  const group = mode === "group";
+  return {
+    source: PROFILES.browse.source,
+    systemPrompt: browseSystem(mode),
+    maxTurns: group ? settings.browseGroupMaxTurns : PROFILES.browse.maxTurns,
+    maxBudgetUsd: group ? settings.browseGroupMaxUsd : PROFILES.browse.maxBudgetUsd,
+    maxMinutes: group ? settings.browseGroupMaxMinutes : settings.browseMaxMinutes,
+    outputFormat: PROFILES.browse.outputSchema,
+    judgeContext: guard.task,
+    guard,
+  };
+}
+
+// The `run` of a browse entry tool (browse.ts BrowseContext): the browse run under its guard, asking `approve` for commit steps.
+export const browseRunner = (mode: BrowseMode, approve: Approve) => (prompt: string, guard: BrowseGuard): Promise<AgentReply> => runAgent(prompt, approve, browseRunOptions(guard, mode));
+
 export function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
   // After a successful tool call: announce a note change on the phone (chat), and report the
   // call to whoever asked (the brief captures what it sent).
@@ -85,9 +108,16 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
           async (input) => {
             if (input.hook_event_name !== "PostToolUse") return {};
             await afterTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, input.tool_response);
+            // The browse run: a page view is read into the result (the server only links its snapshot file), cut to size and remembered
+            // by the guard (the refs, the real names of the controls, what was typed) before it is cleaned like any other result.
+            let response: unknown = input.tool_response;
+            if (opts.guard && input.tool_name.startsWith("mcp__browser__")) {
+              const shaped = opts.guard.shape(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, resultText(response));
+              if (shaped !== undefined) response = withText(response, shaped);
+            }
             // Clean at the door: the model reads the cleaned result, not the original (counts only in the log).
-            const cleaned = cleanToolOutput(input.tool_name, input.tool_response);
-            if (!cleaned) return {};
+            const cleaned = cleanToolOutput(input.tool_name, response);
+            if (!cleaned) return response === input.tool_response ? {} : { hookSpecificOutput: { hookEventName: "PostToolUse" as const, updatedToolOutput: response } };
             console.log(`clean: tool result ${input.tool_name}: ${cleaned.removed} hidden character(s) removed, ${cleaned.hidden} hidden HTML part(s) left out, ${cleaned.cut} cut`);
             return { hookSpecificOutput: { hookEventName: "PostToolUse" as const, updatedToolOutput: cleaned.output } };
           },
@@ -97,7 +127,21 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
   };
 
   // A group run: no connectors, no user settings, no skills; its memory server is the only MCP server.
-  const isolated = opts.source === "group";
+  const browsing = opts.source === "browse"; // the browse sub-run: the browser and web search, nothing of the owner's
+  const isolated = opts.source === "group" || browsing;
+  // The entry tool (browse.ts) for the runs that may browse: the owner's chat, a wake-up and a group. It starts a separate browse run.
+  const mode: BrowseMode = opts.source === "group" ? "group" : "owner";
+  const browseTool =
+    settings.browse && (opts.source === "chat" || opts.source === "background" || opts.source === "group")
+      ? createBrowseServer({ mode, groupId: opts.memory?.groupId, run: browseRunner(mode, mode === "group" ? DENY_ALL : approve) })
+      : undefined;
+  const status = browsing ? browseStatus() : undefined;
+  if (status && !status.ok) throw new Error(`browsing is not set up: ${status.reason}`);
+  const mcpServers: Options["mcpServers"] = browsing && opts.guard && status?.ok
+    ? { browser: browserServer(status, opts.guard.outDir) }
+    : opts.memory || browseTool
+      ? { ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
+      : undefined;
   return {
     model: settings.model,
     outputFormat: opts.outputFormat,
@@ -105,7 +149,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     // background, and a slow one (seen: ~30s) means the first call runs without its tools,
     // then the tool list changes mid-session, which also throws away the prompt cache. With
     // chat's warm process (below) this wait happens before the message arrives.
-    env: { ...process.env, MCP_CONNECTION_NONBLOCKING: "false" },
+    env: { ...process.env, MCP_CONNECTION_NONBLOCKING: "false", ...(browsing ? { MAX_MCP_OUTPUT_TOKENS: "60000" } : {}) }, // a browse page view is cut by code (browse.ts) well below this, so the SDK never writes one to a file the run cannot read
     // Rendered fresh on every request (not recorded once per session): the prompt carries
     // today's date and the last brief, and a change must apply to the very next message.
     // Chat uses Claude Code's preset prompt because that is where the SDK's auto-memory
@@ -116,13 +160,13 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
       ? { type: "preset", preset: "claude_code", append: opts.systemPrompt, snapshot: false }
       : { type: "custom", prompt: opts.systemPrompt, snapshot: false },
     settings: opts.memory ? { autoMemoryEnabled: true, autoMemoryDirectory: opts.memory.dir } : { autoMemoryEnabled: false },
-    mcpServers: opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : undefined,
+    mcpServers,
     strictMcpConfig: isolated || undefined, // nothing private is even loaded
     resume,
     // Built-ins: Skill, and for chat Read / Write / Edit (confined to the notes folder by
     // policy.ts) and WebSearch / WebFetch (search freely, open a page only after approval). No Bash. Everything else the agent can do is an MCP tool (Mailbird,
     // Notion, Calendar...), gated by canUseTool.
-    tools: isolated ? ["Read", "Write", "Edit", "WebSearch"] : opts.memory ? ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"] : opts.source === "background" ? ["Skill", "WebSearch", "WebFetch"] : ["Skill"],
+    tools: browsing ? ["WebSearch"] : isolated ? ["Read", "Write", "Edit", "WebSearch"] : opts.memory ? ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"] : opts.source === "background" ? ["Skill", "WebSearch", "WebFetch"] : ["Skill"],
     // "user" loads user-scope MCP servers (Mailbird) and CLAUDE.md; the skills offered are
     // limited to the bundled ones below.
     // Not "project": there is no project here.
@@ -131,8 +175,8 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     // other skills would cost context on every call and are none of its business).
     plugins: isolated ? undefined : [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
     skills: isolated ? undefined : (opts.skills ? [...opts.skills] : OFFERED_SKILLS),
-    disallowedTools: isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
-    canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir, opts.judgeContext),
+    disallowedTools: browsing ? HIDDEN_BROWSER_TOOLS : isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
+    canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir, opts.judgeContext, undefined, opts.guard),
     hooks,
     maxTurns: opts.maxTurns,
     maxBudgetUsd: opts.maxBudgetUsd,
@@ -146,7 +190,7 @@ async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOptions, prev
   let first = false;
   let lastContext: number | undefined; // the last model call of the main loop shows how big the context is
   for await (const message of stream) {
-    if (message.type === "system" && message.subtype === "init" && opts.source !== "group") { // a group run has no connectors: its tool list says nothing about them
+    if (message.type === "system" && message.subtype === "init" && opts.source !== "group" && opts.source !== "browse") { // a group run has no connectors: its tool list says nothing about them
       recordToolsSeen(message.tools);
       recordConnectors(message.tools, message.mcp_servers);
     }
@@ -176,10 +220,10 @@ async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOptions, prev
 // The one place every run passes: chat, groups, wake-ups, brief, radar, the mail handler. On the ceiling the query is aborted, the
 // timeout is logged and audited, and the rejection takes the usual error path (a notice, rate-limited in groups; the queue moves on).
 // A chat run (the owner's chat and groups alike) and a background run have their own limits (settings.ts).
-async function underCeiling<T>(source: Source, run: (c: Ceiling) => Promise<T>): Promise<T> {
+async function underCeiling<T>(source: Source, run: (c: Ceiling) => Promise<T>, minutes?: number): Promise<T> {
   const chat = source === "chat" || source === "group";
   try {
-    return await withCeiling((chat ? settings.runMaxMinutesChat : settings.runMaxMinutesBackground) * 60_000, run);
+    return await withCeiling((minutes ?? (chat ? settings.runMaxMinutesChat : settings.runMaxMinutesBackground)) * 60_000, run);
   } catch (e) {
     if (e instanceof RunTimeout) {
       console.error(`run: timed out after ${e.minutes} minutes (${source})`);
@@ -192,7 +236,7 @@ async function underCeiling<T>(source: Source, run: (c: Ceiling) => Promise<T>):
 export async function runAgent(prompt: string, approve: Approve, opts: RunOptions, io: { query?: typeof query } = {}): Promise<AgentReply> {
   const { resume, previousCost } = opts.sessionFile ? chatResume(true, opts.sessionFile) : { resume: undefined, previousCost: 0 };
   // A background run is always cold, so the approval it waits on belongs to this run and does not count against its ceiling.
-  return underCeiling(opts.source, (c) => consume((io.query ?? query)({ prompt, options: { ...buildOptions(pausing(c, approve), opts, resume), abortController: c.controller } }), opts, previousCost)).catch((e) => {
+  return underCeiling(opts.source, (c) => consume((io.query ?? query)({ prompt, options: { ...buildOptions(pausing(c, approve), opts, resume), abortController: c.controller } }), opts, previousCost), opts.maxMinutes).catch((e) => {
     if (opts.sessionFile) forgetUnresumable(opts.sessionFile, e, opts.source);
     throw e;
   });

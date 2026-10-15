@@ -35,7 +35,8 @@ const MB = "mcp__mailbird__";
 const GM = "mcp__claude_ai_Gmail__";
 const CAL = "mcp__claude_ai_Google_Calendar__";
 const NOTION = "mcp__claude_ai_Notion__";
-const DRIVE = "mcp__claude_ai_Google_Drive__";
+const BR = "mcp__browser__browser_";
+const DRIVE ="mcp__claude_ai_Google_Drive__";
 
 // Reversible or draft-only upkeep that chat and the daily brief may do unattended.
 const ROUTINE: FlagSpec = { chat: "no", brief: "no" };
@@ -82,12 +83,21 @@ export const MANIFEST: readonly ToolEntry[] = [
   ...rows("mcp__claude_ai_Google_Docs__", "docs", "read", "no", "read_doc"),
   ...rows("mcp__claude_ai_Google_Docs__", "docs", "doc-write", "yes", "update_doc"),
   // --- the assistant's own: web, skills, notes ---
-  ...rows("", "builtin", "web-search", "no", "WebSearch", { only: ["chat", "background"] }), // a search query is a small channel out, accepted where the owner is behind the run
+  ...rows("", "builtin", "web-search", "no", "WebSearch", { only: ["chat", "background", "browse"] }), // a search query is a small channel out, accepted where the owner is behind the run
   ...rows("", "builtin", "web-fetch", { chat: "auto", background: "auto", brief: "auto", radar: "auto" }, "WebFetch", { only: ["chat", "background", "brief", "radar"] }), // never the mail handler; the plain-address veto is code
   ...rows("", "builtin", "skill", "no", "Skill"), // which skills load is limited by the SDK's skills allowlist (agent.ts)
   // The file tools are chat only; WHICH path is code (policy.ts classify), a flag cannot say that.
   ...rows("", "builtin", "note-file", "no", "Read Write Edit", { only: ["chat"] }),
   ...rows("mcp__memory__", "memory", "memory", "no", "forget_note search_logs undo_dream", { only: ["chat"] }),
+  // --- the browse sub-task (browse.ts). The entry tool: the owner's chat starts a run freely, a wake-up asks first (a group's rights are in classify). ---
+  ...rows("mcp__browse__", "browse", "browse", { chat: "no", background: "yes" }, "browse", { only: ["chat", "background"] }),
+  // The browser server's tools, in the browse run only (denied everywhere else). Which element a click or a field is, and which
+  // addresses are fine, is code (browse.ts): reads and plain clicks run, a page address and typed text go to the approval judge, a
+  // click that commits (book, buy, send...) is turned into an ask by code, payment and login fields are denied. Any other tool of the server is denied there.
+  ...rows(BR, "browse", "browser-read", "no", "snapshot find wait_for tabs hover navigate_back click press_key", { only: ["browse"] }),
+  ...rows(BR, "browse", "browser-nav", "auto", "navigate", { only: ["browse"] }),
+  ...rows(BR, "browse", "browser-input", "auto", "type fill_form select_option", { only: ["browse"] }),
+  ...rows(BR, "browse", "browser-dialog", "yes", "handle_dialog", { only: ["browse"] }),
 ];
 
 // Read verbs, matched against the tool's own name (after the server name), ignoring a "notion-" style prefix: both

@@ -1,6 +1,7 @@
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { Source } from "./audit.ts";
 import type { Category } from "./notes.ts";
+import { BROWSE_SCHEMA } from "./browse.ts";
 import { RADAR_SCHEMA } from "./radar-rules.ts";
 import { settings } from "./settings.ts";
 
@@ -16,7 +17,7 @@ export const OFFERED_SKILLS = offeredSkills(settings.mail, settings.mailProvider
 // HOW a run is allowed to work, fixed in code and named: the policy source (policy.ts: which tools are allowed, asked,
 // denied), the system prompt, the skills offered, the turn and budget limits and the output schema. A Task (tasks.ts)
 // names one; the gate can choose a task but never edit a profile. `notes` are the note categories injected as data.
-export type ProfileName = "brief" | "radar" | "background" | "group";
+export type ProfileName = "brief" | "radar" | "background" | "group" | "browse";
 interface RunProfile {
   readonly source: Source;
   readonly maxTurns: number;
@@ -35,6 +36,9 @@ export const PROFILES: Readonly<Record<ProfileName, RunProfile>> = {
   background: { source: "background", maxTurns: 20, maxBudgetUsd: 1.0, skills: OFFERED_SKILLS, notes: ["people", "scheduling", "context", "style", "brief", "setup", "voice"] },
   // A group's run: its own resumed session, its own notes folder as memory, nothing of the owner's (policy source "group").
   group: { source: "group", maxTurns: 8, maxBudgetUsd: 0.5, skills: OFFERED_SKILLS, notes: [] },
+  // The browse sub-task (browse.ts): a fresh run per task with the headless browser, web search and nothing else (no skills, no notes,
+  // no connectors, policy source "browse"); it answers with constrained JSON. A group's browse run has smaller limits (BROWSE_GROUP_*).
+  browse: { source: "browse", maxTurns: settings.browseMaxTurns, maxBudgetUsd: settings.browseMaxUsd, skills: [], outputSchema: BROWSE_SCHEMA, notes: [] },
 };
 
-export type OwnerProfile = Exclude<ProfileName, "group">;
+export type OwnerProfile = Exclude<ProfileName, "group" | "browse">;

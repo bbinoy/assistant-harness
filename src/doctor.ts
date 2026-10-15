@@ -9,6 +9,7 @@ import { spentToday } from "./budget.ts";
 import { inQuietHours } from "./actions.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused, localTime } from "./pause.ts";
+import { browseStatus, PLAYWRIGHT_MCP_VERSION, type BrowseStatus } from "./browse.ts";
 import { settings } from "./settings.ts";
 import { disconnected, NAMES, readConnectors } from "./connectors.ts";
 import { missingSetup, readNotes } from "./notes.ts";
@@ -33,6 +34,12 @@ export function gmailChecks(line: Line, o: { self: string | undefined; connector
   line(o.connector === undefined ? "warn" : o.connector, "Gmail connector available", o.connector === undefined ? "no run yet: start the agent, then run doctor again" : o.connector ? "" : "not available in the last run: connect Gmail in your Claude account (Settings, Connectors)");
   line(true, "Gmail archiving", o.archiveLive ? "live (GMAIL_ARCHIVE_LIVE=true)" : "LOG-ONLY (GMAIL_ARCHIVE_LIVE=false): it records would-archive and archives nothing; set true after the trial week");
   line(o.briefEmail && !o.self ? false : true, "brief by email", o.briefEmail ? "on: emailed to MAIL_SELF_ADDRESS only, plus the Signal summary" : "off (BRIEF_EMAIL=off): the brief goes to Signal only");
+}
+
+// The browse tool (BROWSE=on by default) needs the pinned @playwright/mcp (npm install) and its browser (npm run setup:browse). Off is a valid setup.
+export function browseCheck(line: Line, on: boolean, status: BrowseStatus): void {
+  if (!on) return line(true, "browse: off", "BROWSE=off");
+  line(status.ok, "browse: browser tool ready", status.ok ? `@playwright/mcp ${PLAYWRIGHT_MCP_VERSION}, headless Chromium; the tool is offered but reports "not set up" until this passes` : `${status.reason}; until then the browse tool tells the user it is not set up`);
 }
 
 // The skills that must ship with the repo for the configured setup.
@@ -126,6 +133,8 @@ export async function doctor() {
 
   const dream = readJson<{ lastRunAt?: string }>("state/dream.json", {});
   line(true, "nightly dream", settings.dream ? `once a day before the brief; last run ${dream.lastRunAt ? localTime(dream.lastRunAt) : "not yet"}` : "off (DREAM=off)");
+
+  browseCheck(line, settings.browse, browseStatus());
 
   line(true, "proactive radar", settings.proactive ? `chosen by your chat's gate, about every ${settings.radarMinutes} min (its "[radar] ran" lines are in the log)` : "off (PROACTIVE=off)");
 

@@ -93,6 +93,10 @@ The skills are `daily-brief` (the brief's structure), `mailbird` (triage and dra
 
 **Keep the agent's view of tools in step with the skills.** To save cost and time the model only sees four Notion tools (search, fetch, create-pages, update-page), and the Gmail, Drive, Docs and trading connectors are hidden. If a skill you write needs another tool, add it to `NOTION_TOOLS` or remove the connector from `HIDDEN_CONNECTORS` in `.env`; otherwise that skill silently fails.
 
+## Browser (forms and bookings)
+
+On by default (`BROWSE=on`). `npm install` fetches the pinned `@playwright/mcp` and runs `npm run setup:browse`, which downloads a headless Chromium (about 100 MB) into `state/browse/browsers`, not anywhere global; delete that folder to remove it. If the download failed (offline, `BROWSE_SKIP_INSTALL=1`), run `npm run setup:browse` yourself; until then the browse tool answers "not set up" and `npm run doctor` says what is missing. `BROWSE_BROWSER_PATH` points it at a Chromium or Chrome you already have. `BROWSE=off` removes the tool from every run. A real-world check that costs a few cents: `npm run browse:smoke` (example.com, the httpbin pizza form up to but not including its submit button; `-- submit` shows the approval text a commit step produces, declined; `-- big` a large page). See [SAFETY](SAFETY.md) for what it can and cannot do.
+
 ## Daily use
 
 - **Chat**: message yourself. Replies are formatted with Signal's native styles (bold, italic, strikethrough, monospace).
