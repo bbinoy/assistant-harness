@@ -327,7 +327,7 @@ test("makeApprove: sends the written question and audits the exact arguments", a
   const seen: any[] = [];
   const request = (async (_s: unknown, desc: string, call: unknown, _a: unknown, opts: unknown) => (seen.push({ desc, opts }), { approved: true })) as any;
   let composed: { text?: string; ms: number } = { text: "Move the dentist to 16:00?", ms: 5 };
-  const approve = makeApprove(async () => 1, false, request, (async () => composed) as any);
+  const approve = makeApprove(async () => 1, { request, compose: (async () => composed) as any });
   await approve("details", { tool: CAL, input: { a: 1 } }, new AbortController().signal);
   assert.equal(seen[0].opts.question, "Move the dentist to 16:00?");
   composed = { ms: 5, failure: "x" } as never;

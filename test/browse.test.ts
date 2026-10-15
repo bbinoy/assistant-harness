@@ -285,7 +285,7 @@ test("a group browse run: a commit click asks in that group, a member's yes lets
   const { setGroupApprover, approveInGroup, DENY_ALL } = await import("../src/permissions.ts");
   const posted: { groupId: string; text: string }[] = [];
   let ts = 1000;
-  setGroupApprover((groupId) => makeApprove(async (t) => (posted.push({ groupId, text: t }), ++ts), false, undefined, async (q) => ({ text: q.details, ms: 0 }), groupId));
+  setGroupApprover((groupId) => makeApprove(async (t) => (posted.push({ groupId, text: t }), ++ts), { compose: async (q) => ({ text: q.details, ms: 0 }), scope: groupId }));
   try {
     const g = onPage(guard("group"));
     const canUse = asCall(makeCanUseTool(approveInGroup("g-browse"), "browse", undefined, undefined, judgeAuto, g));
