@@ -225,6 +225,7 @@ src/messages.ts      the log of every message the assistant sent (with Signal ti
 src/edit.ts          edited and deleted messages, the pure parts: same text after normalisation, the prompt note, who may edit (pure, tested)
 src/summarize.ts     the small model that writes that summary
 src/conversation.ts  the one pipeline for the private chat and every group: read receipt, voice in/out, record, run, [[react]]/[[voice]]/[[silent]], quote threading, typing, error notice, a serial queue per conversation. A conversation is data made only by owner() and group(id)
+src/conversationmodel.ts  Conversation (owner() / group(id)), the pipeline's types and cleanIncoming; conversation.ts re-exports them
 src/timing.ts        the per-turn timing line (durations only)
 src/warmslot.ts      the slot that holds one warm model process (the owner's, the latest group's and the gate's), and the fallback to a cold start
 src/gate.ts          the one gate (message or clock): prompt, strict parsing
