@@ -9,7 +9,8 @@ import { Mailbird } from "./mailbird.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";
-import { triageBatch, type MailInput } from "./triage.ts";
+import { RateLimitError } from "./errors.ts";
+import { triageBatch, type MailInput, type Triage } from "./triage.ts";
 
 // The heartbeat: every few minutes (not at night), list the inboxes with NO model call.
 // Only when something new arrived does a model classify it (one batch), and then the
@@ -158,7 +159,14 @@ async function fetchInputs(mb: MailSource, mails: NewMail[]): Promise<MailInput[
 async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: HeartbeatHooks, triage: typeof triageBatch = triageBatch): Promise<NewMail[]> {
   console.log(`heartbeat: ${fresh.length} new conversation(s)`);
 
-  const results = await triage(await fetchInputs(mb, fresh));
+  let results: Triage[];
+  try {
+    results = await triage(await fetchInputs(mb, fresh));
+  } catch (e) {
+    if (!(e instanceof RateLimitError)) throw e;
+    console.error("heartbeat: usage limit hit, the mail stays unseen and is retried next tick");
+    return fresh;
+  }
   const plan = planActions(results, { maxArchives: settings.maxArchivesPerTick });
   const decision: string[] = results.map((t) => (settings.heartbeatLive ? "kept" : `would-${t.label}`));
   const extra: Record<number, Record<string, unknown>> = {};

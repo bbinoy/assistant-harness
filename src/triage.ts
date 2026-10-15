@@ -1,5 +1,6 @@
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { recordCost } from "./budget.ts";
+import { failure, RateLimitError } from "./errors.ts";
 import { memoryFor } from "./notes.ts";
 import { clean, defuseLines, defuseTags, LIMITS, oneLine as sanitizeOneLine } from "./sanitize.ts";
 import { OWNER } from "./settings.ts";
@@ -115,14 +116,19 @@ export function formatMails(mails: MailInput[]): string {
 }
 
 // One model call for a group of emails. Missing or invalid entries fall back to read_later.
-async function classifyGroup(mails: MailInput[], memory: string): Promise<Triage[]> {
+// A usage limit throws RateLimitError instead: that is not a verdict on the mail, so the caller retries it later.
+async function classifyGroup(mails: MailInput[], memory: string, run: typeof query): Promise<Triage[]> {
   const out: Triage[] = mails.map(() => fallback("classifier unavailable"));
+  let lastError: string | undefined; // the SDK reports a refused call as an assistant error code, even when the result says "success"
   try {
-    for await (const message of query({ prompt: formatMails(mails), options: options(memory) })) {
+    for await (const message of run({ prompt: formatMails(mails), options: options(memory) })) {
+      if (message.type === "assistant" && message.error) lastError = message.error;
       if (message.type !== "result") continue;
       const o = message.subtype === "success" && !message.is_error ? (message.structured_output as any) : undefined;
       console.log(`triage: ${mails.length} email(s), ${message.subtype}, $${message.total_cost_usd.toFixed(4)}`);
       recordCost(message.total_cost_usd);
+      const refused = failure(lastError, message.subtype);
+      if (refused instanceof RateLimitError) throw refused;
       if (!Array.isArray(o?.items)) {
         console.error(`triage fallback: subtype=${message.subtype} structured=${o ? "invalid" : "missing"}`);
         break;
@@ -139,13 +145,14 @@ async function classifyGroup(mails: MailInput[], memory: string): Promise<Triage
       break;
     }
   } catch (e) {
+    if (e instanceof RateLimitError) throw e;
     console.error("triage error:", (e as Error).message);
   }
   return out;
 }
 
-// Classifies all new mail. Returns one Triage per input, same order.
-export async function triageBatch(mails: MailInput[]): Promise<Triage[]> {
+// Classifies all new mail. Returns one Triage per input, same order. Throws RateLimitError when the usage limit is hit.
+export async function triageBatch(mails: MailInput[], run: typeof query = query): Promise<Triage[]> {
   const results: Triage[] = mails.map(() => fallback("not classified"));
   const memory = memoryFor(["triage", "people"]);
   const suspicious = mails.map((m) => INSTRUCTION_LIKE.test(`${m.subject}\n${m.body}`));
@@ -154,12 +161,12 @@ export async function triageBatch(mails: MailInput[]): Promise<Triage[]> {
   const normal = mails.map((_, i) => i).filter((i) => !suspicious[i]);
   for (let at = 0; at < normal.length; at += BATCH_SIZE) {
     const idx = normal.slice(at, at + BATCH_SIZE);
-    const group = await classifyGroup(idx.map((i) => mails[i]!), memory);
+    const group = await classifyGroup(idx.map((i) => mails[i]!), memory, run);
     idx.forEach((i, k) => (results[i] = group[k]!));
   }
   for (let i = 0; i < mails.length; i++) {
     if (!suspicious[i]) continue;
-    results[i] = (await classifyGroup([mails[i]!], memory))[0]!;
+    results[i] = (await classifyGroup([mails[i]!], memory, run))[0]!;
     // Never archived, whatever the model said.
     if (results[i]!.label === "archive") results[i] = { ...results[i]!, label: "read_later", protected: true };
     results[i] = { ...results[i]!, reason: `suspicious text; ${results[i]!.reason}`.slice(0, 120) };
