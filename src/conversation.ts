@@ -10,6 +10,7 @@ import { NOTES_DIR } from "./notes.ts";
 import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
 import { OWNER_SESSION_FILE } from "./session.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
+import type { TellSink } from "./telluser.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
@@ -92,6 +93,7 @@ export type Incoming = { type: "message"; m: IncomingMessage } | { type: "reacti
 // What one run needs. The caller (the owner's path here, the group brain in group.ts) builds it.
 interface RunHooks {
   firstOutput: () => void; // the model produced its first message (timing only)
+  tell?: TellSink; // the model's tell_user tool (telluser.ts), for a conversation, not a reaction or a wake-up: sends an interim text message at once
 }
 
 interface Turn {
@@ -321,8 +323,23 @@ export function createPipeline(deps: PipelineDeps) {
     const background = !!turn.reaction || !!turn.background; // a reaction or a wake-up is no conversation: no typing, no icons
     if (!background) status(conv, "👀", turn.target); // 👀 working, ✅ answered, ⚠️ failed, each replacing the last
     const typing = background ? undefined : holdTyping(conv, turn.timing); // already showing if the decision to answer came earlier
+    // tell_user: an interim message goes out at once as plain text under the answer's rules (sanitiser in out.reply, quote, [[silent]] sends nothing).
+    const tell: TellSink | undefined = background ? undefined : async (raw) => {
+      const words = splitReaction(splitVoice(raw).text).text.trim(); // never voice or a reaction before the work is done
+      if (!words || SILENT.test(words)) return "Nothing to send.";
+      const quote = turn.threadUnder && (conv.threadAlways || shouldThread(!!turn.hadQuote, now() - started)) ? turn.threadUnder : undefined;
+      try {
+        await out.reply(words, { kind: turn.kind ?? "chat", quote, groupId: conv.groupId });
+      } catch (e) {
+        console.error(`${conv.kind}: tell_user failed:`, (e as Error).message);
+        return "Could not send it; carry on.";
+      }
+      console.log(`${conv.kind} tell_user sent (${words.length} chars)`);
+      if (typers.has(conv.key)) void signal.typing(false, conv.groupId); // sending clears "typing…" on the phone: still working
+      return "Sent. Carry on with the task.";
+    };
     try {
-      const { text, costUsd } = await turn.run({ firstOutput: () => turn.timing?.mark("first") });
+      const { text, costUsd } = await turn.run({ firstOutput: () => turn.timing?.mark("first"), tell });
       turn.timing?.set("run", now() - started);
       console.log(`${conv.kind} replied (${text.length} chars${costUsd === undefined ? "" : `, $${costUsd.toFixed(4)}`})`);
       const sent = await deliver(conv, text, { ...turn, started });

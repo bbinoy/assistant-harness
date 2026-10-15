@@ -3,6 +3,7 @@ import { budgetSpent } from "./budget.ts";
 import { DELETED_LINE, editNote, sameText } from "./edit.ts";
 import { fence } from "./fence.ts";
 import { prepareGroupChat, runGroupTurn } from "./agent.ts";
+import type { TellSink } from "./telluser.ts";
 import { AuthError, RateLimitError } from "./errors.ts";
 import { askGate, prepareGate, styleLines, type Gate } from "./gate.ts";
 import { recordWake } from "./ledger.ts";
@@ -117,11 +118,11 @@ export interface GroupMessage {
 
 // Makes the prompt once it is known whether the session resumes: `since` is the newest line it has been shown.
 export type PromptBuilder = (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] };
-export type Runner = (build: PromptBuilder, ctx: { conv: Conversation; now: Date; firstOutput?: () => void }) => Promise<string>;
+export type Runner = (build: PromptBuilder, ctx: { conv: Conversation; now: Date; firstOutput?: () => void; tell?: TellSink }) => Promise<string>;
 
 // Chat replies and wake-ups both run here; the cost is logged as for an owner run.
-export const realRunner: Runner = async (build, { conv, now, firstOutput }) => {
-  const r = await runGroupTurn(conv, styleLines(now), build, firstOutput);
+export const realRunner: Runner = async (build, { conv, now, firstOutput, tell }) => {
+  const r = await runGroupTurn(conv, styleLines(now), build, firstOutput, {}, tell);
   if (r.costUsd !== undefined) console.log(`group run: ${r.text.length} chars, $${r.costUsd.toFixed(4)}`);
   return r.text.trim();
 };
@@ -259,7 +260,7 @@ export function createGroupBrain(brain: Brain) {
         st.running = true;
         const res = await pipeline
           .runTurn(conv, {
-            run: async (hooks) => ({ text: await (brain.run ?? realRunner)(build, { conv, now, firstOutput: hooks.firstOutput }) }),
+            run: async (hooks) => ({ text: await (brain.run ?? realRunner)(build, { conv, now, firstOutput: hooks.firstOutput, tell: hooks.tell }) }),
             timing: batch.timing,
             // The reaction and status icons go on the message that addressed us, not on a later one that was answered with it.
             target: live?.quote.author ? { author: live.quote.author, timestamp: live.quote.timestamp } : last.author ? { author: last.author, timestamp: last.timestamp } : undefined,
