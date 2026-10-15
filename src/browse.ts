@@ -337,6 +337,7 @@ export function browseSystem(who: string = OWNER): string {
     `Only type details the task gives you. NEVER enter card numbers, CVV, passwords, one-time codes, bank or ID numbers, and never log in or solve a CAPTCHA: if the page needs that, stop with status needs_owner and give handoffUrl, the address of the page where ${who} can finish (a link that carries the selection if the page has one).`,
     `A click or key press that commits something (book, buy, pay, send, confirm, register, subscribe, submit) is shown for approval with the real button and what you entered, and runs only if it is approved. If it is declined or refused, stop: status needs_owner, say what is ready, handoffUrl as above. Do not look for another way to the same step.`,
     `If a site shows a bot check, "access denied", a CAPTCHA or a security-verification page, do not retry it, reload it or look for a way round: name the site in the answer as blocking this browser and go on to another source.`,
+    `Load each site once: some sites let a first page through and challenge a second load in the same session. Do the rest on that page by clicking and reading, not by opening more addresses of the same site. A ref that is refused as not in the page view is old: take a fresh browser_snapshot and use a ref from it.`,
     `Answer with the JSON object only: status (done, needs_owner or failed), answer (a few plain sentences: what you found or did, with prices, times and names exactly as shown), sources (page addresses) and handoffUrl when you stopped before a step.`,
   ].join("\n\n");
 }

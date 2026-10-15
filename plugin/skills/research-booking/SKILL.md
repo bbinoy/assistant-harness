@@ -25,10 +25,15 @@ go on ("assuming 2 adults, Friday to Sunday").
 - Trains: get the connections first from the free timetable API, with `WebFetch` on
   `https://transport.opendata.ch/v1/connections?from=Zurich&to=Paris&date=2026-10-21&time=08:00&limit=6`
   (works for Swiss and cross-border routes: departure and arrival, duration, changes, train numbers; no prices).
-  Then prices from an operator or aggregator page via `browse`: `https://www.omio.com/trains/zurich/paris` lists
-  trains with fares for a day, and `https://www.thetrainline.com/en/train-times/zurich-to-paris` shows a "from"
-  price. Some sites block automated browsers and stay blocked (SNCF Connect, Rail Europe, bahn.de, Rome2rio, and
-  Trainline's live search): don't retry them, name them, and move on.
+  Then prices from an operator or aggregator page via `browse`. What works (checked 2026-10-15): the Omio route
+  page `https://www.omio.com/trains/zurich/london` (trains and fares per day) and the Trainline timetable page
+  `https://www.thetrainline.com/en/train-times/zurich-to-london` (a "from" price per route). Omio's Cloudflare
+  lets ONE page load through per browser session and challenges the next one ("Just a moment..."): in a browse
+  task, open an Omio page once and do the rest on it by clicking and reading (no second navigate, no second tab);
+  to look at another route, make a separate browse call. Never open several pages of one site in a row. Some
+  sites block automated browsers and stay blocked: SNCF Connect, Rail Europe, bahn.de, Rome2rio, and Trainline's
+  live search results (its search API answers 403 and a CAPTCHA, so "Something went wrong" is the final answer).
+  Don't retry them, don't try other URL forms of the same site, name them in one line, and move on.
 - No live fare anywhere: give the timetable, a best-known fare range clearly marked "unverified", and a link
   that opens the search for them. Trainline takes the route and date in the link
   (`https://www.thetrainline.com/book/results?journeySearchType=single&origin=urn%3Atrainline%3Ageneric%3Aloc%3A6401&destination=urn%3Atrainline%3Ageneric%3Aloc%3A4916&outwardDate=2026-10-21T09%3A00%3A00&outwardDateType=departAfter&passengers%5B%5D=1992-01-01`
