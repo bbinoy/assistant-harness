@@ -189,6 +189,14 @@ test("private chat: voice falls back to text when speech is off, too long, or fa
   assert.ok(long.r.sent.every((s) => !s.text.includes("voice didn't work")));
 });
 
+test("private chat: a [[voice]] reply in a language the voice does not speak is sent as text, not spoken", async () => {
+  const de = "Du hast heute zwei Termine, und der erste ist um halb elf. Viel Erfolg dir!";
+  const r = rig({ ready: true, run: async () => `[[voice]] ${de}` });
+  await r.pipeline.handleIncoming(owner(), msg({ text: "what is on today" }));
+  assert.equal(r.r.spoken.length, 0);
+  assert.deepEqual(r.r.sent.map((s) => s.text), [de]); // plain text, no "voice didn't work" note
+});
+
 test("private chat: a voice message that cannot be understood is explained, and a spoken yes is never an approval", async () => {
   const bad = rig({ separate: false, transcript: async () => { throw new Error("I couldn't hear any words in that voice message."); } });
   await bad.pipeline.handleIncoming(owner(), msg({ text: "", audio: { id: "a.aac", size: 10 } }));

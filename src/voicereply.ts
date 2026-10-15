@@ -2,6 +2,8 @@
 // Same shape as the emoji reaction (reaction.ts): strict and only at the very start, so ordinary
 // text can never be mistaken for it. Pure.
 
+import { settings } from "./settings.ts";
+
 const MARK = /^\s*\[\[voice\]\]\s*/i;
 
 // { voice, text }: the words to speak (if the model chose to speak), or the text to send.
@@ -18,9 +20,9 @@ export const SPOKEN_STYLE =
 // The voice option, added to every prompt that can produce a reply whenever speech is set up (private chat, group
 // messages addressed or not, wake-ups): the model chooses freely, whatever kind of message it answers. The notes
 // can overrule this default ("never use voice", "voice for pep talks").
-const VOICE_INVITE =
-  "you may answer by voice by starting your reply with [[voice]] and then only the words to say aloud, plain and at most about three minutes spoken (no markdown, emoji, links or lists); good for warm, personal or spoken-style replies such as a pep talk or a joke; keep exact, long or detailed answers (times, figures, links, lists) in text. If the notes say how to use voice (or never to), follow them. " +
+const voiceInvite = (languages: readonly string[]): string =>
+  "you may answer by voice by starting your reply with [[voice]] and then only the words to say aloud, plain and at most about three minutes spoken (no markdown, emoji, links or lists); good for warm, personal or spoken-style replies such as a pep talk or a joke; keep exact, long or detailed answers (times, figures, links, lists) in text. If the notes say how to use voice (or never to), follow them. The voice speaks only these languages: " + languages.join(", ") + ". If your reply is in any other language, answer in text and do not use [[voice]], since the voice would read it with the wrong accent. " +
   SPOKEN_STYLE;
 // Added to the words when a reply the model chose to speak had to go out as text, since the model may have announced a voice message.
 export const VOICE_FAILED_NOTE = "(voice didn't work this time, sending text)";
-export const voiceOption = (canSpeak: boolean): string => (canSpeak ? `Voice: ${VOICE_INVITE}.` : "");
+export const voiceOption = (canSpeak: boolean, languages: readonly string[] = settings.ttsLanguages): string => (canSpeak ? `Voice: ${voiceInvite(languages)}.` : "");

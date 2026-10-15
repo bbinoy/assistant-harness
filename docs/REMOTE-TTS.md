@@ -61,3 +61,7 @@ TTS_SAMPLE_TOKEN=some-long-random-string node examples/remote-tts-sample-server.
 Restart the agent, then ask Ted for a voice answer: you should receive a beep as a voice message. Replace `render` with a real model on a server you control.
 
 Back to the [README](../README.md) · [Safety](SAFETY.md) · [Setup](SETUP.md)
+
+## Languages
+
+The default Kokoro voice (`am_onyx`) speaks English only; read with it, German or French sounds wrong. `TTS_LANGUAGES` (default `en`) lists the languages your voice speaks. The assistant is told to use voice only for those, and as a safety net the code detects the language of every reply it was about to speak (a small built-in guess, no network); a reply in another language is sent as text and the skip is logged. With a multilingual voice (for example ElevenLabs `eleven_multilingual_v2`, or your own server), set e.g. `TTS_LANGUAGES=en,de,fr`. Short or unclear text is never held back.

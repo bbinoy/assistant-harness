@@ -13,6 +13,7 @@ import { shouldThread, withQuoteContext } from "./quote.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
+import { unsupportedForVoice } from "./lang.ts";
 import { clean, LIMITS, oneLine } from "./sanitize.ts";
 import { startTiming, type Timing } from "./timing.ts";
 import type { IncomingDeletion, IncomingMessage, IncomingReaction, Quote } from "@ted-personal-assistant/signal";
@@ -262,7 +263,10 @@ export function createPipeline(deps: PipelineDeps) {
     const chosen = splitVoice(replied);
     let spoken = false;
     let speechFailed = false;
-    if (chosen.voice && canSpeak() && chosen.voice.length <= MAX_SPOKEN_CHARS) speechFailed = !(spoken = await speak(conv, chosen.voice));
+    // Safety net: the voice speaks only TTS_LANGUAGES; text in another language would get a wrong accent, so it goes out as text.
+    const foreign = chosen.voice ? unsupportedForVoice(chosen.voice, settings.ttsLanguages) : undefined;
+    if (foreign) console.error(`voice skipped: reply looks ${foreign}, the voice speaks ${settings.ttsLanguages.join("/")}; sending text`);
+    if (chosen.voice && !foreign && canSpeak() && chosen.voice.length <= MAX_SPOKEN_CHARS) speechFailed = !(spoken = await speak(conv, chosen.voice));
     // The model may react instead of (or before) answering; its emoji then replaces the ✅ status.
     const { reaction, text } = splitReaction(spoken ? "" : chosen.text);
     const said = SILENT.test(text) ? "" : text;

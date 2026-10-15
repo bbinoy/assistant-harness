@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseLanguages } from "./lang.ts";
 import { isSafeUrl, type TtsProviderConfig } from "@ted-personal-assistant/signal/tts";
 
 // Every tunable in one place, read from the environment (see .env.example) and validated
@@ -175,6 +176,7 @@ export function loadSettings(env: Env) {
     voiceReplies: oneOf(env, "VOICE_REPLIES", "on", ["on", "off"] as const) === "on",
     ttsDir: kokoro.dir,
     ttsVoice: kokoro.voice,
+    ttsLanguages: parseLanguages(env.TTS_LANGUAGES), // languages the voice speaks (default en); a reply in another one goes out as text (src/lang.ts)
     ttsSpeed: kokoro.speed,
     // Optional remote speech (docs/REMOTE-TTS.md): sends the spoken words to a third party or to your own server.
     tts: ttsProvider(env, kokoro),
