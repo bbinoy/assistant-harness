@@ -17,7 +17,7 @@ import { dataPath, readJson } from "../src/state.ts";
 
 // MAIL_PROVIDER: mailbird is the default and behaves exactly as before (test/default-prompts.test.ts pins its prompts); none is chat only.
 
-test("settings: MAIL_PROVIDER defaults to mailbird, accepts none, rejects gmail (not built yet) and anything else", () => {
+test("settings: MAIL_PROVIDER defaults to mailbird, accepts none, accepts gmail, rejects anything else", () => {
   const d = loadSettings({});
   assert.equal(d.mailProvider, "mailbird");
   assert.equal(d.mail, true);
@@ -29,7 +29,7 @@ test("settings: MAIL_PROVIDER defaults to mailbird, accepts none, rejects gmail 
   assert.equal(none.mail, false);
   assert.ok(none.hiddenConnectors.includes("mcp__mailbird"), "without mail the Mailbird server is hidden from the model");
   assert.ok(none.hiddenConnectors.includes("mcp__claude_ai_Gmail"), "the usual hidden connectors stay hidden");
-  assert.throws(() => loadSettings({ MAIL_PROVIDER: "gmail" }), /MAIL_PROVIDER=gmail is not implemented yet/);
+  assert.equal(loadSettings({ MAIL_PROVIDER: "gmail" }).mailProvider, "gmail"); // test/gmail.test.ts covers the rest
   assert.throws(() => loadSettings({ MAIL_PROVIDER: "imap" }), /MAIL_PROVIDER must be one of none, mailbird, gmail \(got "imap"\)/);
   assert.ok(hiddenTools(["mcp__mailbird__get_message"], none).includes("mcp__mailbird"));
 });

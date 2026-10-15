@@ -2,6 +2,7 @@ import type { Source } from "./audit.ts";
 import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { isInside } from "./contain.ts";
+import { gmailVerdict, GMAIL_PREFIX } from "./gmailrules.ts";
 import { isNotePath } from "./notes.ts";
 import { settings } from "./settings.ts";
 import { entryFor, flagFor, isReadTool } from "./toolmanifest.ts";
@@ -66,12 +67,17 @@ const MAILBIRD = "mcp__mailbird__";
 // adds later is hidden from the run after the one that first saw it.
 export function hiddenTools(
   seen: readonly string[],
-  cfg: { hiddenConnectors: readonly string[]; notionTools: readonly string[]; mailbirdTools: readonly string[] } = settings,
+  cfg: { hiddenConnectors: readonly string[]; notionTools: readonly string[]; mailbirdTools: readonly string[]; gmailTools?: readonly string[] } = settings,
 ): string[] {
   const notion = new Set(cfg.notionTools);
   const mail = new Set(cfg.mailbirdTools);
+  const gmail = cfg.gmailTools ? new Set(cfg.gmailTools) : undefined; // undefined: the whole connector is hidden by prefix, or not in use
   const extra = seen.filter(
-    (t) => (t.startsWith(NOTION) && !notion.has(t.slice(NOTION.length))) || (t.startsWith(MAILBIRD) && !mail.has(t.slice(MAILBIRD.length))) || DENY.some((re) => re.test(t)),
+    (t) =>
+      (t.startsWith(NOTION) && !notion.has(t.slice(NOTION.length))) ||
+      (t.startsWith(MAILBIRD) && !mail.has(t.slice(MAILBIRD.length))) ||
+      (gmail && t.startsWith(GMAIL_PREFIX) && !gmail.has(t.slice(GMAIL_PREFIX.length))) ||
+      DENY.some((re) => re.test(t)),
   );
   return [...cfg.hiddenConnectors, ...new Set(extra)];
 }
@@ -92,6 +98,10 @@ export function classify(tool: string, input: Record<string, unknown>, source: S
   }
   if (DENY.some((re) => re.test(tool))) return "deny";
   if (LOCAL_FILE.test(JSON.stringify(input))) return "deny";
+  // Gmail's rules a flag cannot say: sensitive labels, attachment content, archive log-only, the brief to oneself (gmailrules.ts).
+  const gm = settings.mailProvider === "gmail";
+  const g = gmailVerdict(tool, input, source, { archiveLive: gm && settings.gmailArchiveLive, self: gm ? settings.mailSelfAddress : undefined, briefEmail: gm && settings.briefEmail });
+  if (g) return g;
   // The note file tools are chat only (manifest) and only on a path inside the notes (or, for Read, the data folders): the path is code.
   if (NOTE_FILE_TOOLS.has(tool) && !(isNotePath(input.file_path) || (tool === "Read" && isReadableData(input.file_path)))) return "deny";
   const flag = flagFor(tool, source);

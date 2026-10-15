@@ -10,7 +10,7 @@ This is a personal project that runs daily for its author. It works, its safety-
 - **Node 24+** (TypeScript runs directly, there is no build step).
 - **[Claude Code](https://docs.claude.com/en/docs/claude-code/overview)** installed and logged in (`claude auth login`). The agent uses your stored login so it can reach your claude.ai connectors (Notion, Google Calendar, Gmail…). *Check Anthropic's current terms for using your plan for personal automation like this.* An API key or `claude setup-token` also work but cannot use those connectors (see `HARNESS_AUTH` in `.env.example`).
 - **[signal-cli](https://github.com/AsamK/signal-cli)** (`brew install signal-cli`). Either linked to your own Signal account as a secondary device (Note to Self, the default), or, better, registered as the assistant's own account ([SIGNAL-ACCOUNT.md](SIGNAL-ACCOUNT.md)).
-- **A mail client with an MCP server**, unless you run chat only (below). This repo uses [Mailbird](https://www.getmailbird.com/); see [Why a local mail client](ADAPTING.md#why-the-default-is-a-local-client) and [ADAPTING.md](ADAPTING.md) if you use Gmail only.
+- **A mail client with an MCP server**, unless you run chat only (below). This repo uses [Mailbird](https://www.getmailbird.com/); see [Why a local mail client](ADAPTING.md#why-the-default-is-a-local-client). Gmail only: use the Gmail connector instead ([Gmail](#gmail-no-local-mail-client) below).
 - Optional: Notion and Google Calendar connected under *claude.ai → Settings → Connectors*, for the task and calendar parts of the brief.
 
 ## Install
@@ -45,7 +45,29 @@ Mail is optional. For the Signal chat, memory, wake-ups, the calendar radar and 
 MAIL_PROVIDER=none
 ```
 
-What changes: no mail client is started or contacted anywhere; the heartbeat only keeps its liveness line (one log line at start, `mail: off (MAIL_PROVIDER=none)`, nothing per tick); the daily brief has no email step, so the brief the model writes is the deliverable, and you get its pep talk and focus on Signal (say "brief" for the rest, it is saved in `memory/last-brief.md`); the model is not offered the mail skills or the Mailbird tools and is told there is no mail; `npm run doctor` shows `mail: off` as OK and does not look for Mailbird; setup does not ask about your writing style or sent mail; `npm run restore` and `npm run triage-check` refuse to run. The default is `MAIL_PROVIDER=mailbird`, which behaves as described everywhere else in these docs. `MAIL_PROVIDER=gmail` is reserved for a later version and stops the agent at start with "not implemented yet".
+What changes: no mail client is started or contacted anywhere; the heartbeat only keeps its liveness line (one log line at start, `mail: off (MAIL_PROVIDER=none)`, nothing per tick); the daily brief has no email step, so the brief the model writes is the deliverable, and you get its pep talk and focus on Signal (say "brief" for the rest, it is saved in `memory/last-brief.md`); the model is not offered the mail skills or the Mailbird tools and is told there is no mail; `npm run doctor` shows `mail: off` as OK and does not look for Mailbird; setup does not ask about your writing style or sent mail; `npm run restore` and `npm run triage-check` refuse to run. The default is `MAIL_PROVIDER=mailbird`, which behaves as described everywhere else in these docs.
+
+### Gmail (no local mail client)
+
+If your mail is in Gmail you can skip Mailbird: the assistant uses the Gmail connector of your Claude account, the same way it uses Notion and Google Calendar. Connect Gmail in your Claude account (Settings, Connectors), make sure `HARNESS_AUTH=login`, and set in `.env`:
+
+```
+MAIL_PROVIDER=gmail
+MAIL_SELF_ADDRESS=you@example.com
+```
+
+`MAIL_SELF_ADDRESS` is your own address. It is the only address the daily brief may ever be emailed to (a hard check in code, not a request to the model).
+
+What works:
+
+- **Heartbeat triage.** Every few minutes a small model lists the inbox (`in:inbox newer_than:7d`) and classifies new threads, as with Mailbird. This costs one small model call per tick for the connector round trip, even when nothing is new.
+- **Archiving is log-only for the first week.** An archive is removing the INBOX label (reversible). With the default `GMAIL_ARCHIVE_LIVE=false` the heartbeat and any archive the assistant tries are recorded as `would-archive` and nothing is archived; `npm run report` and the daily brief say so. When the classifications look right, set `GMAIL_ARCHIVE_LIVE=true`. `npm run restore <threadId>` puts an archived thread back in the inbox.
+- **Drafts and sends.** Drafts (new or in-thread) are made freely. `send_message`, `reply` and `forward` always go through the approval flow, shown with the real recipients (including cc, bcc and attachments); a send of a draft is shown from the draft as read back from Gmail. In chat the approval judge may skip the question for a send you just asked for (`AUTO_APPROVE`); unattended runs always ask.
+- **Never allowed**, whoever asks: trash, spam, delete, the labels `TRASH` and `SPAM` on any label tool, reading attachment content, deleting or renaming labels.
+- **The brief** goes to Signal as before. `BRIEF_EMAIL=on` also emails the full brief to `MAIL_SELF_ADDRESS` (and only there).
+- **Not built for Gmail**: the background reply handler and its "Reply ready" drafts (they use Mailbird's tools). Mail the classifier would hand to the handler stays in the inbox and is listed in the brief.
+
+`npm run doctor` checks that `MAIL_SELF_ADDRESS` is set and that the Gmail connector was available in the last run (start the agent once first). The connector's results were written against its published tool descriptions and tested on recorded-shape fake output; watch the first days in `npm run report` and `logs/audit.jsonl`.
 
 ### Skills and first-time setup
 

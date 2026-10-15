@@ -1,5 +1,6 @@
 import type { Kind as MessageKind } from "./messages.ts";
 import { settings } from "./settings.ts";
+import { briefDelivery } from "./brief.ts";
 import { BRIEF_FOOTER, BRIEF_FOOTER_NO_MAIL, renderMarkdown, signalSummary, splitSections, toSignalStyles } from "./markdown.ts";
 import type { Quote, SignalClient } from "@ted-personal-assistant/signal";
 
@@ -73,7 +74,7 @@ export function createOutbound(signal: Pick<SignalClient, "send">, record?: (kin
   // the short summary above, the full text goes out by email).
   // The brief itself goes out by email. Signal gets the short version (pep talk, focus, a pointer).
   async function sendBriefSummary(markdown: string) {
-    await reply(signalSummary(markdown, settings.mail ? BRIEF_FOOTER : BRIEF_FOOTER_NO_MAIL), { kind: "brief" });
+    await reply(signalSummary(markdown, briefDelivery() === "email" ? BRIEF_FOOTER : BRIEF_FOOTER_NO_MAIL), { kind: "brief" });
   }
 
   async function sendBrief(markdown: string) {

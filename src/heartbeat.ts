@@ -4,6 +4,7 @@ import { mailAlertRequest, type NoticeWriter } from "./notice.ts";
 import { LIMITS, oneLine } from "./sanitize.ts";
 import { audit } from "./audit.ts";
 import type { HandleItem } from "./handler.ts";
+import { GmailMail } from "./gmail.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused } from "./pause.ts";
 import { settings } from "./settings.ts";
@@ -30,13 +31,13 @@ interface Row {
   subject: string;
   lastSender: string;
   receivedAtUtc: string; // despite the name, Mailbird reports local time (only used for ordering)
-  lastMessageId: number;
+  lastMessageId: number | string; // Gmail's ids are strings
 }
 
 interface NewMail {
   accountEmail: string;
   conversationId: string;
-  messageId: number;
+  messageId: number | string;
   from: string;
   subject: string;
   receivedAtUtc: string;
@@ -50,8 +51,14 @@ interface HeartbeatHooks {
   onTick: () => void; // tick-driven jobs (wake-ups, dream, brief, radar): independent of the mail check, never awaited
 }
 
-// What the mail check needs of Mailbird (the real client, or a fake in tests).
-export type MailSource = Pick<Mailbird, "inboxes" | "call" | "close">;
+// What the mail check needs of the mail client (Mailbird, the Gmail relay, or a fake in tests).
+export type MailSource = Pick<Mailbird, "inboxes" | "call" | "close"> | Pick<GmailMail, "inboxes" | "call" | "close">;
+
+// The provider's mail source (the heartbeat, `npm run triage-check` and `npm run restore` all start from here).
+export const newMailSource = (): MailSource & { connect?: () => Promise<void> } => (settings.mailProvider === "gmail" ? new GmailMail() : new Mailbird());
+
+// Gmail's first week: the heartbeat classifies and logs "would-archive" but archives nothing (GMAIL_ARCHIVE_LIVE=true ends it).
+const archiveLogOnly = () => settings.mailProvider === "gmail" && !settings.gmailArchiveLive;
 
 // Starts every tick-driven job (wake-ups, dream, brief, radar): each in its own try/catch, none awaited, so a job that throws
 // (even synchronously) or hangs never keeps another from starting.
@@ -74,7 +81,7 @@ const newMail = (inbox: { email: string }, row: Row): NewMail => ({
   receivedAtUtc: row.receivedAtUtc,
 });
 
-const seenKey = (m: { conversationId: string; lastMessageId?: number; messageId?: number }) =>
+const seenKey = (m: { conversationId: string; lastMessageId?: number | string; messageId?: number | string }) =>
   `${m.conversationId}:${m.lastMessageId ?? m.messageId}`;
 
 // The cheap pre-check. Returns conversations whose latest message is new, plus older copies
@@ -158,6 +165,10 @@ async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: Heartbeat
 
   if (settings.heartbeatLive) {
     for (const i of plan.archive) {
+      if (archiveLogOnly()) {
+        decision[i] = "would-archive";
+        continue;
+      }
       try {
         // Mailbird may assign a new id on archive: the response is kept so `npm run restore` can find it.
         extra[i] = { result: short(await mb.call("archive_conversation", { conversationId: fresh[i]!.conversationId })) };
@@ -186,12 +197,15 @@ async function processNewMail(mb: MailSource, fresh: NewMail[], hooks: Heartbeat
       }
     }
 
-    if (plan.handle.length > 0) {
+    if (plan.handle.length > 0 && settings.mailProvider === "gmail") {
+      // The background handler drafts replies with Mailbird's tools and shows them as Mailbird drafts: not built for Gmail. The mail stays in the inbox and the brief lists it.
+      for (const i of plan.handle) decision[i] = "kept-no-handler";
+    } else if (plan.handle.length > 0) {
       try {
         hooks.handle(
           plan.handle.map((i) => {
             const m = fresh[i]!;
-            return { account: m.accountEmail, conversationId: m.conversationId, messageId: m.messageId, from: m.from, subject: m.subject };
+            return { account: m.accountEmail, conversationId: m.conversationId, messageId: Number(m.messageId), from: m.from, subject: m.subject };
           }),
         );
         for (const i of plan.handle) decision[i] = "queued-for-handler";
@@ -238,7 +252,7 @@ async function archiveStaleBriefs(mb: MailSource, ids: string[]) {
 // `env` is for tests: a fake mail source (or the factory that would make the real one) and fake timers.
 export function startHeartbeat(hooks: HeartbeatHooks, env: { triage?: typeof triageBatch; mail?: MailSource; newMail?: () => MailSource; setTimeout?: (f: () => void, ms: number) => unknown; setInterval?: (f: () => void, ms: number) => unknown } = {}) {
   // MAIL_PROVIDER=none: no mail client is made, let alone connected. Only the liveness line is kept (mailOff below).
-  const mb = settings.mail ? (env.mail ?? (env.newMail ?? (() => new Mailbird()))()) : undefined;
+  const mb = settings.mail ? (env.mail ?? (env.newMail ?? newMailSource)()) : undefined;
   let running = false;
   let failing = false;
 
@@ -258,7 +272,7 @@ export function startHeartbeat(hooks: HeartbeatHooks, env: { triage?: typeof tri
         console.log("heartbeat: baseline recorded, existing inbox treated as seen");
       } else {
         if (mail.fresh.length > 0) for (const m of await processNewMail(mb, mail.fresh, hooks, env.triage)) mail.unsee(m);
-        if (settings.heartbeatLive && mail.staleBriefs.length > 0) await archiveStaleBriefs(mb, mail.staleBriefs);
+        if (settings.heartbeatLive && !archiveLogOnly() && mail.staleBriefs.length > 0) await archiveStaleBriefs(mb, mail.staleBriefs);
       }
       mail.commit(); // only now are these messages "seen"
       const prev = readJson<{ lastNewMailAt?: string }>(LIVENESS, {});

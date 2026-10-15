@@ -26,8 +26,17 @@ export async function mailCheck(line: Line, mail: boolean, connect: () => Promis
   }
 }
 
+// The Gmail checks (MAIL_PROVIDER=gmail): the owner's own address is set, the claude.ai connector was available in the last run, and which archive mode is on.
+// The connector comes with the Claude login; whether it is there is only known from a run's start-up message (connectors.ts), so before the first run it is a warning.
+export function gmailChecks(line: Line, o: { self: string | undefined; connector: boolean | undefined; archiveLive: boolean; briefEmail: boolean }): void {
+  line(!!o.self, "MAIL_SELF_ADDRESS set", o.self ? "" : "your own Gmail address, the only address the brief may be emailed to (.env.example)");
+  line(o.connector === undefined ? "warn" : o.connector, "Gmail connector available", o.connector === undefined ? "no run yet: start the agent, then run doctor again" : o.connector ? "" : "not available in the last run: connect Gmail in your Claude account (Settings, Connectors)");
+  line(true, "Gmail archiving", o.archiveLive ? "live (GMAIL_ARCHIVE_LIVE=true)" : "LOG-ONLY (GMAIL_ARCHIVE_LIVE=false): it records would-archive and archives nothing; set true after the trial week");
+  line(o.briefEmail && !o.self ? false : true, "brief by email", o.briefEmail ? "on: emailed to MAIL_SELF_ADDRESS only, plus the Signal summary" : "off (BRIEF_EMAIL=off): the brief goes to Signal only");
+}
+
 // The skills that must ship with the repo for the configured setup.
-export const requiredSkills = (mail: boolean): string[] => ["daily-brief", ...(mail ? ["mailbird"] : []), "calendar", "notion-tasks", "meeting-prep", "setup"];
+export const requiredSkills = (mail: boolean, provider: string = settings.mailProvider): string[] => ["daily-brief", ...(mail ? [provider === "gmail" ? "gmail" : "mailbird"] : []), "calendar", "notion-tasks", "meeting-prep", "setup"];
 
 // What the heartbeat line says after "last tick": mail is only mentioned when there is mail.
 export const heartbeatDetail = (beat: { lastTickAt?: string; lastNewMailAt?: string }, ageMin: number, quiet: boolean, mail: boolean, localTime: (iso: string) => string): string =>
@@ -70,7 +79,8 @@ export async function doctor() {
   });
   line(up ? true : "warn", `Signal daemon reachable on ${settings.signalHost}:${settings.signalPort}`, up ? "" : "only running while the agent is");
 
-  await mailCheck(line, settings.mail, async () => {
+  if (settings.mailProvider === "gmail") gmailChecks(line, { self: settings.mailSelfAddress, connector: readConnectors()?.gmail, archiveLive: settings.gmailArchiveLive, briefEmail: settings.briefEmail });
+  else await mailCheck(line, settings.mail, async () => {
     const mb = new Mailbird();
     try {
       await mb.connect();

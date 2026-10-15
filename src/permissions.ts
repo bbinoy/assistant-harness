@@ -3,6 +3,7 @@ import { audit, type Source } from "./audit.ts";
 import { isJudgeable, judgeAction, mayAutoApprove, type Verdict } from "./autojudge.ts";
 import type { Decision } from "./approvals.ts";
 import { describeCall } from "./format.ts";
+import { isGmailTool, isInboxArchive } from "./gmailrules.ts";
 import { classify, isReadTool } from "./policy.ts";
 import type { DraftView } from "./proposals.ts";
 import { actionOf, entryFor, mailView, type MailView } from "./toolmanifest.ts";
@@ -54,6 +55,14 @@ const once = (tool: string) => tool !== "WebFetch" && !isReadTool(tool);
 let draftReader: ((messageId: number) => Promise<DraftView | undefined>) | undefined;
 // Set by main.ts: reads a draft back from Mailbird, for the approval of a send.
 export const setDraftReader = (fn: typeof draftReader) => void (draftReader = fn);
+// Gmail (MAIL_PROVIDER=gmail), set by main.ts: a draft read back by its id (the approval of send_message with a draftId), and the original
+// message of a reply (its sender and recipients, so a reply that names none is shown with the people who really receive it).
+export interface GmailReaders {
+  draft: (draftId: string) => Promise<DraftView | undefined>;
+  original: (messageId: string) => Promise<DraftView | undefined>;
+}
+let gmailReaders: GmailReaders | undefined;
+export const setGmailReaders = (r: GmailReaders | undefined) => void (gmailReaders = r);
 
 export function makeCanUseTool(approve: Approve, source: Source, memoryDir: string | undefined, judgeContext?: string, judge: typeof judgeAction = judgeAction): CanUseTool {
   return async (tool, input, { signal }) => {
@@ -65,7 +74,12 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       return { behavior: "allow", updatedInput: input };
     }
     if (verdict === "deny") {
-      audit(tool, "deny-policy", source);
+      if (isInboxArchive(tool, input) && settings.mailProvider === "gmail") {
+        // Gmail archive in log-only mode (GMAIL_ARCHIVE_LIVE=false): recorded like the heartbeat's, so the report and brief show it.
+        audit("gmail_archive", "would-archive", source, { id: input.threadId });
+        return { behavior: "deny", message: "Archiving is in log-only mode (GMAIL_ARCHIVE_LIVE=false): it was recorded as would-archive and the thread stays in the inbox. Carry on without archiving." };
+      }
+      audit(tool, "deny-policy", source, isGmailTool(tool) ? idsOf(input) : undefined);
       return { behavior: "deny", message: `${tool} is blocked by policy (or its input is) and cannot be used.` };
     }
     // A small model's second opinion, only for what code puts on the floor (autojudge.ts). In shadow
@@ -83,7 +97,10 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       // every provider. If that cannot be read, the owner would be approving blind, so the send does not happen.
       const id = Number((input as { messageId?: unknown }).messageId);
       const fromDraft = entryFor(tool)?.view === "mbSend";
-      const draft = fromDraft && draftReader && Number.isFinite(id) ? await draftReader(id).catch(() => undefined) : undefined;
+      const kind = entryFor(tool)?.view;
+      let draft = fromDraft && draftReader && Number.isFinite(id) ? await draftReader(id).catch(() => undefined) : undefined;
+      if (kind === "gmSend" && typeof input.draftId === "string" && gmailReaders) draft = await gmailReaders.draft(input.draftId).catch(() => undefined);
+      if (kind === "gmReply" && typeof input.messageId === "string" && gmailReaders) draft = await gmailReaders.original(input.messageId).catch(() => undefined);
       view = mailView(tool, input, draft && { ...draft, bcc: draft.bcc ?? [], hasAttachments: draft.hasAttachments ?? false });
       if (!view || (view.action !== "forward" && view.to.length === 0)) {
         audit(tool, "deny-unreadable-draft", source);

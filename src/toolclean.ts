@@ -12,6 +12,7 @@ const MAIL_TOOL = /mailbird|gmail/i;
 
 export function cleanToolOutput(tool: string, output: unknown): ToolClean | undefined {
   const mail = MAIL_TOOL.test(tool);
+  const gmail = /gmail/i.test(tool);
   const t = { removed: 0, cut: 0, hidden: 0 };
 
   const text = (s: string): string => {
@@ -43,6 +44,12 @@ export function cleanToolOutput(tool: string, output: unknown): ToolClean | unde
     if (v && typeof v === "object") {
       const o = v as Record<string, unknown>;
       if (o.type === "image") return v;
+      // Gmail returns attachments with their base64 content inline: the assistant never reads attachment content, so only the
+      // name, type and size stay (a withheld note replaces the content).
+      if (gmail && Array.isArray(o.attachments)) {
+        const stripped = o.attachments.map((a) => (a && typeof a === "object" ? Object.fromEntries(Object.entries(a).map(([k, x]) => [k, k === "content" || k === "data" ? "[attachment content withheld]" : x])) : a));
+        return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, k === "attachments" ? walk(stripped, k) : walk(x, k)]));
+      }
       return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, walk(x, k)]));
     }
     return v;

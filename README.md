@@ -140,7 +140,7 @@ Link signal-cli and check your mail client first: [docs/SETUP.md](docs/SETUP.md)
 
 - **Your name, its name, its personality**: three lines in `.env`, one prompt in `src/persona.ts`, or just tell it in chat.
 - **Your preferences**: tone, length, who matters, what the brief includes. They live in small notes (`memory/notes/`) that you can also change by chatting. No code, no restart.
-- **Your mail**: it ships with [Mailbird](https://www.getmailbird.com/) because that is how it reaches Proton Mail, whose end-to-end encryption means there is no server to point an agent at. If you use Gmail only, you can go direct and skip the local client.
+- **Your mail**: it ships with [Mailbird](https://www.getmailbird.com/) because that is how it reaches Proton Mail, whose end-to-end encryption means there is no server to point an agent at. If you use Gmail only, set `MAIL_PROVIDER=gmail` to use your Claude account's Gmail connector instead and skip the local client ([docs/SETUP.md](docs/SETUP.md#gmail-no-local-mail-client)).
 - **Your messenger**: Signal is a thin layer. Telegram, Slack, iMessage and WhatsApp are realistic swaps.
 - **Your rules**: what runs unattended, what needs approval and what is blocked is one short, tested file.
 

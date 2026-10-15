@@ -23,6 +23,10 @@ export function buildDigest(entries: TriageEntry[], sinceIso: string | undefined
   if (logOnly) {
     lines.push("Heartbeat was in LOG-ONLY mode: it archived nothing. Labels below are its classifications, not actions taken.");
   }
+  const wouldArchive = entries.filter((e) => e.decision === "would-archive");
+  if (wouldArchive.length > 0 && !logOnly) {
+    lines.push(`Gmail archiving is in LOG-ONLY mode (GMAIL_ARCHIVE_LIVE=false): ${wouldArchive.length} thread(s) were classified archive but are STILL IN THE INBOX. Do not archive them yourself or say they were archived; list them under "Looked archivable" and tell the owner this is the trial week, with how to turn archiving on.`);
+  }
   const by = (label: string) => entries.filter((e) => e.meta.label === label);
   const archived = entries.filter((e) => e.decision === "archived");
   const candidates = entries.filter((e) => e.meta.label === "archive" && e.decision !== "archived");

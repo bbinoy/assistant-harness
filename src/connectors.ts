@@ -13,6 +13,7 @@ interface Connectors {
   notion: boolean;
   calendar: boolean;
   mail: boolean;
+  gmail?: boolean; // the claude.ai Gmail connector (MAIL_PROVIDER=gmail)
 }
 
 export type Connector = "notion" | "calendar";
@@ -26,7 +27,7 @@ interface ServerStatus {
   status: string;
 }
 
-const SERVERS: Record<"notion" | "calendar" | "mail", RegExp> = { notion: /\bnotion\b/i, calendar: /google calendar/i, mail: /^mailbird$/i };
+const SERVERS: Record<"notion" | "calendar" | "mail" | "gmail", RegExp> = { notion: /\bnotion\b/i, calendar: /google calendar/i, mail: /^mailbird$/i, gmail: /^gmail$/i };
 
 // Pure. A connector is DOWN only when the run's start-up message says so: its server is not
 // listed at all (never added to the account), or failed, needs sign-in, or is disabled. Merely
@@ -40,7 +41,7 @@ export function detect(tools: readonly string[], servers?: readonly ServerStatus
     const s = servers.find((x) => SERVERS[key].test(x.name.replace(/^claude\.ai\s+/i, "")));
     return !!s && !["failed", "needs-auth", "disabled"].includes(s.status);
   };
-  return { at: at.toISOString(), notion: up("notion", "mcp__claude_ai_Notion__"), calendar: up("calendar", "mcp__claude_ai_Google_Calendar__"), mail: up("mail", "mcp__mailbird__") };
+  return { at: at.toISOString(), notion: up("notion", "mcp__claude_ai_Notion__"), calendar: up("calendar", "mcp__claude_ai_Google_Calendar__"), mail: up("mail", "mcp__mailbird__"), gmail: up("gmail", "mcp__claude_ai_Gmail__") };
 }
 
 export const recordConnectors = (tools: readonly string[], servers?: readonly ServerStatus[]) => writeJson(FILE, detect(tools, servers));
