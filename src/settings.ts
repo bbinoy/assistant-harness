@@ -64,9 +64,11 @@ export function loadSettings(env: Env) {
     speed: num(env, "TTS_SPEED", 0.95, 0.5, 2),
   };
   // Where mail comes from. none: chat only, no mail client anywhere (heartbeat, brief, prompts and doctor all leave mail out).
-  // gmail is a name reserved for a later step: it must stop the agent, not quietly behave like another provider.
+  // gmail: the claude.ai Gmail connector, inherited from the Claude login like Notion (src/gmail.ts, plugin/skills/gmail).
   const mailProvider = oneOf(env, "MAIL_PROVIDER", "mailbird", ["none", "mailbird", "gmail"] as const);
-  if (mailProvider === "gmail") throw new Error("MAIL_PROVIDER=gmail is not implemented yet (use mailbird, or none for chat only)");
+  // The owner's own address (Gmail only): the one place the brief may be emailed to. Checked by shape here, used by code in gmailrules.ts.
+  const mailSelf = (env.MAIL_SELF_ADDRESS ?? "").trim().toLowerCase();
+  if (mailSelf && !/^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/.test(mailSelf)) throw new Error("MAIL_SELF_ADDRESS must be a plain email address (no name, no angle brackets)");
   // The data root holds three folders: state/ (bookkeeping), logs/ and memory/ (what the
   // model reads). Overridable so tests never touch the real data.
   const dataDir = env.HARNESS_DATA_DIR ? resolve(env.HARNESS_DATA_DIR) : resolve(fileURLToPath(new URL("../", import.meta.url)));
@@ -80,6 +82,12 @@ export function loadSettings(env: Env) {
     model: env.HARNESS_MODEL || "sonnet",
 
     mailProvider,
+    mailSelfAddress: mailSelf || undefined,
+    // Gmail only. The first week the heartbeat only LOGS what it would archive (GMAIL_ARCHIVE_LIVE=true turns archiving on): the same switch
+    // governs a model run's archive calls (policy.ts). Mailbird is not affected.
+    gmailArchiveLive: oneOf(env, "GMAIL_ARCHIVE_LIVE", "false", ["true", "false"] as const) === "true",
+    // Gmail only: email the brief to MAIL_SELF_ADDRESS as well as the Signal summary. Off: the brief is the Signal message alone.
+    briefEmail: oneOf(env, "BRIEF_EMAIL", "off", ["on", "off"] as const) === "on",
     mail: mailProvider !== "none", // is there any mail to look at? Every mail-only path asks this, never the provider's name
 
     heartbeatMinutes: num(env, "HEARTBEAT_MINUTES", 15, 1, 240),
@@ -130,12 +138,20 @@ export function loadSettings(env: Env) {
       ...list(
         env,
         "HIDDEN_CONNECTORS",
-        ["mcp__claude_ai_Interactive_Brokers_IBKR", "mcp__claude_ai_Gmail", "mcp__claude_ai_Google_Drive", "mcp__claude_ai_Google_Docs", "mcp__claude_ai_Claude_Docs"],
+        ["mcp__claude_ai_Interactive_Brokers_IBKR", ...(mailProvider === "gmail" ? [] : ["mcp__claude_ai_Gmail"]), "mcp__claude_ai_Google_Drive", "mcp__claude_ai_Google_Docs", "mcp__claude_ai_Claude_Docs"],
         /^mcp__[\w-]+$/,
         "a tool-name prefix like mcp__claude_ai_Gmail",
       ),
-      ...(mailProvider === "none" ? ["mcp__mailbird"] : []),
+      ...(mailProvider !== "mailbird" ? ["mcp__mailbird"] : []),
     ],
+    // The Gmail connector tools kept visible (the rest of the connector is hidden, policy.ts hiddenTools). Only used with MAIL_PROVIDER=gmail.
+    gmailTools: list(
+      env,
+      "GMAIL_TOOLS",
+      ["search_threads", "get_thread", "get_message", "get_draft", "list_drafts", "list_labels", "create_draft", "update_draft", "reply", "forward", "send_message", "unlabel_thread", "label_thread"],
+      /^[a-z_]+$/,
+      "a Gmail tool name like get_thread",
+    ),
     mailbirdTools: list(
       env,
       "MAILBIRD_TOOLS",

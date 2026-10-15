@@ -7,10 +7,10 @@ import { settings } from "./settings.ts";
 // The only skills the model can load. The SDK enforces this list (anything else is refused with
 // "not in this session's skills allowlist"); Skill calls never reach canUseTool.
 // Without mail the two mail skills are not offered (the others keep a few mail sentences; the system prompt says to skip them, persona.ts).
-const MAIL_SKILLS = ["mailbird", "mailbird-troubleshooting"];
-export const offeredSkills = (mail: boolean): string[] =>
-  ["daily-brief", "mailbird", "mailbird-troubleshooting", "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].filter((s) => mail || !MAIL_SKILLS.includes(s)).map((s) => `ted-personal-assistant:${s}`);
-export const OFFERED_SKILLS = offeredSkills(settings.mail);
+const MAIL_SKILLS = ["mailbird", "mailbird-troubleshooting", "gmail"];
+export const offeredSkills = (mail: boolean, provider: string = settings.mailProvider): string[] =>
+  ["daily-brief", provider === "gmail" ? "gmail" : "mailbird", ...(provider === "gmail" ? [] : ["mailbird-troubleshooting"]), "calendar", "notion-tasks", "meeting-prep", "setup", "radar"].filter((s) => mail || !MAIL_SKILLS.includes(s)).map((s) => `ted-personal-assistant:${s}`);
+export const OFFERED_SKILLS = offeredSkills(settings.mail, settings.mailProvider);
 
 // ---- run profiles ----
 // HOW a run is allowed to work, fixed in code and named: the policy source (policy.ts: which tools are allowed, asked,

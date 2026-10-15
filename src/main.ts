@@ -2,7 +2,8 @@ import "./log.ts"; // first: timestamps, redaction and owner-only files for ever
 import { createPipeline, group, owner, type Pipeline } from "./conversation.ts";
 import { ask, runProfile, prepareChat } from "./agent.ts";
 import { compactChatIfNeeded, compactDue } from "./chatsession.ts";
-import { setDraftReader, type Approve } from "./permissions.ts";
+import { gmailReaders } from "./gmail.ts";
+import { setDraftReader, setGmailReaders, type Approve } from "./permissions.ts";
 import * as approvals from "./approvals.ts";
 import { makeApprove } from "./approvalask.ts";
 import { config, mask } from "./config.ts";
@@ -131,8 +132,10 @@ signal.onDelete((d) => {
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal
 // (propose.ts), and the approval of any send shows the draft read back from here (agent.ts).
 // MAIL_PROVIDER=none: no mail client is made at all, so there is no proposer and no mail handler either.
-const proposer = settings.mail ? createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t, "draft") }) : undefined;
+const proposer = settings.mailProvider === "mailbird" ? createProposer({ mail: new Mailbird(), send: (t) => out.replyPlain(t, "draft") }) : undefined;
 if (proposer) setDraftReader(proposer.read);
+// Gmail: the approval of a send reads the draft (or the message being replied to) back through the connector (gmail.ts).
+if (settings.mailProvider === "gmail") setGmailReaders(gmailReaders());
 
 // A 👍 / 👎 on the pending "Approve?" message answers it (the pipeline checks); any other reaction of the
 // owner is feedback. Our own status icons come back as reactions and are dropped.

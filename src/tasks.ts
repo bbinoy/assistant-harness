@@ -1,6 +1,6 @@
 import { audit } from "./audit.ts";
 import type { OwnerProfile, ProfileName } from "./profiles.ts";
-import { briefInstructions, currentBriefPrompt, markBriefDone, runBriefAttempt, type BriefOutcome } from "./brief.ts";
+import { briefDelivery, briefInstructions, currentBriefPrompt, markBriefDone, runBriefAttempt, type BriefOutcome } from "./brief.ts";
 import { buildDigest, readTriageSince } from "./digest.ts";
 import type { GateOutput, TaskName } from "./gate.ts";
 import { ledger, type LookState } from "./ledger.ts";
@@ -92,7 +92,7 @@ export async function runBriefTask(io: PresetIO, task: Task, st: LookState, now:
   console.log(`brief: starting (gate, attempt ${attempt}/${cap})`);
   let completed = false;
   const outcome = await runBriefAttempt(
-    { run: (p, cb) => io.runProfile("brief", p, { onToolSuccess: cb, judgeContext: task.instructions }).then((r) => ({ text: r.text, costUsd: r.costUsd ?? 0 })), sendBrief: io.sendBrief, notify: io.notify, delivery: settings.mail ? "email" : "signal" },
+    { run: (p, cb) => io.runProfile("brief", p, { onToolSuccess: cb, judgeContext: task.instructions }).then((r) => ({ text: r.text, costUsd: r.costUsd ?? 0 })), sendBrief: io.sendBrief, notify: io.notify, delivery: briefDelivery() },
     currentBriefPrompt(now, undefined, task.instructions),
     attempt,
     () => ((completed = true), markBriefDone(now, attempt)),

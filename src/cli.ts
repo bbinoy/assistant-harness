@@ -1,5 +1,6 @@
 import { isTriage, readAudit, type AuditEntry } from "./audit.ts";
-import { triageCheck } from "./heartbeat.ts";
+import { GmailMail } from "./gmail.ts";
+import { newMailSource, triageCheck } from "./heartbeat.ts";
 import { Mailbird } from "./mailbird.ts";
 import { localTime } from "./pause.ts";
 import { doctor } from "./doctor.ts";
@@ -43,7 +44,8 @@ async function report(hours: number) {
     judgeSummary(hours);
     return approvalSummary(hours);
   }
-  const order = ["archived", "alerted", "covered-by-brief", "queued-for-handler", "archive-deferred", "archive-failed", "alert-failed", "handler-queue-failed", "kept"];
+  if (settings.mailProvider === "gmail" && !settings.gmailArchiveLive) console.log("Gmail archiving is in LOG-ONLY mode (GMAIL_ARCHIVE_LIVE=false): \"would-archive\" below was classified but NOT archived.");
+  const order = ["archived", "would-archive", "alerted", "kept-no-handler", "covered-by-brief", "queued-for-handler", "archive-deferred", "archive-failed", "alert-failed", "handler-queue-failed", "kept"];
   const decisions = [...order, ...new Set(rows.map((e) => e.decision).filter((d) => !order.includes(d)))];
   for (const decision of decisions) {
     const set = rows.filter((e) => e.decision === decision);
@@ -57,7 +59,15 @@ async function report(hours: number) {
   approvalSummary(hours);
 }
 
+// Gmail: an archive is only the INBOX label removed, so undoing it is adding INBOX back to the thread (the audit id is the thread id).
+async function restoreGmail(id: string) {
+  await new GmailMail().call("move_conversation_to_inbox", { conversationId: id });
+  console.log(`Put back in the inbox (thread ${id}).`);
+  process.exit(0);
+}
+
 async function restore(id: string) {
+  if (settings.mailProvider === "gmail") return restoreGmail(id);
   const mb = new Mailbird();
   await mb.connect();
   const entry: AuditEntry | undefined = readAudit((e) => isTriage(e) && e.meta?.id === id).pop();
@@ -94,7 +104,7 @@ if (cmd === "report") await report(Number(arg ?? 24));
 else if (cmd === "restore" && arg) await restore(arg);
 else if (cmd === "doctor") await doctor();
 else if (cmd === "triage-check") {
-  const rows = await triageCheck(new Mailbird(), Number(arg ?? 10));
+  const rows = await triageCheck(newMailSource(), Number(arg ?? 10));
   for (const r of rows) console.log(`${r.action.padEnd(8)} ${r.label.padEnd(10)} ${r.kind.padEnd(16)} ${r.from.slice(0, 24).padEnd(24)} ${r.subject.slice(0, 50).padEnd(50)} ${r.reason}`);
 }
 else console.log("usage: npm run report [hours] | npm run restore <conversationId> | npm run doctor | npm run triage-check [n]");

@@ -156,8 +156,17 @@ const VIEWS: Record<ViewKind, (i: In, draft?: Omit<MailView, "action">) => MailV
   mbDraft: (i) => native("draft", i),
   mbReply: (i) => native("draft", { body: i.body }), // recipients come from the thread, set by the client
   mbForward: (i) => native("forward", { body: i.body }), // recipients start empty and are set with update_draft
-  gmSend: (i) => (i.draftId ? undefined : native("send", i)),
-  gmReply: (i) => native("reply", i),
+  // A send of a Gmail draft is shown from the draft as read back (get_draft). A new send, reply or forward is read from its own
+  // arguments; a reply that names no recipients goes to the people of the original message, read back (`draft` = the original's
+  // sender and recipients), so the approval and the judge floor see who really receives it.
+  gmSend: (i, draft) => (i.draftId ? draft && { action: "send", ...draft } : native("send", i)),
+  gmReply: (i, orig) => {
+    const v = native("reply", i);
+    if (!orig) return i.replyAll ? undefined : v; // a reply-all cannot be shown without the original; explicit recipients, or none: permissions.ts reads the original back first and refuses a reply nobody can be named for
+    const to = addrs(i.to).length ? v.to : i.replyAll ? orig.to : orig.to.slice(0, 1); // orig.to: the sender first, then (reply-all) the other recipients
+    const cc = i.cc !== undefined ? v.cc : i.replyAll ? orig.cc : [];
+    return { ...v, to: [...new Set(to)], cc: [...new Set(cc)], subject: v.subject || orig.subject };
+  },
   gmForward: (i) => native("forward", i),
   gmDraft: (i) => native("draft", i),
 };

@@ -1,5 +1,6 @@
 import { AuthError } from "./errors.ts";
 import { audit } from "./audit.ts";
+import { isSelfSend } from "./gmailrules.ts";
 import { buildDigest, readTriageSince } from "./digest.ts";
 import { fence } from "./fence.ts";
 import { LAST_BRIEF } from "./notes.ts";
@@ -43,7 +44,21 @@ export const BRIEF_INSTRUCTIONS = `Load the 'ted-personal-assistant:daily-brief'
 export const BRIEF_INSTRUCTIONS_NO_MAIL = `Load the 'ted-personal-assistant:daily-brief' skill with the Skill tool and follow it, with these changes because there is no email in this setup: skip the email pass (step 1) and the newsletter radar, never load a mail skill or call a mail tool, and do not deliver by email (step 6). Your final answer is the brief itself, in the skill's format (Markdown, the sections in its order), with nothing before it, and then one last line with the exact text ${DONE_MARKER}. If you cannot do the calendar, task and meeting parts at all, say so in the brief and do NOT print ${DONE_MARKER}.`;
 
 // The instructions of the brief preset (tasks.ts) for the configured mail provider.
-export const briefInstructions = (mail: boolean = settings.mail): string => (mail ? BRIEF_INSTRUCTIONS : BRIEF_INSTRUCTIONS_NO_MAIL);
+// Gmail (MAIL_PROVIDER=gmail): the mail pass uses the gmail skill and the Gmail connector. The brief is the final answer (Signal, the default) or, with
+// BRIEF_EMAIL=on, also emailed to the owner's own address with send_message (policy.ts allows exactly that one send for the brief run, gmailrules.ts).
+const GMAIL_COMMON = "Load the 'ted-personal-assistant:daily-brief' skill with the Skill tool and follow it, with these changes because the mail is Gmail: wherever it says to run 'ted-personal-assistant:mailbird', load 'ted-personal-assistant:gmail' instead and use the Gmail tools it names; the mailbird tools do not exist here.";
+export const BRIEF_INSTRUCTIONS_GMAIL_SIGNAL = `${GMAIL_COMMON} Do not deliver by email (step 6): your final answer is the brief itself, in the skill's format (Markdown, the sections in its order), with nothing before it, and then one last line with the exact text ${DONE_MARKER}. If the mail tools are unreachable, say so in the brief, do the task and calendar parts if you can, and do NOT print ${DONE_MARKER}.`;
+export const briefInstructionsGmailEmail = (self: string): string =>
+  `${GMAIL_COMMON} Deliver the brief (step 6) with the Gmail send_message tool, exactly once, to ${JSON.stringify([self])} and nobody else (no cc, no bcc, no attachments, no draftId): subject starting with the emoji the skill names, body the complete brief as plain text (body, not htmlBody). After send_message succeeds, print the exact line ${DONE_MARKER}. If the mail tools are unreachable, send the brief anyway saying so, do the task and calendar parts if you can, and do NOT print ${DONE_MARKER}.`;
+
+// How today's brief reaches the owner. email: the run sends it with a mail tool and the sent body is kept; signal: the run's final text is the brief.
+export const briefDelivery = (): "email" | "signal" => (!settings.mail ? "signal" : settings.mailProvider === "gmail" ? (settings.briefEmail && settings.mailSelfAddress ? "email" : "signal") : "email");
+
+export const briefInstructions = (mail: boolean = settings.mail, provider: string = settings.mailProvider): string => {
+  if (!mail) return BRIEF_INSTRUCTIONS_NO_MAIL;
+  if (provider !== "gmail") return BRIEF_INSTRUCTIONS;
+  return settings.briefEmail && settings.mailSelfAddress ? briefInstructionsGmailEmail(settings.mailSelfAddress) : BRIEF_INSTRUCTIONS_GMAIL_SIGNAL;
+};
 
 // The run's prompt. Previous brief and digest go in as clearly fenced DATA.
 export function briefPrompt(now: Date, previous: string | undefined, previousAt: string | undefined, digest: string, instructions: string = BRIEF_INSTRUCTIONS): string {
@@ -88,6 +103,7 @@ export async function runBriefAttempt(deps: BriefAttemptDeps, prompt: string, at
   try {
     const { text, costUsd } = await deps.run(prompt, (tool, input) => {
       if (tool === BRIEF_TOOL) captured = (input as { markdownBody?: string }).markdownBody;
+      else if (isSelfSend(tool, input as Record<string, unknown>, settings.mailProvider === "gmail" ? settings.mailSelfAddress : undefined)) captured = (input as { body?: string }).body; // Gmail: the brief sent to the owner's own address
     });
     if (deps.delivery === "signal" && text.includes(DONE_MARKER)) captured = text.replaceAll(DONE_MARKER, "").trim() || undefined;
     const complete = text.includes(DONE_MARKER) && !!captured;
