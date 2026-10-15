@@ -91,7 +91,9 @@ export interface GuardDecision {
   reason?: string;
   description?: string;
   once?: boolean; // an approved call is not repeated
-  judge?: boolean; // ask: still goes to the approval judge (an ambiguous step); only its "auto" skips the owner
+  judge?: boolean; // ask: goes to the approval judge first (a browse commit step); only its "auto" skips the owner. Without it the owner is always asked
+  redacted?: Record<string, unknown>; // ask: the call as the question writer, the approval card and the audit see it (a typed secret cut to its length); the real input still runs
+  facts?: Record<string, unknown>; // ask: what the judge's audit row records about the step (host, role, name)
 }
 export interface CallGuard {
   decide: (tool: string, input: Record<string, unknown>) => Promise<GuardDecision>;
@@ -148,7 +150,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     // A chat send is judged against the owner's words; with none on record there is nothing to judge it against.
     if (settings.autoApprove !== "off" && (g?.kind !== "ask" || g.judge === true) && (g?.judge === true || isJudgeable(tool, input, source, view)) && (view === undefined || (source === "chat" && ownerMessage !== undefined))) {
       judged = await judge({ source, description, ownerMessage: source === "chat" ? ownerMessage : undefined, earlier: source === "chat" ? earlier.reverse() : undefined, task: source === "chat" ? undefined : judgeContext });
-      audit(tool, `judge-${judged.decision}`, source, { reason: judged.reason, mode: settings.autoApprove });
+      audit(tool, `judge-${judged.decision}`, source, { reason: judged.reason, mode: settings.autoApprove, ...g?.facts });
       if (mayAutoApprove(settings.autoApprove, source, judged)) {
         audit(tool, "auto-approved", source, { reason: judged.reason }); // silent on purpose: logged, never announced (npm run report shows them)
         if (onceOnly) remember(key);
@@ -160,7 +162,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       return { behavior: "deny", message: `Asking ${OWNER} about this exact call failed ${MAX_FAILED_ASKS} times, so it is not asked again. Do not retry it; tell ${OWNER} in your own words what you could not do, and drop it unless they bring it up again.` };
     }
     audit(tool, "ask-sent", source); // logged before the wait, so a stuck approval is visible
-    const d = await approve(description, { tool, input }, signal);
+    const d = await approve(description, { tool, input: g?.redacted ?? input }, signal);
     if (d.failure) {
       failures.set(key, (failures.get(key) ?? 0) + 1);
       audit(tool, "ask-failed", source, { reason: d.failure });
@@ -174,7 +176,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       source,
     );
     if (d.approved && onceOnly) remember(key);
-    if (d.approved) return { behavior: "allow", updatedInput: d.updatedInput ?? input };
+    if (d.approved) return { behavior: "allow", updatedInput: g?.redacted ? input : (d.updatedInput ?? input) };
     return {
       behavior: "deny",
       message: d.feedback

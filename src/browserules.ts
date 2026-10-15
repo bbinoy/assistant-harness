@@ -155,6 +155,24 @@ export const isRef = (v: unknown): v is string => typeof v === "string" && /^(f\
 const SENSITIVE_FIELD = /card\s*(number|no\b|#)|credit\s*card|debit\s*card|cc[\s-]?num|cvc|cvv|cid\b|security\s*code|expir|exp\.?\s*date|iban|bic\b|swift|account\s*(number|no\b)|routing|sort\s*code|pass(word|code|phrase)|\bpin\b|\botp\b|one[\s-]?time|2fa|two[\s-]?factor|verification\s*code|auth(entication)?\s*code|social\s*security|\bssn\b|tax\s*id|kreditkarte|kartennummer|prüfnummer|pr[üu]fziffer|passwort|kennwort|sicherheitscode|g[üu]ltig\s*bis|numéro de carte|mot de passe|contraseña|tarjeta/i;
 export const sensitiveField = (name: string): boolean => SENSITIVE_FIELD.test(name);
 
+// What KIND of value a payment or login field takes, in words for the owner's question (never the value). Undefined: not sensitive.
+// `text` is what is about to be typed: a Luhn-valid number is a card number whatever the field is called.
+const KINDS: [RegExp, string][] = [
+  [/cvc|cvv|cid\b|security\s*code|sicherheitscode|prüfnummer|pr[üu]fziffer/i, "a card security code"],
+  [/expir|exp\.?\s*date|g[üu]ltig\s*bis/i, "a card expiry date"],
+  [/card\s*(number|no\b|#)|credit\s*card|debit\s*card|cc[\s-]?num|kreditkarte|kartennummer|numéro de carte|tarjeta/i, "a card number"],
+  [/iban|bic\b|swift|account\s*(number|no\b)|routing|sort\s*code/i, "a bank account detail"],
+  [/pass(word|code|phrase)|passwort|kennwort|mot de passe|contraseña/i, "a password"],
+  [/\bpin\b/i, "a PIN"],
+  [/\botp\b|one[\s-]?time|2fa|two[\s-]?factor|verification\s*code|auth(entication)?\s*code/i, "a one-time code"],
+  [/social\s*security|\bssn\b|tax\s*id/i, "an identity number"],
+];
+export function sensitiveKind(name: string, text = ""): string | undefined {
+  for (const [re, label] of KINDS) if (re.test(name)) return label;
+  if (SENSITIVE_FIELD.test(name)) return "a payment or login detail";
+  return looksLikeCardNumber(text) ? "a card number" : undefined;
+}
+
 // A number that passes the Luhn check (card numbers), 13 to 19 digits, possibly in groups of spaces or dashes.
 export function luhnValid(digits: string): boolean {
   if (!/^\d{13,19}$/.test(digits)) return false;
@@ -182,7 +200,6 @@ const ROUTINE_BUTTON = /^(search|find|filter|sort|show|hide|more|next|previous|p
 export interface ClickClass {
   commit: boolean;
   why: string; // for the audit and for the approval
-  ambiguous?: boolean; // a commit by form position only (a named button in a form, no commit word): the approval judge may decide it
   node?: Node;
 }
 
@@ -195,7 +212,7 @@ export function classifyClick(node: Node | undefined): ClickClass {
   if (COMMIT_NAME.test(name)) return { commit: true, why: `the label "${name}" looks like a commit`, node };
   // An unlabeled button outside a form (carousel arrow, icon button, menu) has no submit semantics: not a commit. Inside a form it stays one.
   if (node.role === "button" && !name) return node.inForm ? { commit: true, why: "a button with no label inside a form", node } : { commit: false, why: "an unlabeled button outside any form", node };
-  if (node.role === "button" && node.inForm && !ROUTINE_BUTTON.test(name)) return { commit: true, ambiguous: true, why: "a button inside a form", node };
+  if (node.role === "button" && node.inForm && !ROUTINE_BUTTON.test(name)) return { commit: true, why: "a button inside a form", node };
   if (node.role === "link" && node.url && /^(javascript|data|blob|mailto|tel):/i.test(node.url.trim())) return { commit: true, why: `a ${node.url.split(":")[0]}: link`, node };
   return { commit: false, why: "ordinary click", node };
 }
