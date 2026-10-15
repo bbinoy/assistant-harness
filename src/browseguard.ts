@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
-import { addressProblem, BROWSER_PREFIX, classifyClick, dnsResolver, hostOf, isAllowedBrowserTool, isRef, parseSnapshot, resolvesPublic, sensitiveKind, type Node, type Resolver } from "./browserules.ts";
+import { addressProblem, BROWSER_PREFIX, classifyClick, dnsResolver, hostOf, isAllowedBrowserTool, isRef, parseSnapshot, resolvesPublic, sensitiveKind, type Node, type Resolver, type VisionMode } from "./browserules.ts";
+import type { Probe } from "./browsecdp.ts";
+import { clickProblem, MAX_POINT_CLICKS, MAX_SHOTS, nodeOfPoint, screenshotInput, validPoint } from "./browsevision.ts";
 import { audit } from "./audit.ts";
 import { clip } from "./format.ts";
 import { cleanText } from "./sanitize.ts";
@@ -20,6 +22,7 @@ export interface Decision {
   judge?: boolean; // ask: the approval judge decides whether the owner is asked (every commit step); anything but its "auto" asks the owner
   redacted?: Record<string, unknown>; // ask: the call as the owner's question and the audit may see it (typed secrets cut to a length)
   facts?: Record<string, unknown>; // ask: host, role and name of the element, added to the judge's audit row
+  input?: Record<string, unknown>; // the call as it must run, when code narrowed it (a screenshot: jpeg, viewport only)
 }
 
 export interface GuardOptions {
@@ -28,10 +31,14 @@ export interface GuardOptions {
   outDir: string;
   maxCommits?: number;
   resolver?: Resolver;
+  vision?: VisionMode; // the vision experiment (browsevision.ts); off: today's behaviour
+  probe?: Probe; // click mode: what is under a point of the page, looked up by code (browsecdp.ts)
+  cdpPort?: number; // click mode: the browser's debugging port on loopback (browseserver.ts starts the browser with it)
 }
 
 const SNAPSHOT_CAP = 24_000; // characters (~7k tokens) of one page view: bigger ones are cut with a visible marker (MCP results over 25k tokens would be written to a file the run cannot read)
 const MAX_DENIED = 6;
+const AUTOFILL_SENSITIVE = /\b(cc-[a-z-]+|current-password|new-password|one-time-code)\b/i; // autocomplete tokens of card and login fields
 const nolabel = (s: string) => s.replace(/\s*:\s*$/, ""); // "Customer name:" as the page labels it
 const HIDDEN = "(hidden: payment or login detail)";
 const short = (tool: string) => tool.slice(BROWSER_PREFIX.length);
@@ -48,6 +55,11 @@ export class BrowseGuard {
   steps = 0;
   private readonly maxCommits: number;
   private readonly resolver: Resolver;
+  readonly vision: VisionMode;
+  readonly cdpPort?: number;
+  private readonly probe?: Probe;
+  private shots = 0;
+  private pointClicks = 0;
   private pending?: string; // the commit call that was asked about: counted when that very call succeeds
 
   constructor(o: GuardOptions) {
@@ -56,6 +68,9 @@ export class BrowseGuard {
     this.outDir = o.outDir;
     this.maxCommits = o.maxCommits ?? settings.browseMaxCommits;
     this.resolver = o.resolver ?? dnsResolver;
+    this.vision = o.vision ?? "off";
+    this.probe = o.probe;
+    this.cdpPort = o.cdpPort;
   }
 
   private log(tool: string, verdict: string, input: Record<string, unknown>, extra: Record<string, unknown> = {}) {
@@ -105,11 +120,12 @@ export class BrowseGuard {
   }
 
   // Every step the classifier takes for a commit goes to the approval judge with this text; the judge (or, failing that, the owner) decides.
-  private commit(tool: string, input: Record<string, unknown>, node: Node | undefined, why: string, control: string, extraValues: [string, string][] = []): Decision {
+  // `judge` false: the owner is asked directly (a click code could not identify).
+  private commit(tool: string, input: Record<string, unknown>, node: Node | undefined, why: string, control: string, extraValues: [string, string][] = [], judge = true): Decision {
     if (this.commits >= this.maxCommits) return this.deny(tool, input, `This run already took its ${this.maxCommits} confirmed step(s). Stop and report what is left for the owner.`, { commit: true, cap: true });
-    this.log(tool, "judge", input, { commit: true, why, role: node?.role, name: node?.name?.slice(0, 80) });
+    this.log(tool, judge ? "judge" : "ask-owner", input, { commit: true, why, role: node?.role, name: node?.name?.slice(0, 80) });
     this.pending = tool + JSON.stringify(input);
-    return { kind: "ask", description: this.commitText(control, why, extraValues, node?.formName), once: true, judge: true, facts: { host: hostOf(this.url), role: node?.role, name: node?.name?.slice(0, 80), step: short(tool) } };
+    return { kind: "ask", description: this.commitText(control, why, extraValues, node?.formName), once: true, judge, facts: { host: hostOf(this.url), role: node?.role, name: node?.name?.slice(0, 80), step: short(tool) } };
   }
 
   // Payment and login fields: the owner is ALWAYS asked (no judge, no cap, no skipping). The question names the page, the field and the kind of
@@ -133,7 +149,7 @@ export class BrowseGuard {
     if (this.denied >= MAX_DENIED) return this.deny(toolName, input, "Too many refused calls in this run. Stop now and report what you have.");
     if (toolName === "WebSearch") return { kind: "defer" };
     if (!toolName.startsWith("mcp__browser__")) return this.deny(toolName, input, `${toolName} is not available in a browse run.`);
-    if (!isAllowedBrowserTool(toolName)) return this.deny(toolName, input, `${short(toolName)} is not available.`);
+    if (!isAllowedBrowserTool(toolName, this.vision)) return this.deny(toolName, input, `${short(toolName)} is not available.`);
     const name = short(toolName);
     switch (name) {
       case "navigate":
@@ -209,9 +225,59 @@ export class BrowseGuard {
         if (c.commit) return this.commit(toolName, input, n, c.why, `Button: “${clip(n.name || "(no label)", 120)}” (${n.role})`);
         return { kind: "defer", description: `🖱️ Browser: click “${clip(n.name || n.ref, 80)}” (${n.role})` };
       }
+      case "take_screenshot": {
+        if (this.shots >= MAX_SHOTS) return this.deny(toolName, input, `This run already took ${MAX_SHOTS} screenshots. Work from the page views, or stop and report.`);
+        const r = screenshotInput(input);
+        if ("deny" in r) return this.deny(toolName, input, r.deny);
+        this.shots++;
+        this.log(toolName, "shot", input);
+        return { kind: "defer", input: r.input };
+      }
+      case "mouse_move_xy": {
+        const p = validPoint(input.x, input.y);
+        if (typeof p === "string") return this.deny(toolName, input, p);
+        this.log(toolName, "hover-point", input);
+        return { kind: "defer" };
+      }
+      case "mouse_wheel": {
+        const ok = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 5000);
+        if (!ok(input.deltaX) || !ok(input.deltaY)) return this.deny(toolName, input, "The scroll amount must be a number up to 5000.");
+        return { kind: "defer" };
+      }
+      case "mouse_click_xy":
+        return this.clickAt(toolName, input);
       default:
         return { kind: "defer" }; // snapshot, find, navigate_back, hover, wait_for: reads
     }
+  }
+
+  // A click at a point (BROWSE_VISION=click). The model's idea of what is there counts for nothing: code asks the browser what the click
+  // would hit (browsecdp.ts), turns that into a Node and decides it as it decides a ref click. What it cannot resolve asks the owner;
+  // payment and login fields always ask; a link must pass the address check.
+  private async clickAt(tool: string, input: Record<string, unknown>): Promise<Decision> {
+    const bad = clickProblem(input);
+    if (bad) return this.deny(tool, input, bad);
+    const pt = validPoint(input.x, input.y);
+    if (typeof pt === "string") return this.deny(tool, input, pt);
+    if (!this.probe) return this.deny(tool, input, "Clicking at a point is not available in this run. Click by ref.");
+    if (++this.pointClicks > MAX_POINT_CLICKS) return this.deny(tool, input, `This run already made ${MAX_POINT_CLICKS} clicks at points. Stop and report.`);
+    const at = `(${Math.round(pt.x)}, ${Math.round(pt.y)})`;
+    const info = await this.probe(pt.x, pt.y);
+    const unknown = (why: string) => this.commit(tool, input, undefined, `the element at the point could not be identified: ${why}`, `Click at ${at} on something code could not identify`, [], false);
+    if (typeof info === "string") return unknown(info);
+    if (!this.url || info.pageUrl !== this.url) return unknown("the page is not the one in the last page view");
+    if (info.opaque) return unknown(info.opaque);
+    if (info.href && info.href.split("#")[0] !== this.url.split("#")[0]) {
+      const badLink = addressProblem(info.href);
+      if (badLink) return this.deny(tool, input, `That link is not allowed: ${badLink}.`, { role: info.role });
+    }
+    const kind = info.password ? "a password" : sensitiveKind(`${info.hints} ${info.name}`) ?? (AUTOFILL_SENSITIVE.test(info.hints) ? "a payment or login detail" : undefined);
+    if (kind) return this.sensitive(tool, input, [{ name: info.name || info.hints || `the field at ${at}`, kind }]);
+    const node = nodeOfPoint(info, pt.x, pt.y);
+    const c = classifyClick(node);
+    this.log(tool, c.commit ? "commit-check" : "click", input, { role: node.role, name: node.name.slice(0, 80), commit: c.commit, point: true });
+    if (c.commit) return this.commit(tool, input, node, c.why, `Click at ${at}: “${clip(node.name || "(no label)", 120)}” (${node.role})`);
+    return { kind: "defer", description: `🖱️ Browser: click at ${at}: “${clip(node.name || node.role, 80)}” (${node.role})` };
   }
 
   // After a call succeeded: what the model will read (a linked snapshot file read in, a page view cut to size), and what code remembers.
@@ -238,6 +304,7 @@ export class BrowseGuard {
     out = cleanText(out).text; // refs and names are remembered as the model will read them, hidden characters out
     if (out.length > SNAPSHOT_CAP) out = `${out.slice(0, SNAPSHOT_CAP)}\n[... ${out.length - SNAPSHOT_CAP} characters of the page view cut: use browser_find for what you need, or a narrower page]`;
     if (/\[ref=|### Snapshot|Page URL/.test(out)) audit("browse_view", "page", "browse", { tool: short(toolName), chars: out.length, cut: out.length > SNAPSHOT_CAP, fromFile: !!link });
+    if (short(toolName) === "take_screenshot") audit("browse_view", "screenshot", "browse", { tool: short(toolName), chars: out.length });
     this.remember(toolName, input, out, seen);
     return out === text ? undefined : out;
   }

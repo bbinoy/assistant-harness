@@ -96,7 +96,7 @@ export const MANIFEST: readonly ToolEntry[] = [
   // The browser server's tools, in the browse run only (denied everywhere else). Which element a click or a field is, and which
   // addresses are fine, is code (browse.ts): reads and plain clicks run, a page address and typed text go to the approval judge, a
   // click that commits (book, buy, send...) is turned into an ask by code, payment and login fields are denied. Any other tool of the server is denied there.
-  ...rows(BR, "browse", "browser-read", "no", "snapshot find wait_for tabs hover navigate_back click press_key", { only: ["browse"] }),
+  ...rows(BR, "browse", "browser-read", "no", "snapshot find wait_for tabs hover navigate_back click press_key take_screenshot mouse_click_xy mouse_move_xy mouse_wheel", { only: ["browse"] }),
   ...rows(BR, "browse", "browser-nav", "auto", "navigate", { only: ["browse"] }),
   ...rows(BR, "browse", "browser-input", "auto", "type fill_form select_option", { only: ["browse"] }),
   ...rows(BR, "browse", "browser-dialog", "yes", "handle_dialog", { only: ["browse"] }),

@@ -148,6 +148,9 @@ export function loadSettings(env: Env) {
     browseMaxUsd: num(env, "BROWSE_MAX_USD", 1.5, 0.05, 50),
     browseMaxMinutes: num(env, "BROWSE_MAX_MINUTES", 10, 1, 120),
     browseMaxCommits: num(env, "BROWSE_MAX_COMMITS", 8, 0, 20),
+    // Screenshot vision for the browse worker (src/browsevision.ts), an experiment, off by default. read: screenshots reach the model, clicks stay by ref.
+    // click: also clicks by coordinates, which the guard resolves to the element under the point itself (a debugging port on loopback, browsecdp.ts).
+    browseVision: oneOf(env, "BROWSE_VISION", "off", ["off", "read", "click"] as const),
     browseLocale: env.BROWSE_LOCALE?.trim() || "en-GB", // the browser's language (Accept-Language, navigator.language): an ordinary one, not the headless default en-US
     browseBrowserPath: env.BROWSE_BROWSER_PATH?.trim() || undefined, // advanced: a Chromium or Chrome executable instead of the one npm run setup:browse installs
 

@@ -94,6 +94,7 @@ export interface GuardDecision {
   judge?: boolean; // ask: goes to the approval judge first (a browse commit step); only its "auto" skips the owner. Without it the owner is always asked
   redacted?: Record<string, unknown>; // ask: the call as the question writer, the approval card and the audit see it (a typed secret cut to its length); the real input still runs
   facts?: Record<string, unknown>; // ask: what the judge's audit row records about the step (host, role, name)
+  input?: Record<string, unknown>; // the call as it must run, when the guard narrowed it (the browse screenshot); the allowed call runs with this input
 }
 export interface CallGuard {
   decide: (tool: string, input: Record<string, unknown>) => Promise<GuardDecision>;
@@ -112,7 +113,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       // Reads log tool + decision only. Writes also log the ids they touch (ids, never
       // content), so "what did it archive?" can always be answered from the audit log.
       audit(tool, "allow", source, isReadTool(tool) ? undefined : idsOf(input));
-      return { behavior: "allow", updatedInput: input };
+      return { behavior: "allow", updatedInput: g?.input ?? input };
     }
     if (verdict === "deny") {
       if (isInboxArchive(tool, input) && settings.mailProvider === "gmail") {
