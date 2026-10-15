@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildOptions } from "../src/agent.ts";
+import { buildOptions } from "../src/agentrun.ts";
 import { createPipeline, group, owner } from "../src/conversation.ts";
 import { createOutbound } from "../src/outbound.ts";
 import { classify } from "../src/policy.ts";
