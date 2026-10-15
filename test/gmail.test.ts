@@ -400,3 +400,47 @@ test("skills and doctor: the gmail skill is offered instead of the Mailbird ones
   assert.deepEqual(out.slice(0, 2), [[true, "MAIL_SELF_ADDRESS set"], ["warn", "Gmail connector available"]]);
   assert.deepEqual(addrs(SELF), [SELF]);
 });
+
+// ---- batching: one relay run per tick ----
+
+test("getMessages: the messages of a tick go through ONE relay run, in order, duplicates once", async () => {
+  await withGmail({}, async () => {
+    const runs: Call[][] = [];
+    const relay: Relay = async (cs) => (runs.push(cs), cs.map((c) => mcp({ sender: `Person ${c.input.messageId} <${c.input.messageId}@example.com>`, plaintext_body: `body ${c.input.messageId}` })));
+    const got = await new GmailMail(relay).getMessages(["a", "b", "a", "c"]);
+    assert.equal(runs.length, 1);
+    assert.deepEqual(runs[0]!.map((c) => c.input), [{ messageId: "a", messageFormat: "PLAIN_TEXT" }, { messageId: "b", messageFormat: "PLAIN_TEXT" }, { messageId: "c", messageFormat: "PLAIN_TEXT" }]);
+    assert.deepEqual(got.map((m) => (m as { body: string }).body), ["body a", "body b", "body a", "body c"]);
+    assert.deepEqual(await new GmailMail(relay).getMessages([]), []);
+    assert.equal(runs.length, 1); // nothing to fetch, no run
+  });
+});
+
+test("getMessages: a big tick is split into runs of ten; a failed run fails only its own messages; a short result is an error for the missing one", async () => {
+  await withGmail({}, async () => {
+    const ids = Array.from({ length: 23 }, (_, i) => `m${i}`);
+    const sizes: number[] = [];
+    const relay: Relay = async (cs) => {
+      sizes.push(cs.length);
+      if (sizes.length === 2) throw new Error("relay down");
+      return cs.slice(0, sizes.length === 3 ? 2 : cs.length).map((c) => mcp({ sender: "d@example.com", plaintext_body: String(c.input.messageId) }));
+    };
+    const got = await new GmailMail(relay).getMessages(ids);
+    assert.deepEqual(sizes, [10, 10, 3]);
+    assert.equal((got[0] as { body: string }).body, "m0");
+    assert.match((got[10] as Error).message, /relay down/);
+    assert.equal((got[20] as { body: string }).body, "m20");
+    assert.match((got[22] as Error).message, /no result/);
+  });
+});
+
+test("getMessages: only calls the relay allows are sent (get_message, never raw), whatever the ids look like", async () => {
+  await withGmail({}, async () => {
+    assert.equal(relayAllowed({ tool: GM + "get_message", input: { messageId: "a", messageFormat: "RAW" } }), false);
+    const seen: Call[][] = [];
+    const relay: Relay = async (cs) => (seen.push(cs), cs.map(() => mcp({ sender: "d@example.com", plaintext_body: "x" })));
+    const got = await new GmailMail(relay).getMessages(["a", 7 as unknown as string]);
+    assert.equal(got.length, 2);
+    assert.ok(seen[0]!.every((c) => relayAllowed(c) && c.tool === GM + "get_message"));
+  });
+});

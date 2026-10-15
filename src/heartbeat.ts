@@ -54,7 +54,7 @@ interface HeartbeatHooks {
 }
 
 // What the mail check needs of the mail client (Mailbird, the Gmail relay, or a fake in tests).
-export type MailSource = Pick<Mailbird, "inboxes" | "call" | "close"> | Pick<GmailMail, "inboxes" | "call" | "close">;
+export type MailSource = (Pick<Mailbird, "inboxes" | "call" | "close"> | Pick<GmailMail, "inboxes" | "call" | "close">) & { getMessages?: GmailMail["getMessages"] };
 
 // The provider's mail source (the heartbeat, `npm run triage-check` and `npm run restore` all start from here).
 export const newMailSource = (): MailSource & { connect?: () => Promise<void> } => (settings.mailProvider === "gmail" ? new GmailMail() : new Mailbird());
@@ -125,13 +125,13 @@ async function checkMail(mb: MailSource) {
 }
 
 // Runs `fn` over `items` with at most `limit` in flight, keeping order.
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
   const worker = async () => {
     while (next < items.length) {
       const i = next++;
-      out[i] = await fn(items[i]!);
+      out[i] = await fn(items[i]!, i);
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
@@ -140,9 +140,15 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 
 const short = (res: unknown) => String(typeof res === "string" ? res : JSON.stringify(res)).replace(/\s+/g, " ").slice(0, 120);
 
+type Fetched = { body?: string; from?: { displayName?: string; email?: string } };
+
 async function fetchInputs(mb: MailSource, mails: NewMail[]): Promise<MailInput[]> {
-  return mapLimit(mails, FETCH_CONCURRENCY, async (m): Promise<MailInput> => {
-    const msg = await mb.call<{ body?: string; from?: { displayName?: string; email?: string } }>("get_message", { messageId: m.messageId });
+  // Gmail answers every message of the tick in one relay run (a model run each would be the cost of a busy inbox).
+  const batch = mb.getMessages ? await mb.getMessages(mails.map((m) => m.messageId)) : undefined;
+  return mapLimit(mails, FETCH_CONCURRENCY, async (m, i): Promise<MailInput> => {
+    const got = batch?.[i];
+    if (got instanceof Error) throw got;
+    const msg = got ?? (await mb.call<Fetched>("get_message", { messageId: m.messageId }));
     return {
       account: m.accountEmail,
       fromName: oneLine("mail sender", msg.from?.displayName ?? m.from, LIMITS.name),

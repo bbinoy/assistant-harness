@@ -205,7 +205,7 @@ src/handler.ts       Sonnet handler for routine mail (persistent queue)
 src/brief.ts         the brief's HOW (attempt, capture, last-brief.md)
 src/digest.ts        what the heartbeat did, for the brief
 src/mailbird.ts      direct MCP client for the local mail server
-src/gmail.ts         the Gmail provider: a relay run for the heartbeat's connector calls, parsers for the connector's results, the approval read-backs
+src/gmail.ts         the Gmail provider: a relay run for the heartbeat's connector calls (the get_message calls of one tick share one run, `getMessages`, ten per run), parsers for the connector's results, the approval read-backs
 src/gmailrules.ts    Gmail rules a flag cannot say: TRASH/SPAM label values, attachments, log-only archive, the brief to oneself (pure, tested)
 src/budget.ts        daily spend guard
 src/settings.ts      every tunable, validated at startup (pure loader, tested)
