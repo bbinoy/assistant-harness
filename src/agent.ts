@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { query, startup, type HookCallbackMatcher, type Options, type SDKMessage, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
+import { createTellServer, OWNER_TELL, withTell, type TellSink } from "./telluser.ts";
 import { browseStatus, browserServer, browseSystem, createBrowseServer, resultText, withText, type BrowseGuard, type BrowseMode } from "./browse.ts";
 import { HIDDEN_BROWSER_TOOLS } from "./browserules.ts";
 import { pausing, RunTimeout, withCeiling, type Ceiling } from "./ceiling.ts";
@@ -144,12 +145,15 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     settings.browse && (opts.source === "chat" || opts.source === "background" || opts.source === "group")
       ? createBrowseServer({ mode, groupId: opts.memory?.groupId, run: browseRunner(mode === "group" && opts.memory?.groupId ? approveInGroup(opts.memory.groupId) : approve) })
       : undefined;
+  // tell_user (telluser.ts): the owner's chat and groups, never an unattended run (a wake-up included).
+  const tellKey = opts.source === "chat" ? OWNER_TELL : opts.source === "group" ? opts.memory?.groupId : undefined;
+  const tellServer = tellKey ? createTellServer(tellKey) : undefined;
   const status = browsing ? browseStatus() : undefined;
   if (status && !status.ok) throw new Error(`browsing is not set up: ${status.reason}`);
   const mcpServers: Options["mcpServers"] = browsing && opts.guard && status?.ok
     ? { browser: browserServer(status, opts.guard.outDir) }
-    : opts.memory || browseTool
-      ? { ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
+    : opts.memory || browseTool || tellServer
+      ? { ...(tellServer ? { tell: tellServer } : {}), ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
       : undefined;
   return {
     model: settings.model,
@@ -323,13 +327,13 @@ export function prepareChat(approve: Approve, notify: (text: string) => Promise<
 }
 
 // Interactive chat: resumes the persistent conversation, on the warm process when it fits.
-export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void }): Promise<AgentReply> {
+export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void; tell?: TellSink }): Promise<AgentReply> {
   setChatOwnerMessage(ownerMessage ?? prompt);
   spare.touch("owner"); // in use: the idle period starts over
   const o = { ...chatOptions(notify), onFirstOutput: hooks?.firstOutput };
   const r = chatResume();
   const input = userInput(prompt, pictures);
-  return runWarmOrCold(spare, "owner", o, r, "chat", input, (abortController) => query({ prompt: input, options: { ...buildOptions(approve, o, r.resume), abortController } }));
+  return withTell(OWNER_TELL, hooks?.tell, () => runWarmOrCold(spare, "owner", o, r, "chat", input, (abortController) => query({ prompt: input, options: { ...buildOptions(approve, o, r.resume), abortController } })));
 }
 
 // ---- a group's chat ----
@@ -348,13 +352,13 @@ export const groupRunOptions = (conv: GroupConv, systemPrompt: string): RunOptio
 });
 
 // `build` makes the prompt once it is known whether the session resumes: a resumed one is told only what it has not seen (group.ts).
-export async function runGroupTurn(conv: GroupConv, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}): Promise<AgentReply> {
+export async function runGroupTurn(conv: GroupConv, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}, tell?: TellSink): Promise<AgentReply> {
   const r = chatResume(conv.sessionFile);
   const { prompt, seenAt, pictures } = build(r.resume ? r.seenAt : undefined);
   const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
   const input = userInput(prompt, pictures);
   // The group's own warm process, if it is the one kept and nothing it was built from has changed (same group, session, prompt, notes index).
-  return runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, (abortController) => (io.query ?? query)({ prompt: input, options: { ...buildOptions(approveInGroup(conv.groupId!), o, r.resume), abortController } }));
+  return withTell(conv.groupId!, tell, () => runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, (abortController) => (io.query ?? query)({ prompt: input, options: { ...buildOptions(approveInGroup(conv.groupId!), o, r.resume), abortController } })));
 }
 
 // Keep ONE warm process for the group that spoke last, replacing another group's. Called when a message arrives for a
