@@ -424,7 +424,7 @@ test("private chat: the owner's reaction is feedback the model judges; it may re
   assert.equal(silent.r.sent.length + silent.r.reacts.length, 0);
   const approval = rig({ reactionApproval: "approved" });
   await approval.pipeline.handleIncoming(owner(), react());
-  assert.equal(approval.r.prompts.length, 0); // 👍 on a pending "Approve?" answers it
+  assert.equal(approval.r.prompts.length, 0); // 👍 on a pending approval message answers it
 });
 
 // ---- groups use the same code, aimed at the group ----

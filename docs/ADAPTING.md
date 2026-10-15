@@ -102,7 +102,7 @@ Then adjust:
 | `src/markdown.ts` | emit the target's markup instead of Signal style ranges (Telegram MarkdownV2/HTML entities, Slack mrkdwn, WhatsApp `*bold*`). `splitSections` and the section-per-message brief delivery carry over unchanged. |
 | `src/outbound.ts` | keep or drop the echo guard, as above. Chunk size (`CHUNK_LIMIT`) should respect the platform's message limit. |
 | `src/guards.ts` | allowlist by your platform's user/chat id. Keep it pure and keep the tests. |
-| `src/approvals.ts` | unchanged. It matches reactions to the "Approve?" message by id; any platform with message ids and reactions works. Without reactions, delete `answerReaction` and rely on text replies. |
+| `src/approvals.ts` | unchanged. It matches reactions to the approval message by id; any platform with message ids and reactions works. Without reactions, delete `answerReaction` and rely on text replies. |
 | `src/config.ts`, `.env.example` | credentials for the platform (a bot token, say), kept in `.env`. |
 
 ### Notes per platform

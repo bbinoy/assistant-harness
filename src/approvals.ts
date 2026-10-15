@@ -240,10 +240,8 @@ export function request(
     console.log(`approval requested${background ? " (background)" : ""}: ${label}`);
     openChat++;
     prepareJudge(); // warm the judge while the owner reads the question
-    const hint = background
-      ? "Reply yes or no (or reply to this message to change something)"
-      : isModifiable(call.tool) ? "Reply yes, no, or tell me what to change" : "Reply yes or no";
-    send(`Approve?\n${shown}\n\n${hint}, or react 👍 / 👎 (${formatWait(minutes)}, then I assume no).`)
+    // The message is the model's question, as written: no header, no footer. A 👍 / 👎 or a reply on it answers it (open is keyed by its timestamp).
+    send(shown)
       .then((ts) => {
         if (entry.done) return;
         entry.ts = ts;

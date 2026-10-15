@@ -143,7 +143,7 @@ if (proposer) setDraftReader(proposer.read);
 // Gmail: the approval of a send reads the draft (or the message being replied to) back through the connector (gmail.ts).
 if (settings.mailProvider === "gmail") setGmailReaders(gmailReaders());
 
-// A 👍 / 👎 on the pending "Approve?" message answers it (the pipeline checks); any other reaction of the
+// A 👍 / 👎 on the pending approval message answers it (the pipeline checks); any other reaction of the
 // owner is feedback. Our own status icons come back as reactions and are dropped.
 signal.onReaction((r) => {
   if (r.isRemove || signal.isOwnReaction(r)) return;

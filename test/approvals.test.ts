@@ -49,15 +49,14 @@ test("three chat approvals: answered independently by reaction and quoted reply"
   assert.deepEqual(await answer("yes", () => {}, undefined, never), { outcome: "none" });
 });
 
-test("timeouts per kind and the stated wait", async (t) => {
+test("timeouts per kind; the message has no header or footer", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   sent.length = 0;
   let chatDone = false;
   let bgDone = false;
   const chat = askTs(false, 1401).then((d) => ((chatDone = true), d));
   const bg = askTs(true, 1402).then((d) => ((bgDone = true), d));
-  assert.match(sent[0]!, /\(15 min, then I assume no\)/);
-  assert.match(sent[1]!, /\(2 h, then I assume no\)/);
+  assert.doesNotMatch(sent[0]!, /Approve\?|then I assume no|Reply yes or no/); // the message is the question as written, no header or footer
   t.mock.timers.tick(15 * 60_000 - 1);
   await Promise.resolve();
   assert.equal(chatDone, false);

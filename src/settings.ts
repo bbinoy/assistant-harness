@@ -129,7 +129,7 @@ export function loadSettings(env: Env) {
     radarMinutes: num(env, "RADAR_MINUTES", 180, 30, 720),
     maxProactivePerDay: num(env, "MAX_PROACTIVE_PER_DAY", 8, 0, 50),
 
-    // How long an "Approve?" waits before it counts as declined: one asked in a chat turn, and one asked by an unattended run.
+    // How long an approval waits before it counts as declined: one asked in a chat turn, and one asked by an unattended run.
     approvalTimeoutMinutes: num(env, "APPROVAL_TIMEOUT_MINUTES", 15, 1, 1440),
     backgroundApprovalTimeoutMinutes: num(env, "BACKGROUND_APPROVAL_TIMEOUT_MINUTES", 120, 1, 2880),
 
