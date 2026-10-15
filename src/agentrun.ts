@@ -169,6 +169,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     plugins: isolated ? undefined : [{ type: "local", path: settings.pluginDir, skipMcpDiscovery: true }],
     skills: isolated ? undefined : (opts.skills ? [...opts.skills] : OFFERED_SKILLS),
     disallowedTools: browsing ? hiddenBrowserTools(opts.guard?.vision) : isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
+    permissionMode: "default", // never the ambient mode (user settings or an auto mode could skip canUseTool, and with it every guard and approval)
     canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir, opts.judgeContext, undefined, opts.guard),
     hooks,
     maxTurns: opts.maxTurns,

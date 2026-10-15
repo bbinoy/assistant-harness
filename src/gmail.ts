@@ -61,6 +61,7 @@ export const sdkRelay: Relay = async (calls) => {
     env: { ...process.env, MCP_CONNECTION_NONBLOCKING: "false" },
     // Only the needed Gmail tools are visible: the other connectors by prefix, the rest of Gmail by name (a smaller context per tick).
     disallowedTools: [...new Set([...settings.hiddenConnectors, "mcp__claude_ai_Notion", "mcp__claude_ai_Google_Calendar", ...hiddenTools(toolsSeen(), { ...settings, gmailTools: names })])],
+    permissionMode: "default", // see agentrun.ts
     canUseTool: async (tool, input) =>
       planned.has(callKey(tool, input)) && relayAllowed({ tool, input })
         ? { behavior: "allow", updatedInput: input }
