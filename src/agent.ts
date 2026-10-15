@@ -92,6 +92,15 @@ function browseRunOptions(guard: BrowseGuard): RunOptions {
 // The `run` of a browse entry tool (browse.ts BrowseContext): the browse run under its guard, asking `approve` for commit steps.
 export const browseRunner = (approve: Approve) => (prompt: string, guard: BrowseGuard): Promise<AgentReply> => runAgent(prompt, approve, browseRunOptions(guard));
 
+// The built-in tools of a run (everything else is an MCP tool): the browse run only searches; a group edits its own notes and searches; the
+// owner's chat adds skills and opening pages; a background run has no notes; the rest only load skills.
+function builtinTools(opts: RunOptions, browsing: boolean, isolated: boolean): string[] {
+  if (browsing) return ["WebSearch"];
+  if (isolated) return ["Read", "Write", "Edit", "WebSearch"];
+  if (opts.memory) return ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"];
+  return opts.source === "background" ? ["Skill", "WebSearch", "WebFetch"] : ["Skill"];
+}
+
 export function buildOptions(approve: Approve, opts: RunOptions, resume: string | undefined): Options {
   // After a successful tool call: announce a note change on the phone (chat), and report the
   // call to whoever asked (the brief captures what it sent).
@@ -165,7 +174,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     // Built-ins: Skill, and for chat Read / Write / Edit (confined to the notes folder by
     // policy.ts) and WebSearch / WebFetch (search freely, open a page only after approval). No Bash. Everything else the agent can do is an MCP tool (Mailbird,
     // Notion, Calendar...), gated by canUseTool.
-    tools: browsing ? ["WebSearch"] : isolated ? ["Read", "Write", "Edit", "WebSearch"] : opts.memory ? ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"] : opts.source === "background" ? ["Skill", "WebSearch", "WebFetch"] : ["Skill"],
+    tools: builtinTools(opts, browsing, isolated),
     // "user" loads user-scope MCP servers (Mailbird) and CLAUDE.md; the skills offered are
     // limited to the bundled ones below.
     // Not "project": there is no project here.
