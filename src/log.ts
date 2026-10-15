@@ -1,24 +1,20 @@
 // Import this FIRST (for its side effects).
 //  - owner-only files: everything the harness creates is mode 600/700 (the audit log holds senders and subjects)
-//  - logs go to logs/agent.log; startup also migrates the old layout and secures state/, logs/, memory/
+//  - logs go to logs/agent.log; startup secures state/, logs/, memory/
 //  - every console line gets a local timestamp, is redacted, and is appended to a rotating file
 //  - crashes and unhandled rejections are written to that same file before the process exits
 process.umask(0o077);
 
 import { appendFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { trimLogInPlace } from "./logtrim.ts";
-import { migrateLegacyLayout } from "./migrate.ts";
 import { redact } from "./redact.ts";
-import { settings } from "./settings.ts";
 import { dataPath, secureDataDirs } from "./state.ts";
 
 const FILE = dataPath("logs/agent.log");
 const MAX_BYTES = 5 * 1024 * 1024;
 const KEEP = 3;
 
-// Before anything reads a file: move logs and the last brief out of the old state/ layout,
-// then create and tighten state/, logs/ and memory/ (owner-only, whatever made the files).
-const migrated = migrateLegacyLayout(settings.dataDir);
+// Before anything reads a file: create and tighten state/, logs/ and memory/ (owner-only, whatever made the files).
 secureDataDirs();
 
 let writes = 0;
@@ -68,7 +64,6 @@ for (const level of ["log", "error", "warn", "info", "debug"] as const) {
 }
 
 if (trimmedStderr) console.log(`logs/launchd-stderr.log was over ${MAX_BYTES / 1024 / 1024} MB: dropped the oldest ${Math.round(trimmedStderr / 1024)} KB`);
-if (migrated.length) console.log(`migrated ${migrated.length} file(s) out of state/: ${migrated.join(", ")}`);
 
 // Let launchd restart us, but leave a trace of why.
 process.on("uncaughtException", (e) => {

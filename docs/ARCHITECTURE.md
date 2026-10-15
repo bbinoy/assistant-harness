@@ -232,7 +232,6 @@ src/memory-tools.ts  `forget_note`, `search_logs`, `undo_dream`: one in-process 
 src/contain.ts       `isInside`: the one path-containment check (symlinks and `..` resolved) behind every file tool
 src/logtrim.ts       cuts launchd-stderr.log down in place at start (pure part tested)
 src/session.ts       when a conversation's session resumes, starts fresh or gets compacted (pure, tested)
-src/migrate.ts       one-time move of old state/ files into logs/ and memory/ (idempotent)
 src/fence.ts         fences untrusted or stored text as data inside a prompt (cleaned and defused first)
 src/sanitize.ts      the one shared text sanitiser: hidden characters, caps, run collapse, fence and header defusing
 src/html.ts          HTML to visible text (parse5; drops hidden content)
@@ -242,7 +241,7 @@ src/reaction.ts      the model's emoji reactions: "[[react: 👍]]" at the start
 src/quote.ts         Signal reply threading: quoted text in, threaded answers out (pure, tested)
 src/format.ts        readable approval text for each tool call (pure, tested)
 src/config.ts        required secrets and the owner's number, read from .env
-src/log.ts           redacting, rotating agent.log; first-start migration and permissions
+src/log.ts           redacting, rotating agent.log; owner-only permissions
 src/pause.ts         the pause switch and local-day helper
 src/redact.ts        keeps phone numbers and credentials out of logs
 src/cli.ts           report / restore / triage-check
