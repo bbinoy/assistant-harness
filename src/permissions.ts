@@ -91,6 +91,7 @@ export interface GuardDecision {
   reason?: string;
   description?: string;
   once?: boolean; // an approved call is not repeated
+  judge?: boolean; // ask: still goes to the approval judge (an ambiguous step); only its "auto" skips the owner
 }
 export interface CallGuard {
   decide: (tool: string, input: Record<string, unknown>) => Promise<GuardDecision>;
@@ -145,7 +146,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     let judged: Verdict | undefined;
     const [ownerMessage, ...earlier] = [...chatOwnerMessages].reverse();
     // A chat send is judged against the owner's words; with none on record there is nothing to judge it against.
-    if (settings.autoApprove !== "off" && g?.kind !== "ask" && isJudgeable(tool, input, source, view) && (view === undefined || (source === "chat" && ownerMessage !== undefined))) {
+    if (settings.autoApprove !== "off" && (g?.kind !== "ask" || g.judge === true) && (g?.judge === true || isJudgeable(tool, input, source, view)) && (view === undefined || (source === "chat" && ownerMessage !== undefined))) {
       judged = await judge({ source, description, ownerMessage: source === "chat" ? ownerMessage : undefined, earlier: source === "chat" ? earlier.reverse() : undefined, task: source === "chat" ? undefined : judgeContext });
       audit(tool, `judge-${judged.decision}`, source, { reason: judged.reason, mode: settings.autoApprove });
       if (mayAutoApprove(settings.autoApprove, source, judged)) {

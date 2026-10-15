@@ -91,6 +91,7 @@ export interface Decision {
   reason?: string; // deny: what the model is told
   description?: string; // ask, and what the judge reads: built by code from the real element
   once?: boolean; // an approved call is not repeated (a commit)
+  judge?: boolean; // ask: the approval judge may approve it without the owner (an ambiguous step); anything but its "auto" asks the owner
 }
 
 export interface GuardOptions {
@@ -162,11 +163,11 @@ export class BrowseGuard {
     ].join("\n");
   }
 
-  private commit(tool: string, input: Record<string, unknown>, node: Node | undefined, why: string, extraValues: [string, string][] = []): Decision {
+  private commit(tool: string, input: Record<string, unknown>, node: Node | undefined, why: string, extraValues: [string, string][] = [], judge = false): Decision {
     if (this.commits >= this.maxCommits) return this.deny(tool, input, `This run already took its ${this.maxCommits} confirmed step(s). Stop and report what is left for the owner.`, { commit: true, cap: true });
-    this.log(tool, "ask", input, { commit: true, why, role: node?.role, name: node?.name?.slice(0, 80) });
+    this.log(tool, "ask", input, { commit: true, why, judge, role: node?.role, name: node?.name?.slice(0, 80) });
     this.pending = tool + JSON.stringify(input);
-    return { kind: "ask", description: this.commitText(node, why, extraValues), once: true };
+    return { kind: "ask", description: this.commitText(node, why, extraValues), once: true, ...(judge ? { judge: true } : {}) };
   }
 
   async decide(toolName: string, input: Record<string, unknown>): Promise<Decision> {
@@ -223,9 +224,10 @@ export class BrowseGuard {
       case "click": {
         const n = this.refNode(input.target);
         if (typeof n === "string") {
-          // A ref that is not in the last view is not looked up: commit-class (fails closed), but invented selectors are refused.
+          // A stale or unknown ref is not a reason to ask the owner: the call is refused and the worker told to look again. Never clicked unseen.
           if (!isRef(input.target)) return this.deny(toolName, input, n);
-          return this.commit(toolName, input, undefined, "the element is not in the last page view");
+          this.log(toolName, "deny", input, { reason: "stale ref", stale: true }); // not counted toward the run's refusals: it is the page moving, not a misstep
+          return { kind: "deny", reason: `${String(input.target)} is not in the last page view (the page changed, or the ref is old). Take a fresh browser_snapshot and click a ref from it.` };
         }
         if (n.url) {
           let abs = n.url;
@@ -239,7 +241,7 @@ export class BrowseGuard {
         }
         const c = classifyClick(n);
         this.log(toolName, c.commit ? "commit-check" : "click", input, { role: n.role, name: n.name.slice(0, 80), commit: c.commit });
-        if (c.commit) return this.commit(toolName, input, n, c.why);
+        if (c.commit) return this.commit(toolName, input, n, c.why, [], !!c.ambiguous);
         return { kind: "defer", description: `🖱️ Browser: click “${clip(n.name || n.ref, 80)}” (${n.role})` };
       }
       default:
@@ -335,6 +337,7 @@ export function browseSystem(who: string = OWNER): string {
     `Only type details the task gives you. NEVER enter card numbers, CVV, passwords, one-time codes, bank or ID numbers, and never log in or solve a CAPTCHA: if the page needs that, stop with status needs_owner and give handoffUrl, the address of the page where ${who} can finish (a link that carries the selection if the page has one).`,
     `A click or key press that commits something (book, buy, pay, send, confirm, register, subscribe, submit) is shown for approval with the real button and what you entered, and runs only if it is approved. If it is declined or refused, stop: status needs_owner, say what is ready, handoffUrl as above. Do not look for another way to the same step.`,
     `If a site shows a bot check, "access denied", a CAPTCHA or a security-verification page, do not retry it, reload it or look for a way round: name the site in the answer as blocking this browser and go on to another source.`,
+    `Load each site once: some sites let a first page through and challenge a second load in the same session. Do the rest on that page by clicking and reading, not by opening more addresses of the same site. A ref that is refused as not in the page view is old: take a fresh browser_snapshot and use a ref from it.`,
     `Answer with the JSON object only: status (done, needs_owner or failed), answer (a few plain sentences: what you found or did, with prices, times and names exactly as shown), sources (page addresses) and handoffUrl when you stopped before a step.`,
   ].join("\n\n");
 }

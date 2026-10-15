@@ -163,6 +163,7 @@ const ROUTINE_BUTTON = /^(search|find|filter|sort|show|hide|more|next|previous|p
 export interface ClickClass {
   commit: boolean;
   why: string; // for the audit and for the approval
+  ambiguous?: boolean; // a commit by form position only (a named button in a form, no commit word): the approval judge may decide it
   node?: Node;
 }
 
@@ -173,8 +174,9 @@ export function classifyClick(node: Node | undefined): ClickClass {
   if (NOT_A_BUTTON.has(node.role)) return { commit: false, why: "a field, not a button", node };
   const name = node.name.trim();
   if (COMMIT_NAME.test(name)) return { commit: true, why: `the label "${name}" looks like a commit`, node };
-  if (node.role === "button" && !name) return { commit: true, why: "a button with no label", node };
-  if (node.role === "button" && node.inForm && !ROUTINE_BUTTON.test(name)) return { commit: true, why: "a button inside a form", node };
+  // An unlabeled button outside a form (carousel arrow, icon button, menu) has no submit semantics: not a commit. Inside a form it stays one.
+  if (node.role === "button" && !name) return node.inForm ? { commit: true, why: "a button with no label inside a form", node } : { commit: false, why: "an unlabeled button outside any form", node };
+  if (node.role === "button" && node.inForm && !ROUTINE_BUTTON.test(name)) return { commit: true, ambiguous: true, why: "a button inside a form", node };
   if (node.role === "link" && node.url && /^(javascript|data|blob|mailto|tel):/i.test(node.url.trim())) return { commit: true, why: `a ${node.url.split(":")[0]}: link`, node };
   return { commit: false, why: "ordinary click", node };
 }
