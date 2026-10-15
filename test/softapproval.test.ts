@@ -4,7 +4,8 @@ import { answer, answerReaction, request, type SoftDeps } from "../src/approvals
 import { makeApprove, sameArgs } from "../src/approvalask.ts";
 import { approvalLines } from "../src/approvalreport.ts";
 import { composeQuestion } from "../src/softjudge.ts";
-import { answerPrompt, checkPrompt, parseAnswer, parseCheck, parseWrite, writePrompt, type OpenView } from "../src/softprompt.ts";
+import { answerPrompt, parseAnswer, parseWrite, writePrompt, type OpenView } from "../src/softprompt.ts";
+import { factsOf, validateQuestion } from "../src/questionfacts.ts";
 import { runJudge } from "../src/approvaljudge.ts";
 import { settings } from "../src/settings.ts";
 import type { AnswerJudgement } from "../src/softprompt.ts";
@@ -35,8 +36,8 @@ const style = async (s: "soft" | "strict" | "conversational", f: () => Promise<v
     mutable.approvalStyle = was;
   }
 };
-const judging = (j: AnswerJudgement | undefined, seen: { views: OpenView[][]; calls: number } = { views: [], calls: 0 }): SoftDeps => ({
-  judge: async (_t, views) => (seen.calls++, seen.views.push([...views]), j),
+const judging = (j: AnswerJudgement | undefined, seen: { views: OpenView[][]; calls: number; quotes?: unknown[] } = { views: [], calls: 0 }): SoftDeps => ({
+  judge: async (_t, views, _r, quote) => (seen.calls++, seen.views.push([...views]), (seen.quotes ??= []).push(quote), j),
   recent: () => [],
 });
 const never: SoftDeps = { judge: async () => assert.fail("the judge must not be called"), recent: () => [] };
@@ -63,12 +64,9 @@ test("prompts: data is JSON-quoted, so a question with a fake instruction stays 
   assert.match(line, /2 min ago/);
   assert.match(p, /New message from .* \(JSON string\): "hmm"/);
   assert.equal(p.split("\n").length, 3 + 0); // approvals, recent, message: no line of its own for injected text
-  assert.match(writePrompt({ tool: "t", args: { a: 1 }, details: "d\nx", recent: [], background: false, rejected: "bcc missing" }), /rejected because: "bcc missing"/);
-  assert.match(checkPrompt({ tool: "t", args: {}, details: "d", question: "q\nr" }), /"q\\nr"/);
+  assert.match(writePrompt({ tool: "t", args: { a: 1 }, details: "d\nx", recent: [], background: false, required: ["a@example.com", "16:00"] }), /REQUIRED strings.*\["a@example.com","16:00"\]/);
   assert.equal(parseWrite({ text: "  Send it to Alice, ok?  " }), "Send it to Alice, ok?");
   for (const bad of [undefined, {}, { text: 5 }, { text: "short" }, { text: "x".repeat(1300) }]) assert.equal(parseWrite(bad), undefined);
-  assert.equal(parseCheck({ match: "accurate" }).accurate, true);
-  for (const bad of [undefined, {}, { match: "Accurate" }, { match: "accurate " }, { match: true }, { match: "inaccurate" }]) assert.equal(parseCheck(bad).accurate, false);
 });
 
 test("soft: the judge sees ALL open approvals with their exact text and age, and the answer goes to the one it names", async () => {
@@ -106,7 +104,6 @@ test("soft: ambiguity between several open approvals asks which one, and approve
     const r = await answer("yes", () => {}, undefined, judging({ target: "unclear", outcome: "other" }));
     assert.equal(r.outcome, "clarify");
     assert.match(r.reply!, /Which one/);
-    assert.match(r.reply!, /Create event pottery/);
     const nice = await answer("ok", () => {}, undefined, judging({ target: "unclear", outcome: "other", reply: "Meinst du den Termin oder die Mail?" }));
     assert.equal(nice.reply, "Meinst du den Termin oder die Mail?");
     assert.deepEqual([a.d, b.d], [undefined, undefined]);
@@ -160,36 +157,90 @@ test("soft: a modification inside the allow-list is applied; one outside it (rec
   });
 });
 
-test("soft: a long message cannot be consent, whatever the judge says", async () => {
+test("soft: there is no length rule: a long clear yes works, whatever its size", async () => {
   await style("soft", async () => {
     const a = ask("Send mail", mail);
     await settle();
-    const long = `${"well, ".repeat(40)}yes go ahead`;
+    const long = `${"well, ".repeat(500)}yes go ahead`;
     const r = await answer(long, () => {}, undefined, judging({ target: "A1", outcome: "approve" }));
-    assert.equal(r.outcome, "clarify");
-    assert.equal(a.d, undefined);
-    assert.deepEqual(await answer("x".repeat(601), () => {}, undefined, never), { outcome: "none" }); // not even sent to the judge
-    await end(a);
+    assert.equal(r.outcome, "approved");
+    assert.equal(a.d.approved, true);
   });
 });
 
-test("soft fail closed: no usable judgement is no approval; the message goes on as chat with a note", async () => {
+test("parseAnswer: multi needs two or more distinct valid ids with exact verdicts", () => {
+  const ids = ["A1", "A2", "A3"];
+  const ok = parseAnswer({ target: "multi", outcome: "multi", answers: [{ target: "A1", outcome: "approve" }, { target: "A2", outcome: "other" }] }, ids);
+  assert.deepEqual(ok?.answers, [{ target: "A1", outcome: "approve" }, { target: "A2", outcome: "other" }]);
+  for (const answers of [undefined, [], [{ target: "A1", outcome: "approve" }], [{ target: "A1", outcome: "approve" }, { target: "A1", outcome: "decline" }], [{ target: "A1", outcome: "approve" }, { target: "A9", outcome: "approve" }], [{ target: "A1", outcome: "approve" }, { target: "A2", outcome: "approve_modified" }], [{ target: "A1", outcome: "approve" }, { target: "A2", outcome: "Approve" }], "A1,A2"]) {
+    assert.equal(parseAnswer({ target: "multi", outcome: "multi", answers }, ids), undefined, JSON.stringify(answers));
+  }
+  assert.equal(parseAnswer({ target: "A1", outcome: "multi", answers: [{ target: "A1", outcome: "approve" }, { target: "A2", outcome: "approve" }] }, ids), undefined);
+});
+
+test("soft: yes to both approves each of the two; a part that is unclear stays open and only it is asked about", async () => {
+  await style("soft", async () => {
+    const a = ask("Create event pottery");
+    const b = ask("Send mail to Bob", mail);
+    await settle();
+    const both = await answer("yes to both", () => {}, undefined, judging({ target: "multi", outcome: "multi", answers: [{ target: "A1", outcome: "approve" }, { target: "A2", outcome: "approve" }] }));
+    assert.deepEqual(both, { outcome: "approved" });
+    assert.deepEqual([a.d.approved, b.d.approved], [true, true]);
+    const c = ask("one");
+    const d = ask("two", mail);
+    const e = ask("three");
+    await settle();
+    const mixed = await answer("yes to the first, no to the second, the third later", () => {}, undefined, judging({ target: "multi", outcome: "multi", answers: [{ target: "A1", outcome: "approve" }, { target: "A2", outcome: "decline" }, { target: "A3", outcome: "other" }], reply: "Okay. Should I do the third one now?" }));
+    assert.deepEqual(mixed, { outcome: "approved", reply: "Okay. Should I do the third one now?" });
+    assert.deepEqual([c.d.approved, d.d.approved, e.d], [true, false, undefined]);
+    // nothing plain in it: nothing resolved, a clarification about the open ones
+    const none = await answer("hmm both maybe", () => {}, undefined, judging({ target: "multi", outcome: "multi", answers: [{ target: "A1", outcome: "other" }, { target: "A1", outcome: "other" }] }));
+    assert.equal(none.outcome, "clarify"); // no part is a plain yes / no: nothing resolved, one question about the open ones
+    await end(e);
+  });
+});
+
+test("soft: multi fails closed: an ended approval is skipped and a part that is unclear stays open", async () => {
+  await style("soft", async () => {
+    const a = ask("one");
+    const b = ask("two", mail);
+    await settle();
+    const gone = await answer("yes both", () => {}, undefined, { judge: async () => (answerReaction("👎", b.ts), { target: "multi", outcome: "multi", answers: [{ target: "A1", outcome: "approve" }, { target: "A2", outcome: "approve" }] }), recent: () => [] });
+    assert.equal(gone.outcome, "approved");
+    assert.deepEqual([a.d.approved, b.d.approved], [true, false]); // b ended (declined by the reaction) before the judge answered: never approved
+    const c = ask("three");
+    const d = ask("four", mail);
+    await settle();
+    const r2 = await answer("yes to both", () => {}, undefined, judging({ target: "multi", outcome: "multi", answers: [{ target: "A1", outcome: "approve" }, { target: "A2", outcome: "other" }] }));
+    assert.deepEqual(r2.outcome, "approved"); // A1 plainly yes; A2 asked about
+    assert.match(r2.reply!, /Which one|four/);
+    assert.deepEqual([c.d.approved, d.d], [true, undefined]);
+    await end(d);
+  });
+});
+
+test("the default style is conversational", () => {
+  const env = { ...process.env };
+  assert.equal(env.APPROVAL_STYLE === undefined ? settings.approvalStyle : "n/a", env.APPROVAL_STYLE === undefined ? "conversational" : "n/a");
+});
+
+test("soft fail closed: no usable judgement is no approval; the agent gets the owner's words and the failure, never an approval", async () => {
   await style("soft", async () => {
     const a = ask("Send mail", mail);
     await settle();
-    const r = await answer("sounds good, hmm", () => {}, undefined, judging(undefined));
-    assert.equal(r.outcome, "none");
-    assert.match(r.note!, /still open/);
-    assert.equal(a.d, undefined);
+    assert.deepEqual(await answer("sounds good, hmm", () => {}, undefined, judging(undefined)), { outcome: "feedback" });
+    assert.deepEqual(a.d, { approved: false, feedback: "sounds good, hmm", failure: "the owner's reply could not be read as a yes or no" });
+    const bg = ask("Open a page", { tool: "WebFetch", input: { url: "https://example.org" } }, true);
+    await settle();
+    assert.deepEqual(await answer("sounds good, hmm", () => {}, undefined, judging(undefined)), { outcome: "none" }); // a background approval stays open
+    assert.equal(bg.d, undefined);
+    await end(bg);
     const b = ask("Other");
     await settle();
-    const two = await answer("hmm", () => {}, undefined, judging(undefined));
-    assert.match(two.note!, /2 open questions/);
-    // a judge that throws is the caller's undefined; a target that no longer exists (expired meanwhile) is a normal message
-    const gone = await answer("yes", () => {}, undefined, { judge: async () => (answerReaction("👎", b.ts), { target: "A2", outcome: "approve" }), recent: () => [] });
+    // a target that no longer exists (expired meanwhile) is a normal message
+    const gone = await answer("yes sure thing", () => {}, undefined, { judge: async () => (answerReaction("👎", b.ts), { target: "A1", outcome: "approve" }), recent: () => [] });
     assert.equal(gone.outcome, "none");
     assert.equal(b.d.approved, false);
-    await end(a);
   });
 });
 
@@ -209,34 +260,36 @@ test("soft fast paths: reaction, quoted exact yes/no, exact yes/no with exactly 
   });
 });
 
-test("soft: a bare yes with two open goes to the judge (strict would take the newest); with a quote to a gone approval it is never approval", async () => {
+test("soft: a bare yes with two open goes to the judge (strict would take the newest); a quote of an ended approval is told to the judge, not decided by code", async () => {
   await style("soft", async () => {
     const a = ask("one");
     const b = ask("two", mail);
     await settle();
-    const seen = { views: [] as OpenView[][], calls: 0 };
+    const seen = { views: [] as OpenView[][], calls: 0, quotes: [] as unknown[] };
     await answer("yes", () => {}, undefined, judging({ target: "unclear", outcome: "other" }, seen));
     assert.equal(seen.calls, 1);
     assert.deepEqual([a.d, b.d], [undefined, undefined]);
     answerReaction("👎", a.ts); // a ends; a quote of it now points at nothing
     await a.p;
-    const r = await answer("yes", () => {}, { timestamp: a.ts }, never);
+    const r = await answer("yes", () => {}, { timestamp: a.ts }, judging({ target: "A1", outcome: "other" }, seen));
+    assert.equal(seen.calls, 2);
+    assert.deepEqual(seen.quotes[1], { id: undefined, ended: true, voice: undefined });
     assert.equal(r.outcome, "clarify");
-    assert.match(r.reply!, /no longer open/);
     assert.equal(b.d, undefined); // not approved by the stale quote
     await end(b);
   });
 });
 
-test("soft: a quoted free-text reply is judged against the quoted approval only; others are not offered", async () => {
+test("soft: a quoted free-text reply is judged with the quote named; the judge sees every open approval", async () => {
   await style("soft", async () => {
     const a = ask("one");
     const b = ask("two", mail);
     await settle();
-    const seen = { views: [] as OpenView[][], calls: 0 };
-    const r = await answer("yes but later", () => {}, { timestamp: b.ts }, judging({ target: "A1", outcome: "other" }, seen));
+    const seen = { views: [] as OpenView[][], calls: 0, quotes: [] as unknown[] };
+    const r = await answer("yes but later", () => {}, { timestamp: b.ts }, judging({ target: "A2", outcome: "other" }, seen));
     assert.equal(r.outcome, "clarify");
-    assert.deepEqual(seen.views[0]!.map((v) => v.question), ["two"]);
+    assert.equal(seen.views[0]!.length, 2);
+    assert.deepEqual(seen.quotes[0], { id: "A2", ended: false, voice: undefined });
     await end(a, b);
   });
 });
@@ -264,69 +317,90 @@ test("strict is unchanged: the soft judge is never used, a bare yes takes the ne
   });
 });
 
-// ---- conversational wording ----
-const q = { tool: MAIL, args: mail.input, details: "✉️ Send email\nTo: alice@example.com\nBcc: carol@example.com", recent: [], background: false, source: "chat" as const };
+// ---- conversational wording: one write call, validated in code ----
+const q = { tool: MAIL, args: { to: ["alice@example.com"], cc: ["bob@example.com"], bcc: ["carol@example.com"], subject: "Offsite agenda", body: "See below. Mail me at ceo@example.org" }, details: "✉️ Send email\nTo: alice@example.com\nCc: bob@example.com\nBcc: carol@example.com", recent: [], background: false, source: "chat" as const };
+const GOOD = "Send “Offsite agenda” to alice@example.com, with bob@example.com on Cc and carol@example.com on Bcc?";
+
+test("factsOf / validateQuestion: every address, title and role word must be there; no invented address", () => {
+  const f = factsOf(q.args, q.details);
+  for (const m of ["alice@example.com", "bob@example.com", "carol@example.com", "Offsite agenda"]) assert.ok(f.must.includes(m), m);
+  assert.ok(!f.must.includes("ceo@example.org")); // an address in free text is allowed, not required
+  assert.equal(validateQuestion(GOOD, f), undefined);
+  assert.match(validateQuestion(GOOD.replace(" and carol@example.com on Bcc", ""), f)!, /carol/);
+  assert.match(validateQuestion(GOOD.replace("on Bcc", "on Cc"), f)!, /Bcc/); // bcc described as cc
+  assert.match(validateQuestion(GOOD.replace("alice@", "alyce@"), f)!, /missing|unknown/);
+  assert.match(validateQuestion(`${GOOD} Also dave@example.com.`, f)!, /unknown address/);
+  assert.match(validateQuestion(`${GOOD} See https://evil.example/x`, f)!, /unknown address/);
+  assert.equal(validateQuestion(`${GOOD} (the body mentions ceo@example.org)`, f), undefined); // an address from the body is allowed, not required
+  // times, dates, ids, zone, amounts, urls
+  const cal2 = factsOf({ eventId: "evt_8f2a", calendarId: "primary", summary: "Dentist", startTime: "2026-10-20T16:00:00", endTime: "2026-10-20T17:00:00", timeZone: "Europe/Berlin" }, "");
+  assert.deepEqual(cal2.must, ["evt_8f2a", "Dentist", "Europe/Berlin", "20 Oct", "16:00", "17:00"].sort((a, b) => cal2.must.indexOf(a) - cal2.must.indexOf(b)));
+  const ok = "Change Dentist (evt_8f2a) to Tue 20 Oct 2026, 16:00–17:00 Europe/Berlin?";
+  assert.equal(validateQuestion(ok, cal2), undefined);
+  for (const bad of [ok.replace("16:00", "15:00"), ok.replace("17:00", "17:30"), ok.replace("20 Oct", "21 Oct"), ok.replace("Europe/Berlin", "America/New_York"), ok.replace("evt_8f2a", "evt_8f2b"), ok.replace("Dentist", "Physio")]) assert.notEqual(validateQuestion(bad, cal2), undefined, bad);
+  const nz = factsOf({ page_id: "2a1f-77c0", new_str: "Budget 2027: 48,500 EUR" }, "");
+  assert.equal(validateQuestion("Replace page 2a1f-77c0 with “Budget 2027: 48,500 EUR”?", nz), undefined);
+  assert.notEqual(validateQuestion("Replace page 2a1f-77c0 with “Budget 2027: 4,850 EUR”?", nz), undefined);
+  assert.notEqual(validateQuestion("Open https://www.example.com/a?", factsOf({ url: "https://www.example.org/a" }, "")), undefined);
+  // the readback in the details (a send of a draft: the arguments are only an id) counts as ground truth
+  const sendDraft = factsOf({ messageId: 26001 }, "✉️ Send email now\nTo: jessica@example.com\nBcc: x@example.org\nSubject: Re: hi");
+  assert.notEqual(validateQuestion("Send draft 26001 to jessica@example.com?", sendDraft), undefined); // bcc not said
+  assert.equal(validateQuestion("Send draft 26001 to jessica@example.com, with x@example.org on Bcc?", sendDraft), undefined);
+});
+
 const scripted = (steps: unknown[]) => {
-  const calls: string[] = [];
-  const run = async (task: "write" | "check", prompt: string) => {
-    calls.push(`${task}:${prompt.includes("rejected because") ? "retry" : "first"}`);
-    const s = steps.shift();
-    if (s instanceof Error) throw s;
-    return s;
-  };
-  return { run, calls };
+  const prompts: string[] = [];
+  return { prompts, run: async (prompt: string) => (prompts.push(prompt), (() => { const s = steps.shift(); if (s instanceof Error) throw s; return s; })()) };
 };
 const text = (t: string) => ({ task: "write", text: t });
-const verdict = (match: string, reason = "r") => ({ task: "check", match, reason });
 
-test("conversational: a written question passes only when the independent check says accurate", async () => {
-  const s = scripted([text("Send Agenda to alice@example.com with a bcc to carol@example.com?"), verdict("accurate")]);
+test("conversational: ONE call; a question that carries every fact is used and nothing else is called", async () => {
+  const s = scripted([text(GOOD)]);
   const c = await composeQuestion(q, {}, 1000, s.run);
-  assert.deepEqual([c.written, c.attempts, c.text], [true, 1, "Send Agenda to alice@example.com with a bcc to carol@example.com?"]);
+  assert.equal(c.text, GOOD);
+  assert.equal(s.prompts.length, 1);
+  assert.match(s.prompts[0]!, /REQUIRED strings/);
 });
 
-test("conversational: a refused question is retried once with the reason, then the code text is used; mismatches are logged", async () => {
-  const s = scripted([text("Send Agenda to alice@example.com?"), verdict("inaccurate", "bcc missing"), text("Send Agenda to alice@example.com (bcc carol@example.com)?"), verdict("accurate")]);
-  const c = await composeQuestion(q, {}, 1000, s.run);
-  assert.deepEqual([c.written, c.attempts, c.mismatches], [true, 2, ["bcc missing"]]);
-  assert.deepEqual(s.calls, ["write:first", "check:first", "write:retry", "check:first"]);
-  const twice = scripted([text("Send it to Alice, ok?"), verdict("inaccurate", "a"), text("Just a thank-you to Alice, ok?"), verdict("inaccurate", "b")]);
-  const f = await composeQuestion(q, {}, 1000, twice.run);
-  assert.deepEqual([f.written, f.text, f.mismatches], [false, q.details, ["a", "b"]]);
-});
-
-test("conversational fails closed: errors, junk, a malformed or wrong-task check all mean the code text", async () => {
-  for (const steps of [
-    [new Error("boom"), new Error("boom")],
-    [undefined, undefined],
-    [text("Send it to Alice, ok?"), undefined, text("Send it to Alice, ok?"), undefined], // no check answer
-    [text("Send it to Alice, ok?"), { task: "check", match: "Accurate" }, text("Send it to Alice, ok?"), { match: "ACCURATE" }],
-    [{ text: "short" }, { text: "" }],
-  ]) {
-    const c = await composeQuestion(q, {}, 1000, scripted([...steps]).run);
-    assert.equal(c.written, false, JSON.stringify(steps));
-    assert.equal(c.text, q.details);
+test("conversational fails closed and silent: a failed validation, junk or an error is no question (no retry, no code-text card)", async () => {
+  for (const steps of [[text("Send it to Alice, ok?")], [text(`${GOOD} Also dave@example.com.`)], [new Error("boom")], [undefined], [{ text: "short" }]]) {
+    const s = scripted([...steps]);
+    const c = await composeQuestion(q, {}, 1000, s.run);
+    assert.equal(c.text, undefined, JSON.stringify(steps));
+    assert.equal(s.prompts.length, 1); // never retried
   }
 });
 
-test("a check answer for the wrong task is discarded by the runner (forTask)", async () => {
+test("a write answer for the wrong task is discarded by the runner (forTask)", async () => {
   const io = { query: (async function* () { yield { type: "result", subtype: "success", is_error: false, structured_output: { task: "answer", target: "none", outcome: "unrelated" } }; }) as any };
-  assert.equal((await runJudge("check", "p", io))?.out, undefined);
-  const ok = { query: (async function* () { yield { type: "result", subtype: "success", is_error: false, structured_output: { task: "check", match: "accurate" } }; }) as any };
-  assert.equal(parseCheck((await runJudge("check", "p", ok))?.out).accurate, true);
+  assert.equal((await runJudge("write", "p", io))?.out, undefined);
+  const ok = { query: (async function* () { yield { type: "result", subtype: "success", is_error: false, structured_output: { task: "write", text: GOOD } }; }) as any };
+  assert.equal(parseWrite((await runJudge("write", "p", ok))?.out), GOOD);
 });
 
 test("makeApprove: strict passes straight through; conversational sends the written question and audits the exact arguments", async () => {
   const seen: any[] = [];
   const request = (async (_s: unknown, desc: string, call: unknown, _a: unknown, opts: unknown) => (seen.push({ desc, opts }), { approved: true })) as any;
-  const approve = makeApprove(async () => 1, false, request);
+  let composed: { text?: string; ms: number } = { ms: 1 };
+  const approve = makeApprove(async () => 1, false, request, (async () => composed) as any);
   await style("strict", async () => {
     await approve("details", { tool: CAL, input: { a: 1 } }, new AbortController().signal);
-    assert.deepEqual(seen[0], { desc: "details", opts: { background: false } });
+    assert.deepEqual(seen[0], { desc: "details", opts: { background: false, scope: "owner" } });
   });
   await style("soft", async () => {
     await approve("details", { tool: CAL, input: { a: 1 } }, new AbortController().signal);
     assert.equal(seen[1].opts.question, "details"); // soft: the code text
+  });
+  await style("conversational", async () => {
+    composed = { text: "Move the dentist to 16:00?", ms: 5 };
+    await approve("details", { tool: CAL, input: { a: 1 } }, new AbortController().signal);
+    assert.equal(seen[2].opts.question, "Move the dentist to 16:00?");
+    composed = { ms: 5, failure: "x" } as never;
+    const n = seen.length;
+    const failed = await approve("details", { tool: CAL, input: { a: 1 } }, new AbortController().signal);
+    assert.equal(failed.approved, false);
+    assert.match(failed.failure!, /no question could be written/); // nothing asked; the agent is told why
+    assert.equal(seen.length, n);
   });
   assert.equal(sameArgs({ a: 1, b: { c: [1, 2], d: 3 } }, { b: { d: 3, c: [1, 2] }, a: 1 }), true);
   assert.equal(sameArgs({ a: 1 }, { a: 2 }), false);
@@ -335,14 +409,74 @@ test("makeApprove: strict passes straight through; conversational sends the writ
 test("approvalLines: arguments next to the question, and a call whose arguments differ is flagged", () => {
   const e = (decision: string, meta: Record<string, unknown>, ts = "2026-10-14T10:00:00.000Z") => ({ ts, source: "chat" as const, tool: CAL, decision, meta });
   const lines = approvalLines([
-    e("approval-asked", { style: "conversational", wording: "model-written, checked", args: { summary: "Dentist" }, question: "Move the dentist?\nok?", attempts: 2 }),
-    e("question-mismatch", { reason: "x" }),
+    e("approval-asked", { style: "conversational", wording: "model-written, checked", args: { summary: "Dentist" }, question: "Move the dentist?\nok?" }),
+    e("question-failed", { reason: "x" }),
     e("approval-outcome", { approved: true, modified: false, argsEqual: false }),
   ]).join("\n");
-  assert.match(lines, /2 tries/);
   assert.match(lines, /arguments: \{"summary":"Dentist"\}/);
   assert.match(lines, /question:  Move the dentist\? \/ ok\?/);
   assert.match(lines, /ARGUMENTS DIFFER/);
-  assert.match(lines, /refused 1 written question/);
+  assert.match(lines, /1 written question\(s\) failed validation/);
   assert.deepEqual(approvalLines([]), []);
+});
+
+// ---- scope: a question belongs to the conversation it was asked in ----
+const askIn = (scope: string, desc: string, call = cal) => {
+  const ts = nextTs++;
+  let decision: any;
+  const p = request(async () => ts, desc, call, undefined, { scope }).then((d) => (decision = d));
+  return { ts, p, get d() { return decision; } };
+};
+
+test("scope: a group's question is answered by any member in that group; the same words in the owner's chat or another group change nothing", async () => {
+  for (const st of ["soft", "strict"] as const) {
+    await style(st, async () => {
+      const g = askIn("groupA", "Post the notes");
+      const owned = askIn("owner", "Create event");
+      await settle();
+      // another conversation's answer never applies
+      assert.deepEqual(await answer("yes", () => {}, undefined, never, { scope: "groupB", by: "x" }), { outcome: "none" });
+      assert.equal(answerReaction("👍", g.ts, "groupB", "x"), "ignored");
+      assert.equal(answerReaction("👍", g.ts), "ignored"); // the default scope is the owner's chat
+      assert.equal(g.d, undefined);
+      // in the group: a plain yes from a member who is not the owner (the group has one open question, so the exact yes is enough)
+      assert.deepEqual(await answer("yes", () => {}, undefined, never, { scope: "groupA", by: "+15555550105" }), { outcome: "approved" });
+      assert.equal((g as { d: any }).d.approved, true);
+      assert.equal(owned.d, undefined); // the owner's own question was not touched
+      await end(owned);
+    });
+  }
+});
+
+test("scope: free text in a group is read by the judge against that group's questions only, and a reaction by a member answers", async () => {
+  await style("soft", async () => {
+    const g1 = askIn("groupA", "Post the notes");
+    const g2 = askIn("groupA", "Post the photos", mail);
+    const o = askIn("owner", "Create event");
+    await settle();
+    const seen = { views: [] as OpenView[][], calls: 0, quotes: [] as unknown[] };
+    const r = await answer("yes to the first", () => {}, undefined, judging({ target: "A1", outcome: "approve" }, seen), { scope: "groupA", by: "+15555550105" });
+    assert.equal(r.outcome, "approved");
+    assert.deepEqual(seen.views[0]!.map((v) => v.question), ["Post the notes", "Post the photos"]); // not the owner's
+    assert.equal(g1.d.approved, true);
+    assert.deepEqual([g2.d, o.d], [undefined, undefined]);
+    assert.equal(answerReaction("👎", g2.ts, "groupA", "+15555550105"), "declined");
+    await g2.p;
+    assert.equal(g2.d.approved, false);
+    await end(o);
+  });
+});
+
+test("voice: the judge is told the text is an automatic transcript", async () => {
+  await style("soft", async () => {
+    const a = askIn("owner", "Create event");
+    const b = askIn("owner", "Send mail", mail);
+    await settle();
+    const seen = { views: [] as OpenView[][], calls: 0, quotes: [] as unknown[] };
+    await answer("yes send it", () => {}, undefined, judging({ target: "A2", outcome: "other", reply: "I heard \"yes send it\". Do you mean the mail?" }, seen), { by: "o", voice: true });
+    assert.deepEqual(seen.quotes[0], { id: undefined, ended: false, voice: true });
+    assert.match(answerPrompt("x", [], [], { voice: true }), /AUTOMATIC TRANSCRIPT/);
+    assert.doesNotMatch(answerPrompt("x", [], []), /TRANSCRIPT/);
+    await end(a, b);
+  });
 });

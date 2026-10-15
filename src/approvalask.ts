@@ -5,8 +5,8 @@ import { recentChat } from "./recentchat.ts";
 import { composeQuestion } from "./softjudge.ts";
 import { settings } from "./settings.ts";
 
-// Asking the owner, per APPROVAL_STYLE. strict and soft: the code text goes out as it is. conversational: a model writes the question,
-// a second independent call checks it against the exact arguments, and the code text is the fallback (softjudge.ts composeQuestion).
+// Asking the owner, per APPROVAL_STYLE. strict and soft: the code text goes out as it is. conversational: a model writes the question
+// in one call and code validates it against the exact arguments (softjudge.ts, questionfacts.ts); if that fails nothing is asked.
 // In both soft styles the ask is audited with the FULL arguments, the exact text sent and, afterwards, the outcome and whether the
 // call that ran has the arguments the question was written for, so a divergence between intent and behaviour can be investigated.
 
@@ -23,21 +23,25 @@ export const sameArgs = (a: unknown, b: unknown): boolean => {
   return JSON.stringify(k(a)) === JSON.stringify(k(b));
 };
 
-export function makeApprove(send: (text: string) => Promise<number>, background: boolean, request: typeof approvals.request = approvals.request): Approve {
-  const source: Source = background ? "background" : "chat";
+// `scope`: the conversation the question is asked in (a group id, or the owner's chat): only an answer there applies.
+export function makeApprove(send: (text: string) => Promise<number>, background: boolean, request: typeof approvals.request = approvals.request, compose: typeof composeQuestion = composeQuestion, scope: string = approvals.OWNER_SCOPE): Approve {
+  const source: Source = scope !== approvals.OWNER_SCOPE ? "group" : background ? "background" : "chat";
   return async (description, call, abort) => {
-    if (settings.approvalStyle === "strict") return request(send, description, call, abort, { background });
+    if (settings.approvalStyle === "strict") return request(send, description, call, abort, { background, scope });
     let question = description;
     let how = "code text";
-    let composed: Awaited<ReturnType<typeof composeQuestion>> | undefined;
+    let ms: number | undefined;
     if (settings.approvalStyle === "conversational") {
-      composed = await composeQuestion({ tool: call.tool, args: call.input, details: description, recent: recentChat(), background, source });
-      question = composed.text;
-      how = composed.written ? "model-written, checked" : "code text (fallback)";
+      // One model call writes it, code validates it. No question means no ask and no card: the agent gets the failure as the tool result.
+      const c = await compose({ tool: call.tool, args: call.input, details: description, recent: scope === approvals.OWNER_SCOPE ? recentChat() : [], background, source });
+      if (c.text === undefined) return { approved: false, failure: `no question could be written that states the exact arguments (${c.failure})` };
+      question = c.text;
+      how = "model-written, validated";
+      ms = c.ms;
     }
     const asked = structuredClone(call.input);
-    audit(call.tool, "approval-asked", source, { style: settings.approvalStyle, wording: how, args: argsForAudit(asked), question, details: description, ...(composed ? { attempts: composed.attempts, mismatches: composed.mismatches, failure: composed.failure } : {}) });
-    const d = await request(send, description, call, abort, { background, question });
+    audit(call.tool, "approval-asked", source, { style: settings.approvalStyle, wording: how, args: argsForAudit(asked), question, details: description, ...(ms !== undefined ? { writeMs: ms } : {}) });
+    const d = await request(send, description, call, abort, { background, question, scope });
     // Post-hoc, never blocking: is what will run what the question was written for?
     audit(call.tool, "approval-outcome", source, { approved: d.approved, modified: !!d.updatedInput, argsEqual: sameArgs(asked, d.updatedInput ?? call.input), ...(d.feedback ? { feedback: d.feedback.slice(0, 300) } : {}), ...(d.updatedInput ? { executed: argsForAudit(d.updatedInput) } : {}) });
     return d;

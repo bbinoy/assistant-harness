@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { answer, answerReaction, formatWait, request } from "../src/approvals.ts";
+import { settings } from "../src/settings.ts";
+
+(settings as { approvalStyle: string }).approvalStyle = "strict"; // these tests are the strict flow; the default is conversational (test/softapproval.test.ts)
 
 // Background approvals (wake-ups, presets, the handler) must not swallow the owner's chat messages.
 const call = { tool: "mcp__claude_ai_Google_Calendar__create_event", input: { summary: "x" } };

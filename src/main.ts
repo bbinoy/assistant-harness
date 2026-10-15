@@ -3,7 +3,7 @@ import { createPipeline, group, owner, type Pipeline } from "./conversation.ts";
 import { ask, runProfile, prepareChat } from "./agent.ts";
 import { compactChatIfNeeded, compactDue } from "./chatsession.ts";
 import { gmailReaders } from "./gmail.ts";
-import { setDraftReader, setGmailReaders, type Approve } from "./permissions.ts";
+import { setDraftReader, setGmailReaders, setGroupApprover, type Approve } from "./permissions.ts";
 import * as approvals from "./approvals.ts";
 import { makeApprove } from "./approvalask.ts";
 import { config, mask } from "./config.ts";
@@ -50,6 +50,8 @@ const out = createOutbound(signal, (kind, ts, text, groupId) => record(groupId, 
 const approve: Approve = makeApprove((t) => out.replyPlain(t, "approval"), false);
 // Unattended runs (wake-ups, the brief, the radar, the mail handler) ask the same way, but only an explicit yes / no or a reply
 // to the question answers it: whatever else the owner types meanwhile is a chat message (approvals.ts).
+// A group asks in the group itself; any member may answer there (approvals.ts scopes every question to its conversation).
+setGroupApprover((groupId) => makeApprove((t) => out.reply(t, { plain: true, kind: "approval", groupId }), false, undefined, undefined, groupId));
 const approveBackground: Approve = makeApprove((t) => out.replyPlain(t, "approval"), true);
 // `say` is a plain message to the owner. `notify` is what the assistant sends on its own (mail
 // alerts, handled mail, setup problems) and is also remembered, so the chat knows what a reply

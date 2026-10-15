@@ -36,6 +36,7 @@ async function questionFor(key: string, style: Style, recent: Case["scenario"]):
   if (hit) return hit;
   const a = ASKS[key]!;
   const c = await composeQuestion({ tool: a.tool, args: a.input, details: describeCall(a.tool, a.input), recent: SCENARIOS[recent]!.recent, background: !!a.background, source: a.background ? "background" : "chat" });
+  if (!c.text) throw new Error(`no question for ${key}: ${c.failure}`);
   written.set(key, c.text);
   return c.text;
 }
@@ -81,7 +82,12 @@ async function runCase(c: Case, style: Style, warm: boolean): Promise<Row> {
   const e = c.expect;
   const approvedKeys = resolved.filter((k) => decisions[k]!.approved);
   let result: Row["result"];
-  if (approvedKeys.length) {
+  if (e.kind === "approveAll" || e.kind === "mixed") {
+    const wantYes = e.kind === "approveAll" ? e.targets : e.approve;
+    const wantNo = e.kind === "approveAll" ? [] : e.decline;
+    const wrong = approvedKeys.some((k) => !wantYes.includes(k));
+    result = wrong ? "FALSE_APPROVAL" : wantYes.every((k) => approvedKeys.includes(k)) && wantNo.every((k) => decisions[k] && !decisions[k]!.approved) ? "correct" : "over_clarify";
+  } else if (approvedKeys.length) {
     const ok = (e.kind === "approve" && approvedKeys.length === 1 && approvedKeys[0] === e.target) || (e.kind === "modify" && approvedKeys.length === 1 && approvedKeys[0] === e.target && String(decisions[e.target]!.updatedInput?.[e.field] ?? "").includes(e.contains));
     result = ok ? "correct" : "FALSE_APPROVAL";
   } else if (resolved.length) {

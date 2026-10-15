@@ -1,11 +1,10 @@
-// Measures the independent question-accuracy check (task "check") on a labelled set, and shows what the writer produces on
-// real-looking calls, with REAL Haiku calls.
+// Measures the code validator of model-written questions on a labelled set (no model call), and shows what the writer produces
+// on real-looking calls, with REAL Haiku calls (one call per question).
 //   HARNESS_DATA_DIR=$(mktemp -d) node --conditions=workspace-source scripts/approval-eval-check.ts [out.json]
 import { writeFileSync } from "node:fs";
-import { runJudge, withTimeout } from "../src/approvaljudge.ts";
 import { describeCall } from "../src/format.ts";
 import { composeQuestion } from "../src/softjudge.ts";
-import { checkPrompt, parseCheck } from "../src/softprompt.ts";
+import { factsOf, validateQuestion } from "../src/questionfacts.ts";
 
 const MAIL = "mcp__claude_ai_Gmail__send_message";
 const FWD = "mcp__claude_ai_Gmail__forward";
@@ -60,17 +59,22 @@ export const CASES: Case[] = [
   k("s7", "inaccurate", "forward recipient domain swapped", FWD, fwd, "Forward email 18c3f to accounting@example.org.com with the note “FYI, see below”. Go ahead?"),
 ];
 
-const results: { id: string; kind: string; why: string; got: string; reason?: string; ms: number }[] = [];
+// The hand-written calendar questions omit the event id and zone a required-strings list would have them carry; add them, so the
+// validator is tested on the real defect of each case (a wrong time) and not on a missing id.
 for (const c of CASES) {
-  const t0 = Date.now();
-  const r = await withTimeout(runJudge("check", checkPrompt({ tool: c.tool, args: c.args, details: describeCall(c.tool, c.args), question: c.question })), 30_000);
-  const v = parseCheck(r?.out);
-  results.push({ id: c.id, kind: c.kind, why: c.why, got: r ? (v.accurate ? "accurate" : "inaccurate") : "no-answer", reason: v.reason, ms: Date.now() - t0 });
-  console.log(`${c.id} ${c.kind.padEnd(10)} -> ${results.at(-1)!.got} (${c.why}) ${v.reason ?? ""}`);
+  if ((c.tool === CAL || c.tool === NEW) && c.id !== "s2") c.question = `${c.question} (${c.tool === CAL ? "evt_8f2a, " : ""}Europe/Berlin)`;
+  else if (c.tool === CAL) c.question = `${c.question} (evt_8f2a)`;
 }
-const miss = results.filter((r) => r.kind === "inaccurate" && r.got === "accurate");
-const alarm = results.filter((r) => r.kind === "accurate" && r.got !== "accurate");
-console.log(`\nchecker: ${results.filter((r) => r.kind === "inaccurate").length} wrong questions, missed ${miss.length} (${miss.map((m) => m.id)}); ${results.filter((r) => r.kind === "accurate").length} accurate questions, false alarms ${alarm.length} (${alarm.map((m) => m.id)})`);
+
+// The validator (questionfacts.ts, no model call) on the labelled set: which wrong questions does it catch, which accurate ones does it refuse.
+const results = CASES.map((c) => {
+  const reason = validateQuestion(c.question, factsOf(c.args, describeCall(c.tool, c.args)));
+  return { id: c.id, kind: c.kind, why: c.why, got: reason ? "refused" : "passed", reason };
+});
+for (const r of results) console.log(`${r.id} ${r.kind.padEnd(10)} -> ${r.got} (${r.why}) ${r.reason ?? ""}`);
+const miss = results.filter((r) => r.kind === "inaccurate" && r.got === "passed");
+const alarm = results.filter((r) => r.kind === "accurate" && r.got === "refused");
+console.log(`\nvalidator: ${results.filter((r) => r.kind === "inaccurate").length} wrong questions, missed ${miss.length} (${miss.map((m) => m.id)}); ${results.filter((r) => r.kind === "accurate").length} accurate questions, false alarms ${alarm.length} (${alarm.map((m) => m.id)})`);
 
 // What the writer produces (and whether the check lets it through), on realistic calls.
 const samples: { name: string; tool: string; args: Record<string, unknown> }[] = [
@@ -87,7 +91,7 @@ for (const s of samples) {
   const details = describeCall(s.tool, s.args);
   const c = await composeQuestion({ tool: s.tool, args: s.args, details, recent: [{ from: "owner", text: "please handle that" }], background: false, source: "chat" });
   written.push({ ...s, details, composed: c, ms: Date.now() - t0 });
-  console.log(`\n== ${s.name} (${c.written ? "model-written, checked" : "FELL BACK to code text"}, ${c.attempts} try, ${Date.now() - t0}ms)\n-- code text:\n${details}\n-- sent:\n${c.text}${c.mismatches.length ? `\n-- refused: ${c.mismatches.join(" | ")}` : ""}`);
+  console.log(`\n== ${s.name} (${c.text ? "validated" : "NOT ASKED"}, ${Date.now() - t0}ms)\n-- code text:\n${details}\n-- ${c.text ? `sent:\n${c.text}` : `failure: ${c.failure}`}`);
 }
 writeFileSync(process.argv[2] ?? "approval-eval-check.json", JSON.stringify({ results, written }, null, 1));
 process.exit(0);

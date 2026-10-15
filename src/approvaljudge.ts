@@ -10,7 +10,7 @@ import { SOFT_SYSTEM } from "./softprompt.ts";
 // its prompt and a field of its answer; an answer for the other task is a failure, so it can never pass as this one's.
 // The floors stay in code (autojudge.ts isJudgeable, policy.ts): this only ever answers inside them.
 
-export type Task = "reply" | "action" | "answer" | "write" | "check"; // the last three: APPROVAL_STYLE soft / conversational (softprompt.ts)
+export type Task = "reply" | "action" | "answer" | "write"; // the last two: APPROVAL_STYLE soft / conversational (softprompt.ts)
 
 export const SYSTEM = `You do ONE of two small jobs for an assistant that acts for its owner, ${OWNER}. The first line of the prompt says which: "task: reply" or "task: action". Set the "task" field of your answer to that same word and fill only that job's fields.
 
@@ -48,7 +48,7 @@ const OPTIONS: Options = {
     schema: {
       type: "object",
       properties: {
-        task: { type: "string", enum: ["reply", "action", "answer", "write", "check"] },
+        task: { type: "string", enum: ["reply", "action", "answer", "write"] },
         verdict: { type: "string", enum: ["approve", "decline", "other", "approve_modified"] },
         changes: {
           type: "array",
@@ -62,10 +62,18 @@ const OPTIONS: Options = {
         decision: { type: "string", enum: ["auto", "ask"] },
         reason: { type: "string" },
         target: { type: "string" }, // answer: an approval id, "none" or "unclear"
-        outcome: { type: "string", enum: ["approve", "decline", "approve_modified", "other", "unrelated"] }, // answer
+        outcome: { type: "string", enum: ["approve", "decline", "approve_modified", "other", "unrelated", "multi"] }, // answer
+        answers: {
+          type: "array", // answer, outcome "multi": a verdict per approval
+          items: {
+            type: "object",
+            properties: { target: { type: "string" }, outcome: { type: "string", enum: ["approve", "decline", "other"] } },
+            required: ["target", "outcome"],
+            additionalProperties: false,
+          },
+        },
         reply: { type: "string" }, // answer: the clarifying reply to the owner
         text: { type: "string" }, // write: the question
-        match: { type: "string", enum: ["accurate", "inaccurate"] }, // check
       },
       required: ["task"],
       additionalProperties: false,
@@ -99,7 +107,7 @@ export async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | und
 // (it is judged in runs of several actions); the reply task does not (approvals.ts prepares one per question and drops it).
 export async function runJudge(task: Task, prompt: string, io: JudgeIO = {}): Promise<{ out: unknown; warm: boolean; subtype: string } | undefined> {
   const { messages, warm } = await spare.run(`task: ${task}\n${prompt}`, io);
-  if (task === "action" || task === "write") setImmediate(() => spare.prepare(io)); // write: its check follows at once
+  if (task === "action") setImmediate(() => spare.prepare(io));
   for await (const m of messages) {
     if (m.type !== "result") continue;
     recordCost(m.total_cost_usd);
