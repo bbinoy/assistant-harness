@@ -6,7 +6,8 @@ import { findMessage, revisionsOf, type Extra, type Kind } from "./messages.ts";
 import { DELETED_LINE, editNote, isAuthor, sameText } from "./edit.ts";
 import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
-import type { TellSink } from "./telluser.ts";
+import { withPictures, type PictureSink } from "./sendpicture.ts";
+import { OWNER_TELL, type TellSink } from "./telluser.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
 import { settings } from "./settings.ts";
@@ -208,8 +209,16 @@ export function createPipeline(deps: PipelineDeps) {
       if (typers.has(conv.key)) void signal.typing(false, conv.groupId); // sending clears "typing…" on the phone: still working
       return "Sent. Carry on with the task.";
     };
+    // send_picture (sendpicture.ts): a screenshot of this turn's browse run, as an attachment under the same target and quote rules; its files go when the turn ends.
+    const sendPicture: PictureSink | undefined = background ? undefined : async (file, raw, id) => {
+      const words = splitReaction(splitVoice(raw).text).text.trim();
+      const quote = turn.threadUnder && (conv.threadAlways || shouldThread(!!turn.hadQuote, now() - started)) ? turn.threadUnder : undefined;
+      await out.sendPicture(file, SILENT.test(words) ? "" : words, { kind: turn.kind ?? "chat", quote, groupId: conv.groupId });
+      if (typers.has(conv.key)) void signal.typing(false, conv.groupId);
+      return `Sent ${id} as a picture. Carry on.`;
+    };
     try {
-      const { text, costUsd } = await turn.run({ firstOutput: () => turn.timing?.mark("first"), tell });
+      const { text, costUsd } = await withPictures(conv.groupId ?? OWNER_TELL, sendPicture, () => turn.run({ firstOutput: () => turn.timing?.mark("first"), tell }));
       turn.timing?.set("run", now() - started);
       console.log(`${conv.kind} replied (${text.length} chars${costUsd === undefined ? "" : `, $${costUsd.toFixed(4)}`})`);
       const sent = await deliver(conv, text, { ...turn, started });

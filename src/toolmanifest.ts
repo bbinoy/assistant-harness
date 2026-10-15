@@ -91,6 +91,8 @@ export const MANIFEST: readonly ToolEntry[] = [
   ...rows("mcp__memory__", "memory", "memory", "no", "forget_note search_logs undo_dream", { only: ["chat"] }),
   // tell_user (telluser.ts): a message to the person while the run continues. Chat and groups only (a group's rights are in classify).
   ...rows("mcp__tell__", "tell", "tell-user", "no", "tell_user", { only: ["chat", "group"] }),
+  // send_picture (sendpicture.ts): a screenshot the browse tool took, as a picture in the conversation it was asked in. Chat and groups only.
+  ...rows("mcp__picture__", "picture", "send-picture", "no", "send_picture", { only: ["chat", "group"] }),
   // --- the browse sub-task (browse.ts). The entry tool: the owner's chat starts a run freely, a wake-up asks first (a group's rights are in classify). ---
   ...rows("mcp__browse__", "browse", "browse", { chat: "no", background: "yes" }, "browse", { only: ["chat", "background"] }),
   // The browser server's tools, in the browse run only (denied everywhere else). Which element a click or a field is, and which

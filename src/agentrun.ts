@@ -1,6 +1,7 @@
 import { query, type HookCallbackMatcher, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
+import { createPictureServer } from "./sendpicture.ts";
 import { createTellServer, OWNER_TELL } from "./telluser.ts";
 import { browseSystem, createBrowseServer } from "./browse.ts";
 import { resultText, withText, type BrowseGuard, type BrowseMode } from "./browseguard.ts";
@@ -102,8 +103,10 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
             // by the guard (the refs, the real names of the controls, what was typed) before it is cleaned like any other result.
             let response: unknown = input.tool_response;
             if (opts.guard && input.tool_name.startsWith("mcp__browser__")) {
+              const shot = input.tool_name.endsWith("take_screenshot") ? opts.guard.keepShot(response) : undefined; // a picture the chat may pass on (sendpicture.ts)
               const shaped = opts.guard.shape(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, resultText(response));
               if (shaped !== undefined) response = withText(response, shaped);
+              if (shot) response = withText(response, `${resultText(response)}\n(This is ${shot}. If it shows what the task is about, list it in the result's shots with a one-line caption.)`);
             }
             // Clean at the door: the model reads the cleaned result, not the original (counts only in the log).
             const cleaned = cleanToolOutput(input.tool_name, response);
@@ -120,20 +123,21 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
   const browsing = opts.source === "browse"; // the browse sub-run: the browser and web search, nothing of the owner's
   const isolated = opts.source === "group" || browsing;
   // The entry tool (browse.ts) for the runs that may browse: the owner's chat, a wake-up and a group. It starts a separate browse run.
+  // tell_user (telluser.ts) and send_picture (sendpicture.ts): the owner's chat and groups, never an unattended run (a wake-up included).
+  const tellKey = opts.source === "chat" ? OWNER_TELL : opts.source === "group" ? opts.memory?.groupId : undefined;
   const mode: BrowseMode = opts.source === "group" ? "group" : "owner";
   const browseTool =
     settings.browse && (opts.source === "chat" || opts.source === "background" || opts.source === "group")
-      ? createBrowseServer({ mode, groupId: opts.memory?.groupId, run: browseRunner(mode === "group" && opts.memory?.groupId ? approveInGroup(opts.memory.groupId) : approve) })
+      ? createBrowseServer({ mode, groupId: opts.memory?.groupId, key: tellKey, run: browseRunner(mode === "group" && opts.memory?.groupId ? approveInGroup(opts.memory.groupId) : approve) })
       : undefined;
-  // tell_user (telluser.ts): the owner's chat and groups, never an unattended run (a wake-up included).
-  const tellKey = opts.source === "chat" ? OWNER_TELL : opts.source === "group" ? opts.memory?.groupId : undefined;
   const tellServer = tellKey ? createTellServer(tellKey) : undefined;
+  const pictureServer = tellKey ? createPictureServer(tellKey) : undefined; // send_picture (sendpicture.ts): same sources as tell_user
   const status = browsing ? browseStatus() : undefined;
   if (status && !status.ok) throw new Error(`browsing is not set up: ${status.reason}`);
   const mcpServers: Options["mcpServers"] = browsing && opts.guard && status?.ok
     ? { browser: browserServer(status, opts.guard.outDir, undefined, { mode: opts.guard.vision, cdpPort: opts.guard.cdpPort }) }
     : opts.memory || browseTool || tellServer
-      ? { ...(tellServer ? { tell: tellServer } : {}), ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
+      ? { ...(tellServer ? { tell: tellServer } : {}), ...(pictureServer ? { picture: pictureServer } : {}), ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
       : undefined;
   return {
     model: settings.model,
