@@ -4,7 +4,7 @@ import { callKey, type Approve } from "./permissions.ts";
 import { recentChat } from "./recentchat.ts";
 import { composeQuestion } from "./approvalmodel.ts";
 
-// Asking the owner: code words a simple question from the exact arguments (questiontemplate.ts), otherwise a model writes it in one call. Either way code validates it against the exact arguments (approvalmodel.ts,
+// Asking the owner: a model writes the question in one call and code validates it against the exact arguments (approvalmodel.ts,
 // questionfacts.ts); if that fails nothing is asked. The ask is audited with the FULL arguments, the exact text sent and, afterwards,
 // the outcome and whether the call that ran has the arguments the question was written for, so a divergence between intent and
 // behaviour can be investigated.
