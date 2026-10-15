@@ -2,6 +2,7 @@ import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { withTimeout } from "./approvaljudge.ts";
 import { recordCost } from "./budget.ts";
 import { fence } from "./fence.ts";
+import { haikuOptions } from "./haiku.ts";
 import { styleLines } from "./gate.ts";
 import { PERSONALITY } from "./persona.ts";
 import { cleanText } from "./sanitize.ts";
@@ -81,22 +82,16 @@ export function checkNotice(raw: unknown, req: Pick<NoticeRequest, "facts" | "ve
   return { text };
 }
 
-// The real model call. Constrained output, no tools, no connectors (they cost ~133k tokens per call, see triage.ts).
-const options = (system: string): Options => ({
-  model: "haiku",
-  systemPrompt: system,
-  tools: [],
-  settingSources: [],
-  strictMcpConfig: true,
-  mcpServers: {},
-  settings: { autoMemoryEnabled: false },
-  maxTurns: 3, // structured output can take a retry turn
-  maxBudgetUsd: 0.05,
-  outputFormat: { type: "json_schema", schema: { type: "object", properties: { message: { type: "string" } }, required: ["message"], additionalProperties: false } },
-  effort: "low",
-  thinking: { type: "disabled" },
-  persistSession: false,
-});
+// The real model call. Constrained output.
+const options = (system: string): Options =>
+  haikuOptions(system, {
+    maxTurns: 3, // structured output can take a retry turn
+    maxBudgetUsd: 0.05,
+    outputFormat: { type: "json_schema", schema: { type: "object", properties: { message: { type: "string" } }, required: ["message"], additionalProperties: false } },
+    effort: "low",
+    thinking: { type: "disabled" },
+    persistSession: false,
+  });
 
 export const askHaiku =
   (run: typeof query = query, timeoutMs: number = NOTICE_TIMEOUT_MS): NoticeModel =>

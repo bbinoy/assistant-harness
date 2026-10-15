@@ -1,6 +1,7 @@
 import { query, startup, type Options, type Query, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import { clockLine } from "./brief.ts";
 import { recordCost } from "./budget.ts";
+import { haikuOptions } from "./haiku.ts";
 import { AuthError, failure, RateLimitError } from "./errors.ts";
 import { fence } from "./fence.ts";
 import { groupNotesBlock } from "./groupstore.ts";
@@ -164,7 +165,7 @@ export function gatePrompt(input: Pick<GateInput, "trigger" | "now" | "tail" | "
 // ---- the real gate ----
 
 // Haiku, no tools, no connectors, no memory, one JSON answer.
-const gateOptions = (system: string): Options => ({ model: "haiku", systemPrompt: system, tools: [], settingSources: [], strictMcpConfig: true, mcpServers: {}, settings: { autoMemoryEnabled: false }, maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false });
+const gateOptions = (system: string): Options => haikuOptions(system, { maxTurns: 3, maxBudgetUsd: 0.05, outputFormat: GATE_SCHEMA, effort: "low", thinking: { type: "disabled" }, persistSession: false });
 
 // A spare Haiku process for the look that has to be fast: an untagged group message. A process is built from its options
 // alone (the system prompt: fixed per kind of look, plus the owner's style notes, which every group is shown anyway), and
