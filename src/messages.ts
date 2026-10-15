@@ -1,3 +1,4 @@
+import { skipForCooldown } from "./cooldown.ts";
 import { statSync } from "node:fs";
 import { appendLine, dataPath, readText, writeText } from "./state.ts";
 import { settings } from "./settings.ts";
@@ -237,6 +238,7 @@ export async function compactIfNeeded(summarize: Summarize, maxBytes = settings.
   const lines = (readText(file) ?? "").split("\n").filter(Boolean);
   const drop = planCompaction(lines, maxBytes);
   if (drop === 0) return false;
+  if (skipForCooldown("log summary")) return false; // usage limit: do not fold now (a failed summary would be replaced by a bare count for good)
   compacting.add(file);
   try {
     const old = lines.slice(0, drop).map(parse).filter((e): e is Sent | Summary => !!e);

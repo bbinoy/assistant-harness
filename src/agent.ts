@@ -8,6 +8,7 @@ import { pausing, RunTimeout, withCeiling, type Ceiling } from "./ceiling.ts";
 import { chatResume, forgetUnresumable, type Resume } from "./chatsession.ts";
 import { disconnected, readConnectors, recordConnectors } from "./connectors.ts";
 import type { Conversation } from "./conversation.ts";
+import { noteSuccess, observeRateLimit } from "./cooldown.ts";
 import { failure } from "./errors.ts";
 import { userInput, type Picture } from "./image.ts";
 import { createMemoryServer } from "./memory-tools.ts";
@@ -189,6 +190,7 @@ async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOptions, prev
   let first = false;
   let lastContext: number | undefined; // the last model call of the main loop shows how big the context is
   for await (const message of stream) {
+    observeRateLimit(message);
     if (message.type === "system" && message.subtype === "init" && opts.source !== "group" && opts.source !== "browse") { // a group run has no connectors: its tool list says nothing about them
       recordToolsSeen(message.tools);
       recordConnectors(message.tools, message.mcp_servers);
@@ -209,6 +211,7 @@ async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOptions, prev
     }
     recordCost(message.total_cost_usd - previousCost); // failures cost money too
     if (message.subtype === "success" && !message.is_error) {
+      noteSuccess();
       return { text: message.result, costUsd: message.total_cost_usd - previousCost, structured: message.structured_output };
     }
     throw failure(lastError, message.subtype);

@@ -1,3 +1,4 @@
+import { skipForCooldown } from "./cooldown.ts";
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { withTimeout } from "./approvaljudge.ts";
 import { recordCost } from "./budget.ts";
@@ -101,6 +102,7 @@ const options = (system: string): Options => ({
 export const askHaiku =
   (run: typeof query = query, timeoutMs: number = NOTICE_TIMEOUT_MS): NoticeModel =>
   async (system, prompt) => {
+    if (skipForCooldown("notice")) throw new Error("usage limit cooldown"); // the writer sends the template text
     const q = run({ prompt, options: options(system) });
     try {
       return await withTimeout(
