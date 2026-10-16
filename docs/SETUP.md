@@ -97,6 +97,20 @@ The skills are `daily-brief` (the brief's structure), `mailbird` (triage and dra
 
 On by default (`BROWSE=on`). `npm install` fetches the pinned `@playwright/mcp` and runs `npm run setup:browse`, which downloads a headless Chromium (about 100 MB) into `state/browse/browsers`, not anywhere global; delete that folder to remove it. If the download failed (offline, `BROWSE_SKIP_INSTALL=1`), run `npm run setup:browse` yourself; until then the browse tool answers "not set up" and `npm run doctor` says what is missing. The browser presents itself as the plain desktop Chrome of the same version (not "HeadlessChrome"), with the language `BROWSE_LOCALE` (default `en-GB`) and this machine's time zone; nothing else is disguised, and sites that block automated browsers (SNCF Connect, Rail Europe, bahn.de, Trainline's search) stay blocked. `BROWSE_BROWSER_PATH` points it at a Chromium or Chrome you already have. `BROWSE=off` removes the tool from every run. A real-world check that costs a few cents: `npm run browse:smoke` (example.com, the httpbin pizza form up to but not including its submit button; `-- submit` shows the approval text a commit step produces, declined; `-- big` a large page). See [SAFETY](SAFETY.md) for what it can and cannot do.
 
+## Saved details for forms (optional)
+
+The browse worker can fill a form with your name, address, date of birth, passport number or loyalty numbers without ever seeing them. You enter them **in a terminal on this Mac, never in the chat** (the chat is logged and goes to the model):
+
+```
+npm run profile -- set email                 # hidden prompt; the first save creates the encryption key in the macOS Keychain
+npm run profile -- set passport --domains sbb.ch,trainline.com
+npm run profile -- list                      # keys, kinds and sites; values masked
+npm run profile -- domains passport sbb.ch   # change the sites
+npm run profile -- delete passport
+```
+
+Keys are lowercase words (`first_name`, `email`, `address.street`, `loyalty.sbb`); the kind (name, email, phone, address, nationality, dob, id, other) is guessed from the key or set with `--kind`. Name, e-mail, phone, address and nationality may be typed on any https page; date of birth, ID or passport and everything else are typed only on the sites you list, and nowhere until you do. The data is in `state/profile.enc` (encrypted, not in git); the key is only in the Keychain (item `ted-profile-key`), so losing the Keychain item means entering the values again. Card numbers, passwords and bank details are refused: they are never stored or filled. The final submit of a form that used your details always asks you first. See [SAFETY](SAFETY.md).
+
 ## Daily use
 
 - **Chat**: message yourself. Replies are formatted with Signal's native styles (bold, italic, strikethrough, monospace).
