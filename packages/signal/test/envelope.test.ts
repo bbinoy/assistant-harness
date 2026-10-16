@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { interpretEnvelope, parseFile, parseImage } from "../src/envelope.ts";
+import { interpretEnvelope, parseAudio, parseFile, parseImage } from "../src/envelope.ts";
 
 const ME = "+10000000000"; // the owner
 const BOT = "+10000000001"; // the assistant's own account
@@ -107,6 +107,10 @@ test("files: the first attachment that is not a picture or audio; ids and sizes 
   assert.deepEqual(parseFile([{ contentType: "application/pdf", id: "d1", size: 900, filename: "Report 2026.pdf" }]), { id: "d1", size: 900, name: "Report 2026.pdf" });
   assert.deepEqual(parseFile([{ contentType: "image/jpeg", id: "p", size: 5 }, { contentType: "audio/aac", id: "a", size: 5 }, { id: "z", size: 7 }]), { id: "z", size: 7 });
   assert.equal(parseFile([{ contentType: "image/png", id: "p", size: 5 }]), undefined);
+  // audio with a file name is an audio file (any size, checked later by the app); without one it is a voice message
+  assert.deepEqual(parseFile([{ contentType: "audio/mpeg", id: "m1", size: 40_000_000, filename: "song.mp3" }]), { id: "m1", size: 40_000_000, name: "song.mp3", audio: true });
+  assert.equal(parseAudio([{ contentType: "audio/mpeg", id: "m1", size: 4000, filename: "song.mp3" }]), undefined);
+  assert.deepEqual(parseAudio([{ contentType: "audio/aac", id: "v1", size: 4000 }]), { id: "v1", size: 4000 });
   assert.equal(parseFile([{ contentType: "application/pdf", id: "../../etc/passwd", size: 5 }]), undefined);
   assert.equal(parseFile([{ contentType: "application/pdf", id: ".hidden", size: 5 }]), undefined);
   assert.equal(parseFile([{ contentType: "application/pdf", id: "empty", size: 0 }]), undefined);

@@ -97,6 +97,8 @@ export interface FileRef {
   id: string;
   size: number;
   name?: string;
+  /** The sender's client said it is audio (an MP3, M4A...). Only a hint, for deciding whether to open it at all: the bytes decide. */
+  audio?: true;
 }
 
 const MAX_FILE_NAME = 200;
@@ -147,9 +149,10 @@ export function parseFile(attachments: unknown): FileRef | undefined {
     const id = typeof a?.id === "string" ? a.id : "";
     const size = Number(a?.size ?? 0);
     const type = String(a?.contentType ?? "").toLowerCase();
-    if (IMAGE_TYPES.includes(type) || type.startsWith("audio/") || !safeId(id) || !(size > 0)) continue;
     const name = typeof a?.filename === "string" && a.filename ? a.filename.slice(0, MAX_FILE_NAME) : undefined;
-    return { id, size, ...(name ? { name } : {}) };
+    // Audio WITH a file name is an audio file someone sent (an MP3...), which goes the way of other files; audio without one is a recorded voice message.
+    if (IMAGE_TYPES.includes(type) || (type.startsWith("audio/") && !name) || !safeId(id) || !(size > 0)) continue;
+    return { id, size, ...(name ? { name } : {}), ...(type.startsWith("audio/") ? { audio: true as const } : {}) };
   }
   return undefined;
 }
@@ -163,7 +166,7 @@ export function parseAudio(attachments: unknown): AudioRef | undefined {
   for (const a of attachments) {
     const id = typeof a?.id === "string" ? a.id : "";
     const size = Number(a?.size ?? 0);
-    if (!String(a?.contentType ?? "").startsWith("audio/") || !safeId(id)) continue;
+    if (!String(a?.contentType ?? "").startsWith("audio/") || !safeId(id) || (typeof a?.filename === "string" && a.filename)) continue; // a named one is an audio file: parseFile
     if (size > 0 && size <= MAX_AUDIO_BYTES) return { id, size };
   }
   return undefined;
