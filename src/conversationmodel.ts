@@ -5,6 +5,7 @@ import type { GroupMessage } from "./group.ts";
 import { FILE as OWNER_LOG, type Extra, type Kind } from "./messages.ts";
 import { NOTES_DIR } from "./notes.ts";
 import { type Picture } from "./image.ts";
+import { type Document } from "./document.ts";
 import { OWNER_SESSION_FILE } from "./session.ts";
 import { settings } from "./settings.ts";
 import { clean, LIMITS, oneLine } from "./sanitize.ts";
@@ -72,8 +73,8 @@ export const group = (groupId: string): Conversation =>
     notice: groupErrorNotice, // nobody there should be sent to a terminal
   });
 
-// A message with its picture, once prepared (the bytes are held for this turn only; src/image.ts).
-export type Held = IncomingMessage & { voice?: boolean; picture?: Picture; edit?: { before?: string } }; // voice: the text is a transcript of a voice message (set by hear); edit: an edit of a message that was answered already, with the version it replaces
+// A message with its picture or document, once prepared (the bytes are held for this turn only; src/image.ts).
+export type Held = IncomingMessage & { voice?: boolean; picture?: Picture; document?: Document; edit?: { before?: string } }; // voice: the text is a transcript of a voice message (set by hear); edit: an edit of a message that was answered already, with the version it replaces
 
 export type Incoming = { type: "message"; m: IncomingMessage } | { type: "reaction"; r: IncomingReaction } | { type: "deletion"; d: IncomingDeletion };
 
@@ -115,8 +116,9 @@ export interface PipelineDeps {
   };
   record: (groupId: string | undefined, kind: Kind, ts: number, text: string, extra?: Extra) => void; // into that conversation's log
   account: string; // our own Signal number: the author of messages of ours that a reaction points at
-  runOwner: (prompt: string, ownerMessage: string, pictures?: Picture[], hooks?: RunHooks) => Promise<{ text: string; costUsd?: number }>;
+  runOwner: (prompt: string, ownerMessage: string, pictures?: Picture[], hooks?: RunHooks, documents?: Document[]) => Promise<{ text: string; costUsd?: number }>;
   picture: (m: IncomingMessage) => Promise<Picture>; // throws a sentence the sender can be told
+  document: (m: IncomingMessage) => Promise<Document>; // a PDF or a text file (src/document.ts); throws a sentence the sender can be told, also for a kind of file that is not supported
   transcript: (m: IncomingMessage) => Promise<string>; // throws a sentence the sender can be told
   speech: { ready: () => boolean; synth: (words: string) => Promise<string>; foreign: (words: string) => Promise<string | undefined> }; // spoken replies: local TTS, a file
   approvals: { answer: (text: string, working: () => void, quote?: { timestamp: number }, deps?: undefined, ctx?: { scope?: string; by?: string; voice?: boolean }) => Promise<{ outcome: "none" | "approved" | "modified" | "declined" | "feedback" | "clarify"; changes?: { field: string; value: unknown }[]; reply?: string }>; answerReaction: (emoji: string, ts: number, scope?: string, by?: string) => string };

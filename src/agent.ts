@@ -5,6 +5,7 @@ import { chatResume } from "./chatsession.ts";
 import { disconnected, readConnectors } from "./connectors.ts";
 import type { Conversation } from "./conversation.ts";
 import { userInput, type Picture } from "./image.ts";
+import type { Document } from "./document.ts";
 import { LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, readNotes } from "./notes.ts";
 import { approveInGroup, setChatOwnerMessage, type Approve } from "./permissions.ts";
 import { backgroundSystem, briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem } from "./persona.ts";
@@ -49,12 +50,12 @@ export function prepareChat(approve: Approve, notify: (text: string) => Promise<
 }
 
 // Interactive chat: resumes the persistent conversation, on the warm process when it fits.
-export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void }): Promise<AgentReply> {
+export async function ask(prompt: string, approve: Approve, notify: (text: string) => Promise<void>, ownerMessage?: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void }, documents: Document[] = []): Promise<AgentReply> {
   setChatOwnerMessage(ownerMessage ?? prompt);
   spare.touch("owner"); // in use: the idle period starts over
   const o = { ...chatOptions(notify), onFirstOutput: hooks?.firstOutput };
   const r = chatResume();
-  const input = userInput(prompt, pictures);
+  const input = userInput(prompt, pictures, documents);
   return runWarmOrCold(spare, "owner", o, r, "chat", input, (abortController) => query({ prompt: input, options: { ...buildOptions(approve, o, r.resume), abortController } }));
 }
 
@@ -74,11 +75,11 @@ export const groupRunOptions = (conv: GroupConv, systemPrompt: string): RunOptio
 });
 
 // `build` makes the prompt once it is known whether the session resumes: a resumed one is told only what it has not seen (group.ts).
-export async function runGroupTurn(conv: GroupConv, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}): Promise<AgentReply> {
+export async function runGroupTurn(conv: GroupConv, style: string, build: (since?: string) => { prompt: string; seenAt?: string; pictures?: Picture[]; documents?: Document[] }, onFirstOutput?: () => void, io: { query?: typeof query } = {}): Promise<AgentReply> {
   const r = chatResume(conv.sessionFile);
-  const { prompt, seenAt, pictures } = build(r.resume ? r.seenAt : undefined);
+  const { prompt, seenAt, pictures, documents } = build(r.resume ? r.seenAt : undefined);
   const o = { ...groupRunOptions(conv, groupSystem({ style })), seenAt, onFirstOutput };
-  const input = userInput(prompt, pictures);
+  const input = userInput(prompt, pictures, documents);
   // The group's own warm process, if it is the one kept and nothing it was built from has changed (same group, session, prompt, notes index).
   return runWarmOrCold(groupSpare, conv.groupId, o, r, "group", input, (abortController) => (io.query ?? query)({ prompt: input, options: { ...buildOptions(approveInGroup(conv.groupId!), o, r.resume), abortController } }));
 }

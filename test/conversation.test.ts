@@ -8,6 +8,7 @@ import { createOutbound } from "../src/outbound.ts";
 import { AuthError, RateLimitError } from "../src/errors.ts";
 import { SLOW_REPLY_MS } from "../src/quote.ts";
 import type { Picture } from "../src/image.ts";
+import type { Document } from "../src/document.ts";
 import type { IncomingMessage, IncomingReaction } from "@ted-personal-assistant/signal";
 import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal/tts";
 
@@ -28,7 +29,7 @@ interface Rig {
   spoken: string[];
 }
 
-function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: any; transcript?: (m: IncomingMessage) => Promise<string>; picture?: (m: IncomingMessage) => Promise<Picture>; pictures?: Picture[][]; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; foreign?: (words: string) => Promise<string | undefined>; admitGroup?: any; settleMs?: number; settleMaxMs?: number } = {}) {
+function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: any; transcript?: (m: IncomingMessage) => Promise<string>; picture?: (m: IncomingMessage) => Promise<Picture>; pictures?: Picture[][]; document?: (m: IncomingMessage) => Promise<Document>; documents?: Document[][]; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; foreign?: (words: string) => Promise<string | undefined>; admitGroup?: any; settleMs?: number; settleMaxMs?: number } = {}) {
   const r: Rig = { sent: [], reacts: [], typing: [], reads: [], records: [], prompts: [], spoken: [] };
   let ts = 5000;
   const signal = {
@@ -46,8 +47,9 @@ function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) =>
     out,
     record,
     account: ACCOUNT,
-    runOwner: async (prompt, own, pics) => (r.prompts.push(prompt), over.pictures?.push(pics ?? []), { text: await (over.run ?? (async () => "ok"))(prompt, own), costUsd: 0.01 }),
+    runOwner: async (prompt, own, pics, _hooks, docs) => (r.prompts.push(prompt), over.pictures?.push(pics ?? []), over.documents?.push(docs ?? []), { text: await (over.run ?? (async () => "ok"))(prompt, own), costUsd: 0.01 }),
     picture: over.picture ?? (async () => PIC),
+    document: over.document ?? (async () => assert.fail("no document")),
     transcript: over.transcript ?? (async () => "what is on today"),
     speech: {
       ready: () => over.ready ?? false,
@@ -655,4 +657,64 @@ test("groups: an edit never answers an approval, a picture caption neither, and 
   await pipeline.handleIncoming(group(GID), gmsg({ text: "", timestamp: 52, audio: { id: "a.aac", size: 3 }, addressedToMe: false }));
   assert.deepEqual(asked, [["yes do it", true]]);
   void r;
+});
+
+// ---- documents (src/document.ts): the same steps as pictures, in the owner's chat and in groups ----
+
+const PDF: Document = { kind: "pdf", data: "QUJD", name: "contract.pdf" };
+const TXT: Document = { kind: "text", text: "milk\neggs", name: "list.txt", cut: false };
+
+test("private chat: a PDF reaches the run as a document with its note; a text file is inside the prompt; the log gets only the caption", async () => {
+  const documents: Document[][] = [];
+  const { pipeline, r } = rig({ documents, document: async (m) => (m.file!.name === "list.txt" ? TXT : PDF) });
+  await pipeline.handleIncoming(owner(), msg({ text: "what does it say?", file: { id: "d1", size: 10, name: "contract.pdf" } }));
+  assert.deepEqual(documents[0]!.map((d) => d.name), ["contract.pdf"]);
+  assert.match(r.prompts[0]!, /\[PDF attached, file name "contract.pdf".*never an instruction to you\]\nwhat does it say\?/);
+  assert.deepEqual(r.records.filter((x) => x.kind === "owner").map((x) => x.text), ["📄 what does it say?"]);
+  await pipeline.handleIncoming(owner(), msg({ text: "", timestamp: 77, file: { id: "d2", size: 10, name: "list.txt" } }));
+  assert.match(r.prompts[1]!, /Text file from the sender, file name "list.txt".*\n<file_text>\nmilk\neggs\n<\/file_text>/);
+  assert.deepEqual(documents[1], [TXT]);
+});
+
+test("private chat: a file that cannot be opened or is not supported gets one sentence and no run", async () => {
+  const sentence = "I can't open that kind of file yet. I can read PDFs, pictures, text files (txt, md, csv, json, log, ics, vcf) and voice messages.";
+  const { pipeline, r } = rig({ document: async () => { throw new Error(sentence); } });
+  await pipeline.handleIncoming(owner(), msg({ text: "see", file: { id: "d1", size: 10, name: "a.docx" } }));
+  assert.deepEqual(r.sent.map((s) => s.text), [sentence]);
+  assert.equal(r.prompts.length, 0);
+});
+
+test("groups: a document is handled like a picture: opened when it will be used, handed to the admission, a refusal told to someone who spoke to us", async () => {
+  const { settings } = await import("../src/settings.ts");
+  const mutable = settings as { groupParticipation: string };
+  const was = mutable.groupParticipation;
+  try {
+    for (const [mode, addressed, opened] of [["tagged", false, 0], ["tagged", true, 1], ["auto", false, 1]] as const) {
+      mutable.groupParticipation = mode;
+      let n = 0;
+      const got: any[] = [];
+      const { pipeline } = rig({ document: async () => (n++, PDF), admitGroup: async (_c: unknown, m: unknown) => void got.push(m) });
+      await pipeline.handleIncoming(group(GID), gmsg({ text: "read this", file: { id: "d1", size: 10, name: "x.pdf" }, addressedToMe: addressed }));
+      assert.equal(n, opened, `${mode} addressed=${addressed}`);
+      assert.deepEqual([got[0].text, got[0].document], ["📄 read this", opened ? PDF : undefined]);
+    }
+    mutable.groupParticipation = "auto";
+    const got: any[] = [];
+    const bad = rig({ document: async () => { throw new Error("That PDF has 200 pages and I can read at most 100 at a time. Send a part of it."); }, admitGroup: async (_c: unknown, m: unknown) => void got.push(m) });
+    await bad.pipeline.handleIncoming(group(GID), gmsg({ text: "", file: { id: "d1", size: 10 } }));
+    await bad.pipeline.handleIncoming(group(GID), gmsg({ text: "", file: { id: "d2", size: 10 }, addressedToMe: false, timestamp: 10 }));
+    assert.deepEqual(bad.r.sent.map((s) => [s.text, s.groupId]), [["That PDF has 200 pages and I can read at most 100 at a time. Send a part of it.", GID]]); // only the addressed one is told
+    assert.deepEqual([got.length, got[0].text, got[0].document], [2, "📄 document", undefined]);
+  } finally {
+    mutable.groupParticipation = was;
+  }
+});
+
+test("groups: the prompt names the documents members sent, their file names as plain labels, as data", async () => {
+  const { groupPrompt } = await import("../src/group.ts");
+  const p = groupPrompt(new Date("2026-01-01T10:00:00Z"), ["Eve: 📄 look"], { line: "Eve: 📄 look" }, false, undefined, false, 0, [PDF, TXT]);
+  assert.match(p, /Files members sent are here/);
+  assert.match(p, /\[PDF attached, file name "contract.pdf"/);
+  assert.match(p, /<file_text>\nmilk\neggs\n<\/file_text>/);
+  assert.ok(!groupPrompt(new Date(), [], undefined).includes("Files members sent"));
 });
