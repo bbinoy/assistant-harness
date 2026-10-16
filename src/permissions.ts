@@ -155,7 +155,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       if (mayAutoApprove(settings.autoApprove, source, judged)) {
         audit(tool, "auto-approved", source, { reason: judged.reason }); // silent on purpose: logged, never announced (npm run report shows them)
         if (onceOnly) remember(key);
-        return { behavior: "allow", updatedInput: input };
+        return { behavior: "allow", updatedInput: g?.input ?? input };
       }
     }
     if ((failures.get(key) ?? 0) >= MAX_FAILED_ASKS) {
@@ -177,7 +177,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       source,
     );
     if (d.approved && onceOnly) remember(key);
-    if (d.approved) return { behavior: "allow", updatedInput: g?.redacted ? input : (d.updatedInput ?? input) };
+    if (d.approved) return { behavior: "allow", updatedInput: g?.input ?? (g?.redacted ? input : (d.updatedInput ?? input)) }; // g.input: the call as code must run it (a saved detail typed by code), never the owner's edit
     return {
       behavior: "deny",
       message: d.feedback

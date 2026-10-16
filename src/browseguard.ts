@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { addressProblem, BROWSER_PREFIX, classifyClick, dnsResolver, hostOf, isAllowedBrowserTool, isRef, parseSnapshot, resolvesPublic, sensitiveKind, type Node, type Resolver, type VisionMode } from "./browserules.ts";
+import { addressProblem, BROWSER_PREFIX, classifyClick, dnsResolver, findTotal, hostOf, isAllowedBrowserTool, isRef, parseSnapshot, resolvesPublic, sensitiveKind, type Node, type Resolver, type VisionMode } from "./browserules.ts";
+import { hostMatches } from "./domains.ts";
+import { fieldFitsKey, isSensitive, maskValue, type Profile } from "./profile.ts";
 import type { Probe } from "./browsecdp.ts";
 import { clickProblem, MAX_POINT_CLICKS, MAX_SHOTS, nodeOfPoint, screenshotInput, validPoint } from "./browsevision.ts";
 import { audit } from "./audit.ts";
@@ -36,7 +38,16 @@ export interface GuardOptions {
   probe?: Probe; // click mode: what is under a point of the page, looked up by code (browsecdp.ts)
   cdpPort?: number; // click mode: the browser's debugging port on loopback (browseserver.ts starts the browser with it)
   shotsDir?: string; // vision on: where each screenshot is kept as a small jpeg, for the chat to pass on (shots.ts)
+  profile?: Profile; // the owner's saved details (profile.ts): the owner's chat run only, a group's guard ignores it
 }
+
+// A saved detail typed by code: the model names a key, never sees the value.
+const WHOLE_PLACEHOLDER = /^\{\{profile:([a-z][a-z0-9._-]*)\}\}$/i;
+const HAS_PLACEHOLDER = /\{\{\s*profile:/i;
+const FIELD_ROLES = /^(textbox|searchbox|combobox|spinbutton)$/;
+interface FillIntent { ref: string; label: string; key: string; shown: string; sensitive: boolean }
+export interface FilledField { host: string; label: string; key: string; shown: string; sensitive: boolean }
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const SNAPSHOT_CAP = 24_000; // characters (~7k tokens) of one page view: bigger ones are cut with a visible marker (MCP results over 25k tokens would be written to a file the run cannot read)
 const MAX_DENIED = 6;
@@ -65,6 +76,14 @@ export class BrowseGuard {
   kept: { id: string; file: string; size: number }[] = []; // the screenshots kept for the chat, in order
   private pointClicks = 0;
   private pending?: string; // the commit call that was asked about: counted when that very call succeeds
+  private readonly profile?: Profile;
+  private readonly secrets = new Set<string>(); // values typed from the profile: cut from everything the model reads, for the rest of the run
+  private readonly fillRefs = new Set<string>(); // the refs they went into: the page view shows the value on those lines
+  private readonly intents = new Map<string, FillIntent>(); // decided to fill, not yet confirmed done
+  private justFilled = new Set<string>();
+  filled: FilledField[] = []; // what was typed from the profile in this run (labels, keys, masked values), for the final approval
+  private viewUrl = ""; // the address of the page view the refs come from
+  private view = ""; // the last full page view, as the model reads it (for the total)
 
   constructor(o: GuardOptions) {
     this.mode = o.mode;
@@ -76,6 +95,74 @@ export class BrowseGuard {
     this.probe = o.probe;
     this.cdpPort = o.cdpPort;
     this.shotsDir = o.shotsDir;
+    this.profile = o.mode === "owner" ? o.profile : undefined;
+  }
+
+  // What the judge and the owner read for typing saved details: label, key and site, never the value.
+  private fillDescription(list: FillIntent[]): string {
+    return `⌨️ Browser: type saved details from the owner's profile (the value is typed by code and not shown)\nSite: ${clip(hostOf(this.url), 100)}\n${list.map((i) => `• “${clip(i.label, 80)}” ← ${i.key}`).join("\n")}`;
+  }
+
+  // The saved keys (never values) the worker may name, for its prompt.
+  profileKeys(): { key: string; kind: string }[] {
+    return Object.entries(this.profile?.entries ?? {}).map(([key, e]) => ({ key, kind: e.kind })).sort((a, b) => (a.key < b.key ? -1 : 1));
+  }
+
+  // Why the saved detail `text` ("{{profile:KEY}}") may not go into this field, or the value and what to remember about it. Everything here is code.
+  private fillFrom(n: Node, text: string): { value: string; intent: FillIntent } | string {
+    const m = WHOLE_PLACEHOLDER.exec(text.trim());
+    if (!m) return "A saved detail is typed as the whole text, exactly {{profile:KEY}}, nothing around it.";
+    if (!this.profile) return "No saved details are available in this run. Use only what the task gives you, or stop with status needs_owner.";
+    const key = m[1]!.toLowerCase();
+    const e = this.profile.entries[key];
+    if (!e) return `There is no saved detail called ${clip(key, 40)}. The keys are: ${this.profileKeys().map((k) => k.key).join(", ")}.`;
+    if (/^f\d+e/.test(n.ref)) return "That field is inside an embedded frame whose content and origin cannot be checked, so a saved detail is not typed there. Stop with status needs_owner and give handoffUrl.";
+    let u: URL;
+    try {
+      u = new URL(this.url);
+    } catch {
+      return "No page is open. Navigate first.";
+    }
+    if (u.protocol !== "https:") return "Saved details are only typed on https pages.";
+    if (!this.viewUrl || this.viewUrl !== this.url) return "The page changed since the last page view. Take a fresh browser_snapshot and use a ref from it.";
+    if (!FIELD_ROLES.test(n.role)) return `${n.ref} is a ${n.role}, not a text field.`;
+    if (sensitiveKind(n.name)) return "That is a payment or login field: saved details are never typed there. Stop with status needs_owner and give handoffUrl.";
+    if (!fieldFitsKey(n.name, key, e)) return `The field “${clip(n.name || n.ref, 60)}” does not look like the place for ${key}.`;
+    if (e.domains.length) {
+      if (!hostMatches(u.hostname, e.domains)) return `${key} is not allowed on ${clip(u.hostname, 60)}.`;
+    } else if (isSensitive(e)) return `${key} is a sensitive detail and the owner has not named a site for it yet, so it is not typed anywhere.`;
+    this.secrets.add(e.value);
+    return { value: e.value, intent: { ref: n.ref, label: n.name || n.ref, key, shown: maskValue(e.value, isSensitive(e)), sensitive: isSensitive(e) } };
+  }
+
+  // Saved details were typed by this call: remembered for the final approval.
+  private doneFills(name: string, input: Record<string, unknown>): FillIntent[] {
+    const refs = name === "type" ? [String(input.target)] : name === "fill_form" && Array.isArray(input.fields) ? (input.fields as Record<string, unknown>[]).map((f) => String(f.target)) : [];
+    const done: FillIntent[] = [];
+    for (const r of refs) {
+      const it = this.intents.get(r);
+      if (!it) continue;
+      this.intents.delete(r);
+      done.push(it);
+      this.fillRefs.add(r);
+      this.justFilled.add(r);
+      this.typed.set(r, { label: it.label, value: it.shown });
+      const host = hostOf(this.url);
+      if (!this.filled.some((f) => f.host === host && f.key === it.key && f.label === it.label)) this.filled.push({ host, label: it.label, key: it.key, shown: it.shown, sensitive: it.sensitive });
+    }
+    return done;
+  }
+
+  // The model never reads a saved value: it is cut from every result (the echo of the typed code, the field in a later page view, a summary on the page).
+  private redact(text: string): string {
+    if (!this.secrets.size) return text;
+    let out = text;
+    for (const ref of this.fillRefs) out = out.replace(new RegExp(`(\\[ref=${escapeRe(ref)}\\](?: \\[[^\\]]*\\])*):[ \\t].*$`, "gm"), "$1: [filled]");
+    for (const v of [...this.secrets].sort((a, b) => b.length - a.length)) {
+      if (v.length < 3) continue;
+      for (const variant of new Set([v, JSON.stringify(v).slice(1, -1), v.replace(/'/g, "\\'"), v.replace(/\s+/g, " ")])) out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(variant)}(?![\\p{L}\\p{N}])`, "gu"), "[filled]");
+    }
+    return out;
   }
 
   // The names of the buttons, links and fields of the last page view (cheap context for the judge when a point could not be resolved).
@@ -133,24 +220,41 @@ export class BrowseGuard {
     for (const [ref, t] of this.typed) rows.set(ref, `${nolabel(t.label) || ref}: ${t.value}`);
     for (const [label, value] of extraValues) rows.set(`x${label}`, `${nolabel(label)}: ${value}`);
     const values = [...rows.values()].slice(0, 30).map((r) => `• ${clip(r, 160)}`);
+    const here = hostOf(this.url);
+    // Saved details typed in this run: field label, the key it came from, and the value (masked to its last 4 characters for a sensitive key).
+    const profile = this.filled.length
+      ? [
+          "Profile fields filled in this run (typed by code; the assistant never saw the values):",
+          ...this.filled.slice(-12).map((f) => `• ${clip(nolabel(f.label) || "(no label)", 60)} ← ${f.key}: ${f.shown}${f.host !== here ? ` (on ${f.host})` : ""}`),
+          this.totalLine(),
+        ]
+      : [];
     return [
       "🛒 Browser: confirm this step",
-      `Site: ${clip(hostOf(this.url) || "(unknown)", 100)}`,
+      `Site: ${clip(here || "(unknown)", 100)}`,
       `Address: ${clip(this.where(), 300)}`,
       control,
       ...(form ? [`Form: ${clip(form, 100)}`] : []),
       `Why you are asked: ${why}`,
       values.length ? `Entered so far:\n${values.join("\n")}` : "Entered so far: nothing visible",
+      ...profile,
       `Task: ${clip(this.task, 300)}`,
       "Approve only if this is exactly what you want done.",
     ].join("\n");
   }
 
+  // The total as code reads it from the last page view, or says there is none. The shop's own figure: nothing here checks it.
+  private totalLine(): string {
+    const t = findTotal(this.view);
+    return t ? `Total (read from the page by code, not checked by the shop): ${t}` : "Total: none found on the page";
+  }
+
   // Every step the classifier takes for a commit goes to the approval judge with this text; the judge (or, failing that, the owner) decides.
-  // `judge` false: the owner is asked directly.
+  // `judge` false: the owner is asked directly. After saved details were typed in this run the owner is ALWAYS asked, whatever the judge would say.
   private commit(tool: string, input: Record<string, unknown>, node: Node | undefined, why: string, control: string, extraValues: [string, string][] = [], judge = true): Decision {
     if (this.commits >= this.maxCommits) return this.deny(tool, input, `This run already took its ${this.maxCommits} confirmed step(s). Stop and report what is left for the owner.`, { commit: true, cap: true });
-    this.log(tool, judge ? "judge" : "ask-owner", input, { commit: true, why, role: node?.role, name: node?.name?.slice(0, 80) });
+    if (this.filled.length) (judge = false), (why = `${why}; details from your saved profile were typed in this run, so you always confirm`);
+    this.log(tool, judge ? "judge" : "ask-owner", input, { commit: true, why, role: node?.role, name: node?.name?.slice(0, 80), ...(this.filled.length ? { profileKeys: this.filled.map((f) => f.key) } : {}) });
     this.pending = tool + JSON.stringify(input);
     return { kind: "ask", description: this.commitText(control, why, extraValues, node?.formName), once: true, judge, facts: { host: hostOf(this.url), role: node?.role, name: node?.name?.slice(0, 80), step: short(tool) } };
   }
@@ -192,6 +296,17 @@ export class BrowseGuard {
         const n = this.refNode(input.target);
         if (typeof n === "string") return this.deny(toolName, input, n);
         const text = String(input.text ?? "");
+        this.intents.delete(n.ref);
+        if (HAS_PLACEHOLDER.test(text)) {
+          // A saved detail: code checks the field, the page and the site, then types the real value. The model, the question and the audit see the key.
+          const logged = { target: input.target };
+          if (input.submit === true) return this.deny(toolName, logged, "Do not submit while typing a saved detail. Type it, then use the page's own button.");
+          const r = this.fillFrom(n, text);
+          if (typeof r === "string") return this.deny(toolName, logged, r, { profile: true });
+          this.intents.set(n.ref, r.intent);
+          this.log(toolName, "fill-profile", logged, { role: n.role, name: n.name.slice(0, 60), profileKey: r.intent.key, valueLength: r.value.length });
+          return { kind: "defer", input: { ...input, text: r.value }, description: this.fillDescription([r.intent]) };
+        }
         const kind = sensitiveKind(n.name, text);
         if (kind) return this.sensitive(toolName, input, [{ name: n.name, kind }]);
         if (input.submit === true) return this.commit(toolName, input, n, "typing with Enter would submit the form", `Typing into “${clip(n.name || n.ref, 120)}” (${n.role}) and pressing Enter`, [[n.name || n.ref, text]]);
@@ -202,9 +317,21 @@ export class BrowseGuard {
         const fields = Array.isArray(input.fields) ? (input.fields as Record<string, unknown>[]) : [];
         const lines: string[] = [];
         const secret: { name: string; kind: string }[] = [];
+        const real: Record<string, unknown>[] = [];
+        const mine: FillIntent[] = [];
         for (const f of fields) {
           const n = this.refNode(f.target);
           if (typeof n === "string") return this.deny(toolName, input, n);
+          this.intents.delete(n.ref);
+          if (HAS_PLACEHOLDER.test(String(f.value ?? ""))) {
+            const logged = { target: f.target };
+            const r = this.fillFrom(n, String(f.value));
+            if (typeof r === "string") return this.deny(toolName, logged, r, { profile: true });
+            mine.push(r.intent);
+            real.push({ ...f, value: r.value });
+            continue;
+          }
+          real.push(f);
           const kind = sensitiveKind(n.name, String(f.value ?? "")) ?? sensitiveKind(String(f.name ?? ""));
           if (kind) {
             secret.push({ name: n.name || String(f.name ?? ""), kind });
@@ -213,6 +340,11 @@ export class BrowseGuard {
           lines.push(`• ${clip(n.name || n.ref, 80)}: ${clip(String(f.value ?? ""), 160)}`);
         }
         if (secret.length) return this.sensitive(toolName, input, secret);
+        if (mine.length) {
+          for (const it of mine) this.intents.set(it.ref, it);
+          this.log(toolName, "fill-profile", { fields: fields.map((f) => ({ value: HAS_PLACEHOLDER.test(String(f.value ?? "")) ? "" : f.value })) }, { profileKeys: mine.map((m) => m.key) });
+          return { kind: "defer", input: { ...input, fields: real }, description: `${this.fillDescription(mine)}${lines.length ? `\n${lines.join("\n")}` : ""}` };
+        }
         this.log(toolName, "fill", input);
         return { kind: "defer", description: `⌨️ Browser: fill in a form\nSite: ${clip(hostOf(this.url), 100)}\n${lines.join("\n")}` };
       }
@@ -336,11 +468,19 @@ export class BrowseGuard {
       this.url = "";
       return `### Page\nThe page went to an address that is not allowed (${addressProblem(seen)}); its content is withheld. Go back or stop.`;
     }
+    const done = this.doneFills(short(toolName), input);
+    if (done.length) {
+      // Saved details were typed: the server's echo of the typed code is dropped, the model is told only which fields were filled.
+      out = out.replace(/### Ran Playwright code[\s\S]*?(?=\n### |$)/, "").replace(/\n{3,}/g, "\n\n");
+      out = `Filled ${done.map((d) => `“${clip(d.label, 60)}”`).join(", ")} from the saved profile.\n${out}`;
+    }
     out = cleanText(out).text; // refs and names are remembered as the model will read them, hidden characters out
+    out = this.redact(out);
     if (out.length > SNAPSHOT_CAP) out = `${out.slice(0, SNAPSHOT_CAP)}\n[... ${out.length - SNAPSHOT_CAP} characters of the page view cut: use browser_find for what you need, or a narrower page]`;
     if (/\[ref=|### Snapshot|Page URL/.test(out)) audit("browse_view", "page", "browse", { tool: short(toolName), chars: out.length, cut: out.length > SNAPSHOT_CAP, fromFile: !!link });
     if (short(toolName) === "take_screenshot") audit("browse_view", "screenshot", "browse", { tool: short(toolName), chars: out.length });
     this.remember(toolName, input, out, seen);
+    this.justFilled.clear();
     return out === text ? undefined : out;
   }
 
@@ -351,13 +491,13 @@ export class BrowseGuard {
     if (/\[ref=/.test(text)) {
       const fresh = parseSnapshot(text);
       if (name === "find") for (const [k, v] of fresh) this.nodes.set(k, v);
-      else this.nodes = fresh;
+      else (this.nodes = fresh, (this.viewUrl = this.url), (this.view = text));
     }
-    if (name === "type" && isRef(input.target)) {
+    if (name === "type" && isRef(input.target) && !this.justFilled.has(String(input.target))) {
       const label = this.nodes.get(String(input.target))?.name ?? "";
       this.typed.set(String(input.target), { label, value: sensitiveKind(label, String(input.text ?? "")) ? HIDDEN : String(input.text ?? "") });
     }
-    if (name === "fill_form" && Array.isArray(input.fields)) for (const f of input.fields as Record<string, unknown>[]) if (isRef(f.target)) {
+    if (name === "fill_form" && Array.isArray(input.fields)) for (const f of input.fields as Record<string, unknown>[]) if (isRef(f.target) && !this.justFilled.has(String(f.target))) {
       const label = String(f.name ?? this.nodes.get(String(f.target))?.name ?? "");
       this.typed.set(String(f.target), { label, value: sensitiveKind(label, String(f.value ?? "")) || sensitiveKind(this.nodes.get(String(f.target))?.name ?? "") ? HIDDEN : String(f.value ?? "") });
     }

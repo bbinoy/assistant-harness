@@ -62,7 +62,7 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 function browseRunOptions(guard: BrowseGuard): RunOptions {
   return {
     source: PROFILES.browse.source,
-    systemPrompt: browseSystem(undefined, guard.vision),
+    systemPrompt: browseSystem(undefined, guard.vision, guard.profileKeys()),
     maxTurns: PROFILES.browse.maxTurns,
     maxBudgetUsd: PROFILES.browse.maxBudgetUsd,
     maxMinutes: settings.browseMaxMinutes,

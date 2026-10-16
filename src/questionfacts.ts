@@ -63,8 +63,24 @@ export function factsOf(args: Record<string, unknown>, details: string): Facts {
     for (const m of s.matchAll(AMOUNT)) if (amounts++ < 5) add(must, m[0].trim());
   });
   // The details are ground truth for what code read back (a mail send's draft): their address lines count too.
+  // A browse step after saved details were typed (browseguard.ts commitText): the site, each profile KEY, the masked tail of a sensitive
+  // value and the page's total (when code found one) must be in the question. Values are never in the details, so they cannot be in it.
+  if (details.includes("Profile fields filled in this run")) {
+    const site = /^Site: (\S+)$/m.exec(details)?.[1];
+    if (site) add(must, site);
+    for (const line of details.split("\n")) {
+      const p = /^• .+ ← ([a-z][a-z0-9._-]*): (.*)$/.exec(line);
+      if (p) {
+        add(must, p[1]!);
+        const masked = /••••\S{4}/.exec(p[2]!)?.[0];
+        if (masked) add(must, masked);
+      }
+      const t = /^Total \(read from the page[^)]*\): (.+)$/.exec(line)?.[1];
+      if (t) add(must, t.trim());
+    }
+  }
   for (const line of details.split("\n")) {
-    const h = /^(To|Cc|Bcc|With|Address|Where):\s*(.*)$/.exec(line);
+    const h =/^(To|Cc|Bcc|With|Address|Where):\s*(.*)$/.exec(line);
     if (!h) continue;
     if (/^cc$/i.test(h[1]!) && h[2]!.trim()) roles.add("cc");
     if (/^bcc$/i.test(h[1]!) && h[2]!.trim()) roles.add("bcc");
