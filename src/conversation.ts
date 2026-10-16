@@ -181,7 +181,7 @@ export function createPipeline(deps: PipelineDeps) {
     const chosen = splitVoice(replied);
     const { reaction, text } = splitReaction(chosen.text);
     await d.send({ kind: "text", text, voice: !!chosen.voice }, false);
-    if (reaction && t.target) await d.send({ kind: "reaction", emoji: reaction }, false);
+    if (reaction && t.target && !t.reaction) await d.send({ kind: "reaction", emoji: reaction }, false); // never an emoji for an emoji: a reaction turn does not answer with one (no ping-pong)
     else if (!t.reaction && !d.state.reacted) status(conv, "✅", t.target); // a reaction the model already put on that message stays
   }
 

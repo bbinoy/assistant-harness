@@ -408,11 +408,11 @@ test("bursts: the pause is shortened to what is left of the maximum", async () =
   assert.deepEqual(waits, [2000, 1000]);
 });
 
-test("private chat: the owner's reaction is feedback the model judges; it may react back or say something, never apologises", async () => {
+test("private chat: the owner's reaction is feedback the model judges; it may say something but never answers with an emoji, never apologises", async () => {
   const { r, pipeline } = rig({ run: async () => "[[react: ❤️]] glad it helped" });
   await pipeline.handleIncoming(owner(), react({ targetAuthor: ACCOUNT }));
   assert.match(r.prompts[0]!, /reacted 👍 to a message that is no longer in your log/);
-  assert.deepEqual(r.reacts.map((x) => [x.emoji, x.target]), [["❤️", { author: ACCOUNT, timestamp: 42 }]]);
+  assert.deepEqual(r.reacts, []); // never an emoji for an emoji
   assert.deepEqual(r.sent.map((s) => [s.text, s.quote]), [["glad it helped", undefined]]);
   assert.deepEqual(r.typing, []); // a reaction is not a conversation turn
   assert.ok(r.records.some((x) => x.kind === "reaction" && /^👍 on:/.test(x.text)));
