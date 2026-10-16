@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { interpretEnvelope, parseAudio, parseFile, parseImage } from "../src/envelope.ts";
+import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { interpretEnvelope, parseAudio, parseFile, parseImage, parseLongText, readLongText } from "../src/envelope.ts";
 
 const ME = "+10000000000"; // the owner
 const BOT = "+10000000001"; // the assistant's own account
@@ -172,4 +175,39 @@ test("a reply to a voice note carries the voice note's timestamp (a quote of an 
   assert.equal(interpretEnvelope(msg({ id: 4, author: ME, text: "", attachments: [{ contentType: "audio/aac" }] }), self).message?.quotedAudio, 4);
   assert.equal(interpretEnvelope(msg({ id: 4, author: ME, text: "hi", attachments: [{ contentType: "image/png" }] }), self).message?.quotedAudio, undefined);
   assert.equal(interpretEnvelope(msg({ id: 4, author: ME, text: "hi" }), self).message?.quotedAudio, undefined);
+});
+
+test("long message: a text/x-signal-plain attachment is the full text (longText), never a file; its name is ignored", () => {
+  const att = [{ contentType: "text/x-signal-plain", id: "lt1", size: 9000, filename: "signal-2026-10-16.txt" }];
+  assert.deepEqual(parseLongText(att), { id: "lt1", size: 9000 });
+  assert.equal(parseFile(att), undefined);
+  assert.equal(parseLongText([{ contentType: "text/plain", id: "t", size: 5 }]), undefined);
+  assert.equal(parseLongText([{ contentType: "text/x-signal-plain", id: "../x", size: 5 }]), undefined);
+  assert.equal(parseLongText([{ contentType: "text/x-signal-plain", id: "e", size: 0 }]), undefined);
+  const env = { sourceNumber: ME, timestamp: 9, dataMessage: { timestamp: 9, message: "cut start", attachments: att } };
+  const m = interpretEnvelope(env, peer).message;
+  assert.deepEqual([m?.text, m?.longText, m?.file], ["cut start", { id: "lt1", size: 9000 }, undefined]);
+  const alone = interpretEnvelope({ ...env, dataMessage: { timestamp: 9, attachments: att } }, peer).message;
+  assert.deepEqual([alone?.text, alone?.longText?.id], ["", "lt1"]);
+  // a real file sent next to it is still a file
+  const both = interpretEnvelope({ ...env, dataMessage: { timestamp: 9, message: "x", attachments: [...att, { contentType: "application/pdf", id: "d", size: 5, filename: "a.pdf" }] } }, peer).message;
+  assert.deepEqual([both?.longText?.id, both?.file?.id], ["lt1", "d"]);
+  // an edit of a long message carries it too
+  const edit = interpretEnvelope({ sourceNumber: ME, timestamp: 10, editMessage: { targetSentTimestamp: 9, dataMessage: { timestamp: 10, message: "cut", attachments: att } } }, peer).message;
+  assert.deepEqual([edit?.edited?.targetTimestamp, edit?.longText?.id], [9, "lt1"]);
+});
+
+test("readLongText: plain UTF-8 only, cut at 64 KB, never a symlink, a folder, a path or a missing file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lt-"));
+  writeFileSync(join(dir, "ok"), "Grüße 👋 and more");
+  writeFileSync(join(dir, "nul"), "a\u0000b");
+  writeFileSync(join(dir, "bad"), Buffer.from([0xc3, 0x28]));
+  writeFileSync(join(dir, "blank"), "  \n");
+  writeFileSync(join(dir, "big"), `${"é".repeat(40_000)}`); // 80,000 bytes, two per character: the cut falls between characters or at one
+  symlinkSync(join(dir, "ok"), join(dir, "link"));
+  assert.deepEqual(readLongText({ id: "ok" }, dir), { text: "Grüße 👋 and more", cut: false });
+  for (const id of ["nul", "bad", "blank", "link", "missing", "../ok", ""]) assert.equal(readLongText({ id }, dir), undefined, id);
+  const big = readLongText({ id: "big" }, dir)!;
+  assert.equal(big.cut, true);
+  assert.equal(big.text, "é".repeat(32_768));
 });

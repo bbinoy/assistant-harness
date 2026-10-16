@@ -14,7 +14,7 @@ import { group, type Batch, type Conversation, type Pipeline } from "./conversat
 import { quoteNote } from "./quote.ts";
 import { voiceOption } from "./voicereply.ts";
 import type { Quote } from "@ted-personal-assistant/signal";
-import { clean, defuseSpeakers, oneLine } from "./sanitize.ts";
+import { clean, defuseSpeakers, LIMITS, oneLine } from "./sanitize.ts";
 import { OWNER, settings } from "./settings.ts";
 
 // Group chats. In its own Signal account the assistant can be added to a group. There it is a friendly
@@ -192,7 +192,9 @@ export function createGroupBrain(brain: Brain) {
     // A group worth answering just got a message: make sure its warm process is the kept one. Not while its own turn runs
     // (the session is about to change; the end of that turn prepares it), nor when nothing will be answered.
     if (!st.running && !isPaused(now) && !budgetSpent()) warm?.(conv, false);
-    if (direct) st.addressed = { line, quote: { text: m.text.slice(0, 200), author: m.author ?? "", timestamp: m.timestamp }, incoming: m.quote, voice: !!m.voice, picture: m.picture, document: m.document, at: now.getTime(), edit }; // sticky until answered, or until it is too old to answer (GROUP_STICKY_MINUTES)
+    // The message that addressed us goes to the model whole (a long message too); the 600-character line is for the log and the gate's view.
+    const asked = m.reaction ? line : `${speaker(m)}: ${defuseSpeakers(clean("group message", m.text, { max: LIMITS.message }))}`;
+    if (direct) st.addressed = { line: asked, quote: { text: m.text.slice(0, 200), author: m.author ?? "", timestamp: m.timestamp }, incoming: m.quote, voice: !!m.voice, picture: m.picture, document: m.document, at: now.getTime(), edit }; // sticky until answered, or until it is too old to answer (GROUP_STICKY_MINUTES)
     // Still waiting for an answer to a direct address? (It lapses after GROUP_STICKY_MINUTES: answering hours later would be odd.)
     const pending = () => {
       if (st.addressed && now.getTime() - st.addressed.at > stickyMs()) st.addressed = undefined;

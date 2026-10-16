@@ -1,3 +1,4 @@
+import { closeSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -47,6 +48,11 @@ export interface IncomingMessage {
   image?: ImageRef;
   /** Any other file (the first one that is neither a picture nor audio): a PDF, a text file, a zip... Its type is for the caller to decide from the bytes; resolve its file with {@link attachmentPath}. */
   file?: FileRef;
+  /**
+   * The full text of a LONG message: Signal apps send text over about 2000 characters as a cut body plus an attachment of type
+   * `text/x-signal-plain` that holds all of it. Never a {@link file}; read it with {@link readLongText} and use it in place of `text`.
+   */
+  longText?: LongTextRef;
   /**
    * Set when this is an EDIT: `text` is the new text, `timestamp` the edit's own timestamp, and `targetTimestamp` the
    * timestamp of the message it replaces (the original's, or an earlier edit's: Signal clients differ). An edit is
@@ -101,6 +107,18 @@ export interface FileRef {
   audio?: true;
 }
 
+/** The attachment that holds the whole text of a long message (the sender's file name is ignored). */
+export interface LongTextRef {
+  id: string;
+  size: number;
+}
+
+/** Signal's content type for the full text of a long message. */
+export const LONG_TEXT_TYPE = "text/x-signal-plain";
+/** The most of a long message that is read (bytes); the rest is cut. */
+export const MAX_LONG_TEXT_BYTES = 64 * 1024;
+const isLongTextType = (a: any) => String(a?.contentType ?? "").split(";")[0]!.trim().toLowerCase() === LONG_TEXT_TYPE;
+
 const MAX_FILE_NAME = 200;
 
 // An attachment id becomes a file name, so only plain names pass (no path separators, nothing hidden).
@@ -138,6 +156,50 @@ export function parseImage(attachments: unknown): ImageRef | undefined {
   return undefined;
 }
 
+/** Pure: the long-message attachment (`text/x-signal-plain`) among signal-cli's attachments, with a plain id and a size. */
+export function parseLongText(attachments: unknown): LongTextRef | undefined {
+  if (!Array.isArray(attachments)) return undefined;
+  for (const a of attachments) {
+    const id = typeof a?.id === "string" ? a.id : "";
+    const size = Number(a?.size ?? 0);
+    if (isLongTextType(a) && safeId(id) && size > 0) return { id, size };
+  }
+  return undefined;
+}
+
+/**
+ * The text of a long-message attachment, read from signal-cli's folder: only a plain file there (no symlink), at most
+ * {@link MAX_LONG_TEXT_BYTES} bytes, strict UTF-8 without NUL. `cut` says the file was longer. Undefined when it is missing or
+ * is not text (the content type came from the sender, the bytes decide). Never throws; the text is untrusted like any message.
+ */
+export function readLongText(ref: { id: string }, dir: string = defaultAttachmentsDir()): { text: string; cut: boolean } | undefined {
+  let fd: number | undefined;
+  try {
+    const file = attachmentPath(ref, dir);
+    if (!lstatSync(file).isFile()) return undefined;
+    fd = openSync(file, "r");
+    const size = fstatSync(fd).size;
+    const buf = Buffer.alloc(Math.min(size, MAX_LONG_TEXT_BYTES + 3));
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    const cut = size > MAX_LONG_TEXT_BYTES;
+    const bytes = buf.subarray(0, Math.min(n, MAX_LONG_TEXT_BYTES));
+    if (!bytes.length || bytes.includes(0)) return undefined;
+    for (let drop = 0; drop <= (cut ? 3 : 0); drop++) {
+      try {
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, bytes.length - drop)).replace(/^﻿/, "");
+        return text.trim() ? { text, cut } : undefined;
+      } catch {
+        // a character split at the cut: try again without it
+      }
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 /**
  * Pure: the first attachment that is not a picture or audio (those have their own parsers), with a plain id and a size. The
  * content type is not consulted beyond that: the caller decides what the bytes are. Any size is surfaced, so the caller can
@@ -150,6 +212,7 @@ export function parseFile(attachments: unknown): FileRef | undefined {
     const size = Number(a?.size ?? 0);
     const type = String(a?.contentType ?? "").toLowerCase();
     const name = typeof a?.filename === "string" && a.filename ? a.filename.slice(0, MAX_FILE_NAME) : undefined;
+    if (isLongTextType(a)) continue; // the body of a long message, never a file
     // Audio WITH a file name is an audio file someone sent (an MP3...), which goes the way of other files; audio without one is a recorded voice message.
     if (IMAGE_TYPES.includes(type) || (type.startsWith("audio/") && !name) || !safeId(id) || !(size > 0)) continue;
     return { id, size, ...(name ? { name } : {}), ...(type.startsWith("audio/") ? { audio: true as const } : {}) };
@@ -284,7 +347,8 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
   const audio = edit ? undefined : parseAudio(body.attachments);
   const image = edit ? undefined : parseImage(body.attachments);
   const file = edit || audio || image ? undefined : parseFile(body.attachments);
-  if (!body.message && !audio && !image && !file) return {};
+  const longText = parseLongText(body.attachments); // also in an edit: the new text of a long message
+  if (!body.message && !audio && !image && !file && !longText) return {};
   const quote = parseQuote(body.quote);
   const mentioned = (Array.isArray(body.mentions) ? body.mentions : []).some((m: any) => m?.uuid === ch.account || m?.number === ch.account);
   return {
@@ -298,6 +362,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
       audio,
       ...(image ? { image } : {}),
       ...(file ? { file } : {}),
+      ...(longText ? { longText } : {}),
       ...(edit ? { edited: { targetTimestamp: target } } : {}),
       ...(group ? { group, addressedToMe: mentioned || quote?.author === ch.account, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}),
     },

@@ -15,7 +15,7 @@ import { settings } from "./settings.ts";
 import { UNSURE } from "./lang.ts";
 import { clean, LIMITS, oneLine } from "./sanitize.ts";
 import { startTiming, type Timing } from "./timing.ts";
-import type { IncomingDeletion, IncomingMessage, IncomingReaction, Quote } from "@ted-personal-assistant/signal";
+import { MAX_LONG_TEXT_BYTES, type IncomingDeletion, type IncomingMessage, type IncomingReaction, type Quote } from "@ted-personal-assistant/signal";
 import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal/tts";
 
 // The conversation model lives in conversationmodel.ts; these are re-exported for the modules and tests that import them from here.
@@ -324,10 +324,31 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
+  const LONG_CUT_NOTE = "[Note: this message was long and arrived cut off; the full text could not be read. Say so if the missing end matters, and ask to have it sent again]";
+  const LONG_CUT_AT = `[Note: this message was very long; only the first ${MAX_LONG_TEXT_BYTES / 1024} KB are shown]`;
+
+  // A long message: Signal sends the first ~2000 characters as the body and all of it as an attachment. The attachment's text takes the
+  // body's place (when it starts with the body; otherwise it follows it); it is cleaned like any text right after. Unreadable: the cut body
+  // stays, with a note for the model. Never a file, so no "unsupported" sentence. Only the size is logged.
+  function withLongText(m: IncomingMessage): IncomingMessage {
+    if (!m.longText) return m;
+    const { longText: ref, ...rest } = m;
+    const got = deps.longText?.(m);
+    if (!got) {
+      console.log(`long message: attachment (${ref.size} bytes) could not be read, using the cut text (${m.text.length} chars)`);
+      return { ...rest, text: `${m.text}\n${LONG_CUT_NOTE}`.trim() };
+    }
+    console.log(`long message: ${got.text.length} chars from the attachment (body ${m.text.length} chars)`);
+    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+    const head = norm(m.text).slice(0, 200);
+    const whole = !head || norm(got.text).startsWith(head) ? got.text : `${m.text}\n${got.text}`;
+    return { ...rest, text: got.cut ? `${whole}\n${LONG_CUT_AT}` : whole };
+  }
+
   // Everything a message goes through before its conversation decides what to do with it. The same steps for the owner and
   // every group; the Conversation's flags (vouch, attention, optionalPictures) say where they differ.
-  async function intake(conv: Conversation, raw: IncomingMessage): Promise<void> {
-    const original = cleanIncoming(raw); // the door: hidden characters never get past here
+  async function intake(conv: Conversation, incoming: IncomingMessage): Promise<void> {
+    const original = cleanIncoming(withLongText(incoming)); // the door: hidden characters never get past here
     const arrived = now();
     if (conv.vouch && !(await deps.vouch(conv.groupId!))) return; // a group we cannot vouch for gets nothing, not even a transcription
     if (original.edited) return edit(conv, original, arrived);

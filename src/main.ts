@@ -28,7 +28,7 @@ import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { unsupportedForVoice } from "./lang.ts";
 import { openLog } from "./state.ts";
-import { attachmentPath, ensureSignalDaemon, SignalClient, type IncomingMessage } from "@ted-personal-assistant/signal";
+import { attachmentPath, ensureSignalDaemon, readLongText, SignalClient, type IncomingMessage } from "@ted-personal-assistant/signal";
 import { providerReady, stopQwen, synthesizeWith, warmQwen } from "@ted-personal-assistant/signal/tts";
 import { Limiter } from "./limiter.ts";
 import { probeAudio, transcribe, voiceReady } from "@ted-personal-assistant/signal/voice";
@@ -109,6 +109,7 @@ const pipeline: Pipeline = createPipeline({
   runOwner: (prompt, ownerMessage, pictures, hooks, documents) => ask(prompt, approve, say, ownerMessage, pictures, hooks, documents),
   picture: (m) => preparePicture(attachmentPath(m.image!, settings.signalAttachmentsDir)), // a plain file name inside signal-cli's folder
   document: async (m) => prepareFile(attachmentPath(m.file!, settings.signalAttachmentsDir), m.file!.name, audioTools), // the same: only the id, joined to signal-cli's folder; an audio file is transcribed (queued with voice messages)
+  longText: (m) => readLongText(m.longText!, settings.signalAttachmentsDir), // the same: only the id, joined to signal-cli's folder
   transcript,
   speech: {
     ready: () => settings.voiceReplies && signal.separateAccount && providerReady(settings.tts).ok,

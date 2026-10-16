@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPipeline, group, owner, type Incoming } from "../src/conversation.ts";
@@ -9,7 +9,7 @@ import { AuthError, RateLimitError } from "../src/errors.ts";
 import { SLOW_REPLY_MS } from "../src/quote.ts";
 import type { Picture } from "../src/image.ts";
 import type { Document } from "../src/document.ts";
-import type { IncomingMessage, IncomingReaction } from "@ted-personal-assistant/signal";
+import { readLongText, type IncomingMessage, type IncomingReaction } from "@ted-personal-assistant/signal";
 import { MAX_SPOKEN_CHARS } from "@ted-personal-assistant/signal/tts";
 
 // The shared conversation pipeline against a fake Signal client. The first block pins the owner's private chat
@@ -29,7 +29,7 @@ interface Rig {
   spoken: string[];
 }
 
-function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: any; transcript?: (m: IncomingMessage) => Promise<string>; picture?: (m: IncomingMessage) => Promise<Picture>; pictures?: Picture[][]; document?: (m: IncomingMessage) => Promise<Document>; documents?: Document[][]; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; foreign?: (words: string) => Promise<string | undefined>; admitGroup?: any; settleMs?: number; settleMaxMs?: number } = {}) {
+function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) => Promise<string>; ready?: boolean; approval?: any; reactionApproval?: any; transcript?: (m: IncomingMessage) => Promise<string>; picture?: (m: IncomingMessage) => Promise<Picture>; pictures?: Picture[][]; document?: (m: IncomingMessage) => Promise<Document>; longText?: (m: IncomingMessage) => { text: string; cut: boolean } | undefined; documents?: Document[][]; now?: () => number; vouch?: boolean; wait?: (ms: number) => Promise<void>; synth?: (words: string) => Promise<string>; foreign?: (words: string) => Promise<string | undefined>; admitGroup?: any; settleMs?: number; settleMaxMs?: number } = {}) {
   const r: Rig = { sent: [], reacts: [], typing: [], reads: [], records: [], prompts: [], spoken: [] };
   let ts = 5000;
   const signal = {
@@ -50,6 +50,7 @@ function rig(over: { separate?: boolean; run?: (prompt: string, own?: string) =>
     runOwner: async (prompt, own, pics, _hooks, docs) => (r.prompts.push(prompt), over.pictures?.push(pics ?? []), over.documents?.push(docs ?? []), { text: await (over.run ?? (async () => "ok"))(prompt, own), costUsd: 0.01 }),
     picture: over.picture ?? (async () => PIC),
     document: over.document ?? (async () => assert.fail("no document")),
+    longText: over.longText,
     transcript: over.transcript ?? (async () => "what is on today"),
     speech: {
       ready: () => over.ready ?? false,
@@ -792,4 +793,61 @@ test("groups: the prompt names the documents members sent, their file names as p
   assert.match(p, /\[PDF attached, file name "contract.pdf"/);
   assert.match(p, /<file_text>\nmilk\neggs\n<\/file_text>/);
   assert.ok(!groupPrompt(new Date(), [], undefined).includes("Files members sent"));
+});
+
+// ---- long messages: Signal sends the first ~2000 characters as the body and all of it as a text/x-signal-plain attachment ----
+
+const LONG = Array.from({ length: 400 }, (_, i) => `Sentence ${i} of a very long message about the trip.`).join(" "); // ~20 KB
+const longRig = (files: Record<string, Buffer | string>, over: Parameters<typeof rig>[0] = {}) => {
+  const dir = mkdtempSync(join(tmpdir(), "longtext-"));
+  for (const [id, data] of Object.entries(files)) writeFileSync(join(dir, id), data);
+  return rig({ ...over, longText: (m) => readLongText(m.longText!, dir) });
+};
+
+test("long message: the owner's model gets the whole text from the attachment, never an unsupported-file sentence", async () => {
+  const { pipeline, r } = longRig({ lt1: LONG });
+  await pipeline.handleIncoming(owner(), msg({ text: LONG.slice(0, 2000), longText: { id: "lt1", size: LONG.length } }));
+  assert.equal(r.prompts[0], LONG);
+  assert.deepEqual(r.sent.map((s) => s.text), ["ok"]); // only the answer: nothing about file types
+});
+
+test("long message: a body that is not the start of the attachment is kept, with the attachment after it; an empty body is fine", async () => {
+  const { pipeline, r } = longRig({ lt2: "the second half of it", lt3: "all of it written out" });
+  await pipeline.handleIncoming(owner(), msg({ text: "something else", longText: { id: "lt2", size: 21 } }));
+  assert.equal(r.prompts[0], "something else\nthe second half of it");
+  await pipeline.handleIncoming(owner(), msg({ text: "", timestamp: 112, longText: { id: "lt3", size: 21 } }));
+  assert.equal(r.prompts[1], "all of it written out");
+});
+
+test("long message: a fake text attachment (binary, NUL, a symlink, a folder, missing) is not used: the cut body stays with a note", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "longtext-"));
+  writeFileSync(join(dir, "bin"), Buffer.from([0xff, 0xfe, 0x00, 0x01, 0x80]));
+  writeFileSync(join(dir, "nul"), "text with a NUL\u0000 inside");
+  writeFileSync(join(dir, "real"), "secret outside");
+  mkdirSync(join(dir, "sub"));
+  symlinkSync(join(dir, "real"), join(dir, "link"));
+  for (const id of ["bin", "nul", "link", "missing", "sub"]) {
+    const { pipeline, r } = rig({ longText: (m) => readLongText(m.longText!, dir) });
+    await pipeline.handleIncoming(owner(), msg({ text: "the cut start of it", longText: { id, size: 30 } }));
+    assert.match(r.prompts[0]!, /^the cut start of it\n\[Note: this message was long and arrived cut off/, id);
+    assert.ok(!r.prompts[0]!.includes("secret outside"));
+    assert.ok(!r.sent.some((s) => /kind of file/.test(s.text)));
+  }
+});
+
+test("long message: over 64 KB it is cut with a note", async () => {
+  const big = Array.from({ length: 10_000 }, (_, i) => `word${i}`).join(" "); // ~69 KB of varied text, more than the cap
+  const { pipeline, r } = longRig({ big: big.repeat(4) });
+  await pipeline.handleIncoming(owner(), msg({ text: big.slice(0, 100), longText: { id: "big", size: big.length * 4 } }));
+  assert.ok(r.prompts[0]!.startsWith("word0 word1 word2"));
+  assert.ok(r.prompts[0]!.length > 60_000 && r.prompts[0]!.length < 66_000);
+  assert.match(r.prompts[0]!, /\n\[Note: this message was very long; only the first 64 KB are shown\]$/);
+});
+
+test("long message: in a group the whole text reaches the admission and is no file", async () => {
+  const got: any[] = [];
+  const { pipeline } = longRig({ lt4: LONG }, { admitGroup: async (_c: unknown, m: unknown) => void got.push(m) });
+  await pipeline.handleIncoming(group(GID), gmsg({ text: LONG.slice(0, 2000), longText: { id: "lt4", size: LONG.length } }));
+  assert.equal(got[0].text, LONG);
+  assert.equal(got[0].document, undefined);
 });

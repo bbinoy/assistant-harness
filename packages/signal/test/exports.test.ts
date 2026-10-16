@@ -11,9 +11,11 @@ const names = (m: object) => Object.keys(m).sort();
 
 test("exports: core entry", () => {
   assert.deepEqual(names(core), [
+    "LONG_TEXT_TYPE",
     "MAX_AUDIO_BYTES",
     "MAX_FILE_BYTES",
     "MAX_IMAGE_BYTES",
+    "MAX_LONG_TEXT_BYTES",
     "SignalClient",
     "attachmentPath",
     "defaultAttachmentsDir",
@@ -22,7 +24,9 @@ test("exports: core entry", () => {
     "parseAudio",
     "parseFile",
     "parseImage",
+    "parseLongText",
     "parseQuote",
+    "readLongText",
     "silentLogger",
     "withMentions",
   ]);
