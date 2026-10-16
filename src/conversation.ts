@@ -7,6 +7,7 @@ import { DELETED_LINE, editNote, isAuthor, sameText } from "./edit.ts";
 import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
 import { documentNote, takeDocuments, type Document } from "./document.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
+import { holdQuote, holdVoiceNote, rememberSender } from "./voicenote.ts";
 import { OWNER_KEY, withSend, type Content, type SendSink } from "./send.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
@@ -119,7 +120,7 @@ export function createPipeline(deps: PipelineDeps) {
   async function speak(conv: Conversation, words: string): Promise<boolean> {
     let file: string | undefined;
     try {
-      file = await deps.speech.synth(words);
+      file = await deps.speech.synth(words, conv.key); // the voice active in THIS conversation
       await out.sendVoice(file, words, conv.groupId);
       return true;
     } catch (e) {
@@ -234,7 +235,9 @@ export function createPipeline(deps: PipelineDeps) {
     // The `send` tool (send.ts): the same delivery as the final reply; none for a reaction or a wake-up. Its screenshots go when the turn ends.
     const sink: SendSink | undefined = background ? undefined : (c) => d.send(c, true);
     try {
-      const { text, costUsd } = await withSend(conv.groupId ?? OWNER_KEY, sink, () => turn.run({ firstOutput: () => turn.timing?.mark("first") }));
+      const by = turn.target?.author;
+      const asking = { author: by, timestamp: turn.target?.timestamp, owner: conv.kind === "owner" || (!!by && deps.isOwner({ from: by, fromUuid: by })) };
+      const { text, costUsd } = await withSend(conv.groupId ?? OWNER_KEY, sink, () => turn.run({ firstOutput: () => turn.timing?.mark("first") }), asking);
       turn.timing?.set("run", now() - started);
       console.log(`${conv.kind} replied (${text.length} chars${costUsd === undefined ? "" : `, $${costUsd.toFixed(4)}`})`);
       await deliverFinal(conv, d, text, turn);
@@ -282,7 +285,10 @@ export function createPipeline(deps: PipelineDeps) {
     const target = { author: m.from, timestamp: m.timestamp };
     if (conv.attention === "always") status(conv, "👂", target);
     try {
-      return { ...m, text: clean("voice transcript", await deps.transcript(m), { max: LIMITS.body }), audio: undefined, voice: true };
+      const text = clean("voice transcript", await deps.transcript(m), { max: LIMITS.body });
+      // Kept (id only, no copy) so the voice tool can build a cloned voice from it: per conversation, never across conversations.
+      if (settings.tts.provider === "qwen" && m.audio) holdVoiceNote(conv.key, { ts: m.timestamp, id: m.audio.id, size: m.audio.size, by: m.from || m.fromUuid || "", byName: m.fromName && oneLine("sender name", m.fromName, 40), snippet: oneLine("voice note", text, 60) });
+      return { ...m, text, audio: undefined, voice: true };
     } catch (e) {
       await tell(conv, m, (e as Error).message, () => status(conv, "⚠️", target));
       return false;
@@ -323,6 +329,10 @@ export function createPipeline(deps: PipelineDeps) {
     const author = original.from || original.fromUuid;
     if (conv.attention === "always") void signal.markRead(original.timestamp); // the owner sees it was read, as soon as we have it
     else if (original.addressedToMe && author) void signal.markRead(original.timestamp, author); // only those who spoke to us see "seen"
+    if (settings.tts.provider === "qwen") {
+      rememberSender(conv.key, author, original.fromName && oneLine("sender name", original.fromName, 40));
+      if (original.quotedAudio) holdQuote(conv.key, original.timestamp, original.quotedAudio);
+    }
     let m: Held = original;
     if (m.audio) {
       const heard = await hear(conv, m);

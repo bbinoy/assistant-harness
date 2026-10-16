@@ -3,6 +3,7 @@ import { z } from "zod";
 import { audit } from "./audit.ts";
 import { isOneEmoji } from "./reaction.ts";
 import { dropShots, loadShot } from "./shots.ts";
+import { setAsking, type Asking } from "./voicenote.ts";
 
 // send: the model's way to put something in the conversation NOW while it keeps working: a message ("On it, researching now"), a voice note,
 // a picture (a screenshot of this run's browse), or an emoji reaction. Text the model writes before a tool call stays internal; only this tool
@@ -26,13 +27,15 @@ const sinks = new Map<string, SendSink>();
 
 // Around a conversation's turn: the sink is found by key while it runs (a warm process is built before its turn exists); afterwards the
 // turn's screenshots are removed.
-export async function withSend<T>(key: string, sink: SendSink | undefined, run: () => Promise<T>): Promise<T> {
+export async function withSend<T>(key: string, sink: SendSink | undefined, run: () => Promise<T>, asking?: Asking): Promise<T> {
   if (sink) sinks.set(key, sink);
+  setAsking(key, asking); // who is asking in this turn (the voice tool records the requester)
   try {
     return await run();
   } finally {
     if (sink && sinks.get(key) === sink) sinks.delete(key);
     dropShots(key);
+    setAsking(key, undefined);
   }
 }
 

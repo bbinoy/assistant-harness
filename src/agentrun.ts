@@ -2,6 +2,7 @@ import { query, type HookCallbackMatcher, type Options, type SDKMessage } from "
 import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
 import { createSendServer, OWNER_KEY } from "./send.ts";
+import { createVoiceServer } from "./voicetool.ts";
 import { browseSystem, createBrowseServer } from "./browse.ts";
 import { resultText, withText, type BrowseGuard, type BrowseMode } from "./browseguard.ts";
 import { browseStatus, browserServer } from "./browseserver.ts";
@@ -130,12 +131,14 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
       ? createBrowseServer({ mode, groupId: opts.memory?.groupId, key: tellKey, run: browseRunner(mode === "group" && opts.memory?.groupId ? approveInGroup(opts.memory.groupId) : approve) })
       : undefined;
   const sendServer = tellKey ? createSendServer(tellKey) : undefined;
+  // voice (voicetool.ts): the cloned voice of this conversation, Qwen only; the owner's chat and groups, never an unattended run.
+  const voiceServer = tellKey && settings.tts.provider === "qwen" ? createVoiceServer(tellKey) : undefined;
   const status = browsing ? browseStatus() : undefined;
   if (status && !status.ok) throw new Error(`browsing is not set up: ${status.reason}`);
   const mcpServers: Options["mcpServers"] = browsing && opts.guard && status?.ok
     ? { browser: browserServer(status, opts.guard.outDir, undefined, { mode: opts.guard.vision, cdpPort: opts.guard.cdpPort }) }
     : opts.memory || browseTool || sendServer
-      ? { ...(sendServer ? { send: sendServer } : {}), ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
+      ? { ...(sendServer ? { send: sendServer } : {}), ...(voiceServer ? { voice: voiceServer } : {}), ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
       : undefined;
   return {
     model: settings.model,

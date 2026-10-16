@@ -162,3 +162,10 @@ test("deletes: a remote delete names the message, in a private chat, a group and
   assert.deepEqual(interpretEnvelope({ sourceNumber: ME, dataMessage: { timestamp: 1, remoteDelete: { timestamp: 9 } } }, peer).deletion?.targetTimestamp, 9); // older signal-cli: only `timestamp`
   assert.deepEqual(interpretEnvelope({ sourceNumber: ME, dataMessage: { timestamp: 1, remoteDelete: {} } }, peer), {});
 });
+
+test("a reply to a voice note carries the voice note's timestamp (a quote of an attachment has no text)", () => {
+  const msg = (quote: object) => ({ sourceNumber: ME, timestamp: 9, syncMessage: { sentMessage: { destinationNumber: ME, timestamp: 9, message: "use this one", quote } } });
+  assert.equal(interpretEnvelope(msg({ id: 4, author: ME, text: "", attachments: [{ contentType: "audio/aac" }] }), self).message?.quotedAudio, 4);
+  assert.equal(interpretEnvelope(msg({ id: 4, author: ME, text: "hi", attachments: [{ contentType: "image/png" }] }), self).message?.quotedAudio, undefined);
+  assert.equal(interpretEnvelope(msg({ id: 4, author: ME, text: "hi" }), self).message?.quotedAudio, undefined);
+});

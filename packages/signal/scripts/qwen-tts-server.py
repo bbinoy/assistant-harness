@@ -5,6 +5,7 @@
 # Exits when its parent goes away (stdin closes). POST /say {"text": ...} -> audio/wav; GET /health -> ok.
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -18,6 +19,8 @@ model_id, ref_audio = sys.argv[1:3]
 ref_text = os.environ.get("QWEN_TTS_REF_TEXT", "")
 nonce = os.environ.get("QWEN_TTS_NONCE", "")
 MAX_CHARS = 4000
+voice_root = os.path.realpath(os.environ["QWEN_TTS_VOICE_ROOT"]) if os.environ.get("QWEN_TTS_VOICE_ROOT") else ""
+VOICE_PATH = re.compile(r"^(groups/[0-9a-f]{16}/)?voices/[a-z0-9-]{1,32}$")
 
 
 def watch_parent():
@@ -33,9 +36,24 @@ t0 = time.time()
 model = load_model(model_id)
 
 
-def speak(text):
+def reference(voice):
+    """The reference clip and its text: the default, or a voice of the library (a relative path of a fixed shape, inside the voice folder)."""
+    if not voice:
+        return ref_audio, ref_text
+    if not voice_root or not VOICE_PATH.match(voice):
+        raise ValueError("bad voice")
+    d = os.path.realpath(os.path.join(voice_root, voice))
+    if not d.startswith(voice_root + os.sep):
+        raise ValueError("bad voice")
+    with open(os.path.join(d, "ref.txt"), encoding="utf-8") as f:
+        return os.path.join(d, "ref.wav"), f.read().strip()
+
+
+def speak(text, voice=None):
     parts = []
-    for r in model.generate(text=text, lang_code="english", ref_audio=ref_audio, ref_text=ref_text):
+    audio_path, audio_text = reference(voice)
+    # the model caches the encoded reference per clip, so a voice costs its encoding once, on its first reply
+    for r in model.generate(text=text, lang_code="english", ref_audio=audio_path, ref_text=audio_text):
         parts.append(np.array(r.audio))
     return np.concatenate(parts), model.sample_rate
 
@@ -66,10 +84,12 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("content-length", "0"))
             if n <= 0 or n > 64 * 1024:
                 return self._send(400, b"bad length")
-            text = str(json.loads(self.rfile.read(n))["text"]).strip()
+            body = json.loads(self.rfile.read(n))
+            text = str(body["text"]).strip()
+            voice = body.get("voice")
             if not text or len(text) > MAX_CHARS:
                 return self._send(400, b"bad text")
-            audio, rate = speak(text)
+            audio, rate = speak(text, voice)
             with tempfile.NamedTemporaryFile(suffix=".wav") as f:
                 sf.write(f.name, audio, rate)
                 body = open(f.name, "rb").read()

@@ -106,7 +106,7 @@ const pipeline: Pipeline = createPipeline({
   transcript,
   speech: {
     ready: () => settings.voiceReplies && signal.separateAccount && providerReady(settings.tts).ok,
-    synth: (words) => synthesizeWith(words, settings.tts, console),
+    synth: (words, conversation) => synthesizeWith(words, settings.tts, console, conversation), // the conversation picks its cloned voice (voicetool.ts)
     foreign: (words) => unsupportedForVoice(words, settings.ttsLanguages),
   },
   approvals,
