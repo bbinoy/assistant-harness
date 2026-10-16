@@ -68,30 +68,41 @@ export const isSensitive = (e: Pick<Entry, "kind">): boolean => SENSITIVE_KINDS.
 export const KEY_NAME = /^[a-z][a-z0-9._-]{0,39}$/;
 export const MAX_VALUE = 200;
 
-export function seal(entries: Entries, hexKey: string): string {
+// The card (card.ts) is a second kind of item in the same sealed file: the profile readers below never return it, only readAll/writeAll do.
+export interface Payload {
+  entries: Entries;
+  card?: unknown; // validated by card.ts (cardOf); this file only keeps it sealed
+}
+
+export const seal = (entries: Entries, hexKey: string): string => sealAll({ entries }, hexKey);
+
+export function sealAll(payload: Payload, hexKey: string): string {
   const iv = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", Buffer.from(hexKey, "hex"), iv);
   c.setAAD(AAD);
-  const ct = Buffer.concat([c.update(JSON.stringify({ entries }), "utf8"), c.final()]);
+  const ct = Buffer.concat([c.update(JSON.stringify({ entries: payload.entries, ...(payload.card !== undefined ? { card: payload.card } : {}) }), "utf8"), c.final()]);
   return JSON.stringify({ v: 1, iv: iv.toString("base64"), tag: c.getAuthTag().toString("base64"), ct: ct.toString("base64") });
 }
 
 // Throws on a wrong key, a changed file or anything that is not a sealed profile.
-export function unseal(file: string, hexKey: string): Entries {
+export const unseal = (file: string, hexKey: string): Entries => unsealAll(file, hexKey).entries;
+
+export function unsealAll(file: string, hexKey: string): Payload {
   const o = JSON.parse(file) as { v?: number; iv?: string; tag?: string; ct?: string };
   if (o.v !== 1 || typeof o.iv !== "string" || typeof o.tag !== "string" || typeof o.ct !== "string") throw new Error("not a profile file");
   const d = createDecipheriv("aes-256-gcm", Buffer.from(hexKey, "hex"), Buffer.from(o.iv, "base64"));
   d.setAAD(AAD);
   d.setAuthTag(Buffer.from(o.tag, "base64"));
   const plain = Buffer.concat([d.update(Buffer.from(o.ct, "base64")), d.final()]).toString("utf8");
-  const parsed = (JSON.parse(plain) as { entries?: Entries }).entries;
+  const body = JSON.parse(plain) as { entries?: Entries; card?: unknown };
+  const parsed = body.entries;
   if (!parsed || typeof parsed !== "object") throw new Error("not a profile");
   const out: Entries = {};
   for (const [k, e] of Object.entries(parsed)) {
     if (!KEY_NAME.test(k) || typeof e?.value !== "string" || !KINDS.includes(e.kind)) continue;
     out[k] = { value: e.value, kind: e.kind, domains: Array.isArray(e.domains) ? e.domains.filter((x) => typeof x === "string") : [], ...(Array.isArray(e.labels) ? { labels: e.labels.filter((x) => typeof x === "string").slice(0, 8) } : {}) };
   }
-  return out;
+  return { entries: out, ...(body.card !== undefined ? { card: body.card } : {}) };
 }
 
 export const profilePath = (): string => join(settings.stateDir, "profile.enc");
@@ -112,7 +123,12 @@ export class ProfileStore {
   }
 
   async read(): Promise<Entries> {
-    if (!this.exists()) return {};
+    return (await this.readAll()).entries;
+  }
+
+  // The whole sealed file: the profile entries and the card, if there is one. Only card.ts asks for the card.
+  async readAll(): Promise<Payload> {
+    if (!this.exists()) return { entries: {} };
     if (statSync(this.path).mode & 0o077) throw new ProfileError(`${this.path} is readable by others: run chmod 600 on it`);
     let key: string | undefined;
     try {
@@ -122,13 +138,19 @@ export class ProfileStore {
     }
     if (!key) throw new ProfileError("the profile file exists but the Keychain has no key for it");
     try {
-      return unseal(readFileSync(this.path, "utf8"), key);
+      return unsealAll(readFileSync(this.path, "utf8"), key);
     } catch {
       throw new ProfileError("the profile file does not open with the Keychain key (changed, damaged or from another key)");
     }
   }
 
+  // Saving the profile keeps the card that is in the file (a file that cannot be opened is never overwritten).
   async write(entries: Entries): Promise<void> {
+    const old = this.exists() ? (await this.readAll()).card : undefined;
+    await this.writeAll({ entries, ...(old !== undefined ? { card: old } : {}) });
+  }
+
+  async writeAll(payload: Payload): Promise<void> {
     let key: string | undefined;
     try {
       key = await this.keychain.get();
@@ -141,7 +163,7 @@ export class ProfileStore {
       throw e instanceof ProfileError ? e : new ProfileError((e as Error).message);
     }
     const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, seal(entries, key), { mode: 0o600 });
+    writeFileSync(tmp, sealAll(payload, key), { mode: 0o600 });
     chmodSync(tmp, 0o600);
     renameSync(tmp, this.path);
   }
