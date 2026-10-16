@@ -307,12 +307,17 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
-  // A PDF or text file -> the message with it attached, or false when it could not be opened or is not a kind we read (the sender
+  // A PDF, text file or audio file -> the message with it attached, or false when it could not be opened or is not a kind we read (the sender
   // was told, if they should be). Like see(): one step for every conversation; only its size and kind are logged, never the name or the content.
   async function openFile(conv: Conversation, m: IncomingMessage): Promise<Held | false> {
     console.log(`📄 file (${m.file!.size} bytes${m.text ? `, caption ${m.text.length} chars` : ""})`);
     try {
-      return { ...m, file: undefined, document: await deps.document(m) };
+      const document = await deps.document(m);
+      // An audio file with speech in it is also a source for the voice tool (same list as voice messages; id only, never a copy): per conversation.
+      if (document.kind === "audio" && document.speech && settings.tts.provider === "qwen") {
+        holdVoiceNote(conv.key, { ts: m.timestamp, id: m.file!.id, size: m.file!.size, by: m.from || m.fromUuid || "", byName: m.fromName && oneLine("sender name", m.fromName, 40), snippet: oneLine("audio file", document.text, 60), kind: "file", name: document.name, seconds: document.seconds });
+      }
+      return { ...m, file: undefined, document };
     } catch (e) {
       await tell(conv, m, (e as Error).message);
       return false;
@@ -346,12 +351,13 @@ export function createPipeline(deps: PipelineDeps) {
       m = { ...m, image: undefined, picture: seen ? seen.picture : undefined };
     }
     if (m.file) {
-      const seen = !conv.optionalPictures || m.addressedToMe || settings.groupParticipation !== "tagged" ? await openFile(conv, m) : false;
+      // An audio file is opened like a voice message is transcribed, whoever it is for (it may be the source of a voice someone asks for next).
+      const seen = !conv.optionalPictures || m.addressedToMe || settings.groupParticipation !== "tagged" || m.file.audio ? await openFile(conv, m) : false;
       if (!seen && !conv.optionalPictures) return;
       m = { ...m, file: undefined, document: seen ? seen.document : undefined };
     }
     // The line for the history: searchable, and what the dream learns from (never the picture or the document itself).
-    const line = original.audio ? `🎙️ ${m.text}` : original.image ? `🖼️ ${m.text || "image"}` : original.file ? `📄 ${m.text || "document"}` : m.text;
+    const line = original.audio ? `🎙️ ${m.text}` : original.image ? `🖼️ ${m.text || "image"}` : original.file ? `📄 ${m.text || (m.document?.kind === "audio" ? "audio file" : "document")}` : m.text;
     if (!conv.approvals) {
       // A question asked in this group is answered here by ANY member (their message, a quoted reply or a reaction); the model reads it
       // like the owner's. Only this group's approvals can be answered; an edit and a caption never answer.

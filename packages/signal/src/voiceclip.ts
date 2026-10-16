@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { SAFE_INPUT, toolEnv } from "./internal/exec.ts";
+import { AUDIO_FILE_MAX_SECONDS, probeAudio, type AudioInfo } from "./audiofile.ts";
 import { transcribe } from "./transcribe.ts";
 
 // A voice note -> the reference clip of a cloned voice: mono 24 kHz wav, silence trimmed at both ends, at most 15 s (the best stretch
@@ -22,6 +23,13 @@ export interface ClipTools {
   decode(file: string): Promise<Int16Array>;
   /** The words in a wav file ("" when none). */
   transcribe(wav: string): Promise<string>;
+  /** What an audio FILE really is (ffprobe): its length, or a short reason it is not audio (video, other). */
+  probe(file: string): Promise<AudioInfo | string>;
+}
+
+export interface BuildOptions {
+  /** An audio file somebody sent, not a voice message: it must really be audio (not video), and only the first AUDIO_FILE_MAX_SECONDS are searched instead of refusing a long one. */
+  file?: boolean;
 }
 
 export function realClipTools(whisperModel: string): ClipTools {
@@ -35,6 +43,7 @@ export function realClipTools(whisperModel: string): ClipTools {
       return new Int16Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.length - (b.length % 2)));
     },
     transcribe: (wav) => transcribe(wav, whisperModel),
+    probe: probeAudio,
   };
 }
 
@@ -72,10 +81,21 @@ export function bestWindow(levels: number[], max = MAX_SECONDS): { from: number;
   const sorted = [...levels].sort((a, b) => a - b);
   const gate = Math.max(-50, pct(sorted, 0.9) - 20);
   let best = 0;
-  let bestScore = -1;
-  let score = levels.slice(0, w).filter((l) => l > gate).length;
+  let bestScore = -Infinity;
+  // Most speech wins, and a long silence inside the window costs more than the frames it lacks: a stretch of continuous talking beats
+  // one with a pause in the middle (or music that fades in and out around a few words). Ties keep the earliest stretch.
+  // Speech rises and falls from syllable to syllable; a steady tone or hum (an intro jingle, a held note) does not, so a loud frame only counts
+  // when the level moves by a dB or more next to it.
+  const lively = levels.map((l, i) => Math.abs(l - (levels[i - 1] ?? l)) >= 1 || Math.abs(l - (levels[i + 1] ?? l)) >= 1);
   for (let s = 0; s + w <= levels.length; s++) {
-    if (s > 0) score += (levels[s + w - 1]! > gate ? 1 : 0) - (levels[s - 1]! > gate ? 1 : 0);
+    let voiced = 0;
+    let run = 0;
+    let longest = 0;
+    for (let i = s; i < s + w; i++) {
+      if (levels[i]! > gate) (lively[i] && voiced++, (run = 0));
+      else longest = Math.max(longest, ++run);
+    }
+    const score = voiced - 2 * Math.max(0, longest - 5); // pauses up to half a second are speech rhythm
     if (score > bestScore) (bestScore = score, (best = s));
   }
   const quietest = (a: number, b: number) => {
@@ -122,19 +142,24 @@ export interface Reference {
 }
 
 /** Makes the reference clip of a voice note file, or throws ClipRefused with a sentence. */
-export async function buildReference(file: string, tools: ClipTools): Promise<Reference> {
+export async function buildReference(file: string, tools: ClipTools, opts: BuildOptions = {}): Promise<Reference> {
+  if (opts.file) {
+    const info = await tools.probe(file).catch(() => "not media" as const);
+    if (typeof info === "string") throw new ClipRefused(info === "video" ? "That file is a video, not audio, so I can't make a voice from it." : "That file is not real audio, so I can't make a voice from it.");
+  }
   let pcm: Int16Array;
   try {
     pcm = await tools.decode(file);
   } catch {
     throw new ClipRefused("I couldn't read that audio.");
   }
+  if (opts.file && pcm.length > AUDIO_FILE_MAX_SECONDS * RATE) pcm = pcm.subarray(0, AUDIO_FILE_MAX_SECONDS * RATE); // a long file: its first minutes are searched
   if (pcm.length > HARD_MAX_SECONDS * RATE) throw new ClipRefused(`That recording is over ${HARD_MAX_SECONDS / 60} minutes. Send a clip of 10 to 15 seconds.`);
   if (pcm.length < MIN_SECONDS * RATE) throw new ClipRefused(`That clip is too short (${(pcm.length / RATE).toFixed(1)} s). I need at least ${MIN_SECONDS} seconds of speech, ideally 10 to 15.`);
   const levels = frameLevels(pcm);
-  const bad = notSpeech(levels);
-  if (bad) throw new ClipRefused(bad);
   const { from, to } = bestWindow(levels);
+  const bad = notSpeech(levels.slice(from, to)); // the stretch that is used must be speech; a long recording with only a few seconds of it is fine
+  if (bad) throw new ClipRefused(bad);
   const clip = pcm.subarray(from * FRAME, Math.min(pcm.length, to * FRAME));
   if (clip.length < MIN_SECONDS * RATE) throw new ClipRefused("That clip is too short.");
   const wav = wavBytes(clip);

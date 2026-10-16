@@ -1,6 +1,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { settings } from "../src/settings.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildOptions } from "../src/agentrun.ts";
@@ -27,7 +28,7 @@ const speech = (seconds: number): Int16Array => {
 const silence = (seconds: number) => new Int16Array(seconds * RATE).map((_, i) => (i % 7) - 3);
 const noise = (seconds: number) => new Int16Array(seconds * RATE).map((_, i) => Math.round(4000 * Math.sin(i * 12.9898) * Math.cos(i * 4.1414)));
 
-const fakeClip = (pcm: Int16Array, text = "hello this is my own voice speaking"): ClipTools => ({ decode: async () => pcm, transcribe: async () => text });
+const fakeClip = (pcm: Int16Array, text = "hello this is my own voice speaking", probe: ClipTools["probe"] = async () => ({ seconds: pcm.length / RATE, codec: "mp3" })): ClipTools => ({ decode: async () => pcm, transcribe: async () => text, probe });
 
 let tmp: string;
 let attachments: string;
@@ -40,12 +41,17 @@ const note = (key: string, ts: number, by = "+1", o: { id?: string; file?: boole
   if (o.file !== false) writeFileSync(join(attachments, id), "audio");
   holdVoiceNote(key, { ts, id, size: 5000, by, byName: o.byName, snippet: "use my voice please" }, NOW);
 };
-const asMember = (key: string, author: string, ts: number, owner: boolean, run: () => Promise<void>) => withSend(key, undefined, run, { author, timestamp: ts, owner });
+const asMember = async <T>(key: string, author: string, ts: number, owner: boolean, run: () => Promise<T>): Promise<T> => {
+  let out: T | undefined;
+  await withSend(key, undefined, async () => void (out = await run()), { author, timestamp: ts, owner });
+  return out as T;
+};
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "voice-test-"));
   attachments = join(tmp, "att");
   mkdirSync(attachments);
+  rmSync(join(settings.stateDir, "voice", "sources.json"), { force: true }); // notes are kept on disk: every test starts with none
   resetVoiceNotes();
   deps = mk();
 });
@@ -109,8 +115,8 @@ test("clip: too short, silent, noise, no words and too long are refused; a long 
   await assert.rejects(buildReference(f, fakeClip(speech(10), "")), /clear speech/);
   await assert.rejects(buildReference(f, fakeClip(speech(10), "(music) [noise]"), ), /clear speech/);
   await assert.rejects(buildReference(f, fakeClip(speech(10), "uh")), /clear speech/);
-  await assert.rejects(buildReference(f, { decode: async () => new Int16Array(301 * RATE), transcribe: async () => "x" }), /over 5 minutes/);
-  await assert.rejects(buildReference(f, { decode: async () => { throw new Error("bad"); }, transcribe: async () => "x" }), /couldn't read/);
+  await assert.rejects(buildReference(f, { ...fakeClip(new Int16Array(301 * RATE)), transcribe: async () => "x" }), /over 5 minutes/);
+  await assert.rejects(buildReference(f, { ...fakeClip(speech(1)), decode: async () => { throw new Error("bad"); } }), /couldn't read/);
   const ok = await buildReference(f, fakeClip(speech(8)));
   assert.ok(ok.seconds > 7 && ok.wav.subarray(0, 4).toString() === "RIFF" && ok.wav.readUInt32LE(24) === RATE);
   const long = await buildReference(f, fakeClip(speech(70)));
@@ -268,4 +274,88 @@ process.stdin.on("end", () => process.exit(0)); process.stdin.resume();
     stopQwen();
   }
   assert.deepEqual(bodies, [{ text: "one" }, { text: "two", voice: "voices/anna" }, { text: "three" }, { text: "four" }]);
+});
+
+// ---- audio FILES as a voice source (an mp3 someone sent), the same list and the same rules as voice messages ----
+
+const fileNote = (key: string, ts: number, by = "+1", o: { id?: string; file?: boolean; byName?: string; name?: string } = {}) => {
+  const id = o.id ?? `file${ts}`;
+  if (o.file !== false) writeFileSync(join(attachments, id), "mp3 bytes");
+  holdVoiceNote(key, { ts, id, size: 90_000, by, byName: o.byName, snippet: "this is the speech in the file", kind: "file", name: o.name ?? "talk.mp3", seconds: 95 }, NOW);
+};
+
+test("clip: an audio file must really be audio (no video, no fake mp3); a long one is searched in its first 5 minutes instead of refused", async () => {
+  const f = join(tmp, "in");
+  await assert.rejects(buildReference(f, fakeClip(speech(10), undefined, async () => "video"), { file: true }), /video/);
+  await assert.rejects(buildReference(f, fakeClip(speech(10), undefined, async () => "not media"), { file: true }), /not real audio/);
+  await assert.rejects(buildReference(f, { ...fakeClip(speech(10)), probe: async () => { throw new Error("boom"); } }, { file: true }), /not real audio/);
+  // a voice message is not probed: the same fake that refuses a file passes there
+  assert.ok((await buildReference(f, fakeClip(speech(10), undefined, async () => "video"))).seconds > 0);
+  const long = await buildReference(f, fakeClip(speech(301)), { file: true });
+  assert.ok(long.seconds <= 15 && long.seconds >= 10);
+  await assert.rejects(buildReference(f, fakeClip(speech(301))), /over 5 minutes/);
+});
+
+test("clip: for a long file the best stretch has continuous speech, not the start (a hum, a long pause)", async () => {
+  const hum = (s: number) => new Int16Array(s * RATE).map((_, i) => Math.round(120 * Math.sin(i / 9)));
+  const pcm = new Int16Array([...hum(40), ...speech(12), ...hum(40)]);
+  const tone = (s: number) => new Int16Array(s * RATE).map((_, i) => Math.round(9000 * Math.sin(i / 11))); // a loud steady intro jingle: loud, but not speech
+  const withJingle = new Int16Array([...tone(25), ...speech(12)]);
+  const j = await buildReference(join(tmp, "in"), fakeClip(withJingle), { file: true });
+  const jb = j.wav.subarray(44);
+  const js = new Int16Array(jb.buffer.slice(jb.byteOffset, jb.byteOffset + jb.length));
+  assert.ok(js.filter((v) => Math.abs(v) > 2000).length / js.length > 0.3 && j.seconds < 14, "the jingle is skipped");
+  const ref = await buildReference(join(tmp, "in"), fakeClip(pcm), { file: true });
+  const body = ref.wav.subarray(44);
+  const samples = new Int16Array(body.buffer.slice(body.byteOffset, body.byteOffset + body.length));
+  const loud = samples.filter((v) => Math.abs(v) > 2000).length / samples.length;
+  assert.ok(loud > 0.3, String(loud));
+});
+
+test("tool: an audio file with speech is a source like a voice note: use it from the asking message, a quoted file or the latest one", async () => {
+  const T = NOW - 100_000;
+  fileNote("owner", T, "owner", { byName: "Ben", name: "talk.mp3" });
+  const s = await voiceNow("owner", { action: "sources" }, deps);
+  assert.match(s, /id \d+: audio file "talk.mp3" \(95 s\), from Ben, .*"this is the speech in the file"/);
+  const r = await asMember("owner", "owner", T, true, () => voiceNow("owner", { action: "use", name: "talk" }, deps));
+  assert.match(r, /now using the voice "talk".*from the audio file/);
+  const meta = JSON.parse(readFileSync(join(tmp, "voice/voices/talk/meta.json"), "utf8"));
+  assert.deepEqual([meta.source, meta.by, meta.from], ["audio file", "owner", "owner"]);
+  fileNote("owner", T + 5000, "owner", { name: "other.mp3" });
+  holdQuote("owner", T + 9000, T); // a later message replies to the first file
+  const q = await asMember("owner", "owner", T + 9000, true, () => voiceNow("owner", { action: "use", name: "quoted" }, deps));
+  assert.match(q, /"quoted"/);
+  assert.match(await voiceNow("owner", { action: "use", name: "latest" }, deps), /"latest"/); // no source in the message: the latest in the chat
+});
+
+test("tool: a file source is probed again at use (not audio any more: refused, nothing saved); too big or gone is refused first", async () => {
+  fileNote("owner", NOW - 5000, "owner");
+  const d = mk(fakeClip(speech(12), undefined, async () => "not media"));
+  assert.match(await voiceNow("owner", { action: "use" }, d), /not real audio/);
+  assert.deepEqual(listVoices(join(tmp, "voice")), []);
+  fileNote("owner", NOW - 4000, "owner", { id: "huge" });
+  truncateSync(join(attachments, "huge"), 50_000_001);
+  assert.match(await voiceNow("owner", { action: "use", source: String(NOW - 4000) }, deps), /audio file is no longer on this device/);
+  fileNote("owner", NOW - 3000, "owner", { id: "gone", file: false });
+  assert.match(await voiceNow("owner", { action: "use", source: String(NOW - 3000) }, deps), /audio file is no longer on this device/);
+});
+
+test("tool: a file without speech is refused by the clip check, and a file from another conversation is never used", async () => {
+  fileNote("owner", NOW - 5000, "owner");
+  assert.match(await voiceNow("owner", { action: "use" }, mk(fakeClip(speech(12), ""))), /clear speech/);
+  fileNote("g2", NOW - 2000, "+9", { byName: "Other" });
+  await asMember("g1", "+2", 1, false, async () => assert.match(await voiceNow("g1", { action: "use", source: String(NOW - 2000) }, deps), /not a voice note from this conversation/));
+  assert.deepEqual(listVoices(scopeRoot(deps.voiceRoot, "g1")), []);
+});
+
+test("tool: group: a member's file makes a voice used in that group only; the file's sender and the requester are both recorded", async () => {
+  const T = NOW - 50_000;
+  fileNote("g1", T, "+3", { byName: "Max", name: "max.m4a" });
+  const r = await asMember("g1", "+2", T + 1000, false, () => voiceNow("g1", { action: "use", name: "max", source: String(T) }, deps));
+  assert.match(r, /Max's voice/);
+  assert.match(r, /only in this group|used only in this group/);
+  const meta = JSON.parse(readFileSync(join(scopeRoot(deps.voiceRoot, "g1"), "voices/max/meta.json"), "utf8"));
+  assert.deepEqual([meta.by, meta.from, meta.source], ["+2", "+3", "audio file"]);
+  assert.equal(activeVoice(deps.voiceRoot), "default");
+  assert.deepEqual(listVoices(deps.voiceRoot), []);
 });

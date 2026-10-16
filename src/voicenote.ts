@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { settings } from "./settings.ts";
 
 // The voice notes received in each conversation (the owner's chat, and each group on its own), so the voice tool can build a cloned voice from
-// one of them. Only the attachment id is kept (signal-cli's file name; the file is found by joining it to the attachments folder, voice.ts
+// one of them. Audio FILES that contain speech (an MP3 someone sent) are kept in the same list, marked kind "file". Only the attachment id is kept (signal-cli's file name; the file is found by joining it to the attachments folder, voice.ts
 // does the same for transcription), the sender, the time and a short snippet of the transcript for the model to recognise it by.
 // The audio itself is not copied. Bounded: the last NOTES_PER_CONVERSATION notes of a conversation, none older than MAX_AGE_MS (a note
 // outside that is not offered and not used). A note belongs to the conversation it arrived in: a lookup never crosses conversations.
@@ -18,6 +18,9 @@ export interface VoiceNote {
   by: string; // sender's Signal id
   byName?: string;
   snippet: string; // the start of the transcript: data from the sender
+  kind?: "voice" | "file"; // a recorded voice message (default) or an audio file the sender attached
+  name?: string; // file: its (sanitised) name
+  seconds?: number; // file: its length
 }
 
 interface Store {
