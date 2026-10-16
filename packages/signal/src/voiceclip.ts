@@ -6,14 +6,14 @@ import { promisify } from "node:util";
 import { SAFE_INPUT, toolEnv } from "./internal/exec.ts";
 import { transcribe } from "./transcribe.ts";
 
-// A voice note -> the reference clip of a cloned voice: mono 24 kHz wav, silence trimmed at both ends, at most 30 s (the best stretch
+// A voice note -> the reference clip of a cloned voice: mono 24 kHz wav, silence trimmed at both ends, at most 15 s (the best stretch
 // when it is longer), with the words said in it (local whisper). A clip that is too short, too long to take, mostly silence, or not
 // speech is refused with a sentence the person can be told. ffmpeg and whisper run here, on this machine; nothing is sent anywhere.
 
 const run = promisify(execFile);
 export const RATE = 24_000;
 export const MIN_SECONDS = 3;
-export const MAX_SECONDS = 30;
+export const MAX_SECONDS = 15; // measured: a 27 s reference doubled the time of every reply (the clip is part of the prompt) against a 10 s one
 export const HARD_MAX_SECONDS = 300; // longer recordings are refused instead of searched
 const FRAME = RATE / 10; // 100 ms
 
@@ -129,8 +129,8 @@ export async function buildReference(file: string, tools: ClipTools): Promise<Re
   } catch {
     throw new ClipRefused("I couldn't read that audio.");
   }
-  if (pcm.length > HARD_MAX_SECONDS * RATE) throw new ClipRefused(`That recording is over ${HARD_MAX_SECONDS / 60} minutes. Send a clip of 10 to 30 seconds.`);
-  if (pcm.length < MIN_SECONDS * RATE) throw new ClipRefused(`That clip is too short (${(pcm.length / RATE).toFixed(1)} s). I need at least ${MIN_SECONDS} seconds of speech, ideally 10 to 30.`);
+  if (pcm.length > HARD_MAX_SECONDS * RATE) throw new ClipRefused(`That recording is over ${HARD_MAX_SECONDS / 60} minutes. Send a clip of 10 to 15 seconds.`);
+  if (pcm.length < MIN_SECONDS * RATE) throw new ClipRefused(`That clip is too short (${(pcm.length / RATE).toFixed(1)} s). I need at least ${MIN_SECONDS} seconds of speech, ideally 10 to 15.`);
   const levels = frameLevels(pcm);
   const bad = notSpeech(levels);
   if (bad) throw new ClipRefused(bad);

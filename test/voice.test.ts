@@ -101,7 +101,7 @@ test("library: a group has its own folder named by a hash, never its id", () => 
   assert.equal(activeVoiceRel(join(tmp, "voice"), "other"), undefined);
 });
 
-test("clip: too short, silent, noise, no words and too long are refused; a long good one is cut to 30 s", async () => {
+test("clip: too short, silent, noise, no words and too long are refused; a long good one is cut to 15 s", async () => {
   const f = join(tmp, "in");
   await assert.rejects(buildReference(f, fakeClip(speech(2))), /too short/);
   await assert.rejects(buildReference(f, fakeClip(silence(10))), /almost silent|mostly silence/);
@@ -114,7 +114,7 @@ test("clip: too short, silent, noise, no words and too long are refused; a long 
   const ok = await buildReference(f, fakeClip(speech(8)));
   assert.ok(ok.seconds > 7 && ok.wav.subarray(0, 4).toString() === "RIFF" && ok.wav.readUInt32LE(24) === RATE);
   const long = await buildReference(f, fakeClip(speech(70)));
-  assert.ok(long.seconds <= 30 && long.seconds >= 20, String(long.seconds));
+  assert.ok(long.seconds <= 15 && long.seconds >= 10, String(long.seconds));
 });
 
 test("tool: the owner turns a voice note into the active voice; the consent line comes once", async () => {
