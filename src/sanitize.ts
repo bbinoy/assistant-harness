@@ -97,7 +97,7 @@ function collapse(text: string): { text: string; cut: number } {
 // Zalgo: a pile of combining marks on one letter. Real scripts stack a handful at most.
 const MARK_PILE = /(\p{M}{8})\p{M}+/gu;
 
-export const LIMITS = { name: 100, subject: 300, line: 2000, body: 20_000, block: 100_000 } as const;
+export const LIMITS = { name: 100, subject: 300, line: 2000, body: 20_000, message: 70_000, block: 100_000 } as const; // message: what a person typed to us, a long message included (64 KB of text and a note)
 const HARD_INPUT = 4_000_000; // the work itself is bounded, whatever comes in
 
 export interface CleanOptions {

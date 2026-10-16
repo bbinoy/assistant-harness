@@ -118,6 +118,7 @@ export interface PipelineDeps {
   account: string; // our own Signal number: the author of messages of ours that a reaction points at
   runOwner: (prompt: string, ownerMessage: string, pictures?: Picture[], hooks?: RunHooks, documents?: Document[]) => Promise<{ text: string; costUsd?: number }>;
   picture: (m: IncomingMessage) => Promise<Picture>; // throws a sentence the sender can be told
+  longText?: (m: IncomingMessage) => { text: string; cut: boolean } | undefined; // the full text of a long message (signal-cli's saved attachment, id only); undefined when it cannot be read
   document: (m: IncomingMessage) => Promise<Document>; // a PDF or a text file (src/document.ts); throws a sentence the sender can be told, also for a kind of file that is not supported
   transcript: (m: IncomingMessage) => Promise<string>; // throws a sentence the sender can be told
   speech: { ready: () => boolean; synth: (words: string, conversation: string) => Promise<string>; foreign: (words: string) => Promise<string | undefined> }; // spoken replies: local TTS, a file
@@ -144,7 +145,7 @@ export interface Batch<T> {
 // A message as it comes in from Signal, cleaned: text (also a picture's caption), the sender's name and the quoted text.
 export const cleanIncoming = (m: IncomingMessage): IncomingMessage => ({
   ...m,
-  text: clean("message", m.text, { max: LIMITS.body }),
+  text: clean("message", m.text, { max: LIMITS.message }),
   ...(m.fromName ? { fromName: oneLine("group member name", m.fromName, LIMITS.name) } : {}),
   ...(m.quote ? { quote: { ...m.quote, text: clean("quoted message", m.quote.text, { max: LIMITS.line }) } } : {}),
 });

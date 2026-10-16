@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createPipeline, group, type Pipeline } from "../src/conversation.ts";
 import { createOutbound } from "../src/outbound.ts";
 import { groupName, createGroupBrain, groupPrompt, groupWakePrompt, ownerInGroup, speaker } from "../src/group.ts";
+import { readLongText } from "@ted-personal-assistant/signal";
 import { classify } from "../src/policy.ts";
 import { parseGate } from "../src/gate.ts";
 import { settings } from "../src/settings.ts";
@@ -121,6 +122,7 @@ const rig = (over: object = {}) => {
     runOwner: async () => assert.fail("not the owner's chat"),
     picture: (over as any).picture ?? (async () => ({ mediaType: "image/jpeg" as const, data: "QUJD" })),
     document: (over as any).document ?? (async () => assert.fail("no document")),
+    longText: (over as any).longText,
     transcript: async () => "voice words",
     speech: (over as any).speech ?? { ready: () => false, synth: async () => assert.fail("no speech"), foreign: async () => undefined },
     approvals: { answer: async () => ({ outcome: "none" as const }), answerReaction: () => "ignored" },
@@ -624,4 +626,16 @@ test("groups: a gate slower than the settling pause is waited for; a failing gat
   const tagged = rig({ gate: async () => assert.fail("addressed: no gate, not even early") });
   await tagged.on(mk({ groupId: gid() }));
   assert.equal(tagged.sent.length, 1);
+});
+
+test("groups: a long message that addressed us reaches the model whole (the 600-character line is only for the log)", async () => {
+  const long = Array.from({ length: 300 }, (_, i) => `Point ${i} about the plan.`).join(" ");
+  const dir = mkdtempSync(join(tmpdir(), "grp-long-"));
+  writeFileSync(join(dir, "lt"), long);
+  const prompts: string[] = [];
+  const g = gid();
+  const r = rig({ longText: (m: any) => readLongText(m.longText, dir), run: async (build: (s?: string) => { prompt: string }) => (prompts.push(build().prompt), "ok") });
+  await (r as any).pipelineOn(g, { from: "+15555550105", text: long.slice(0, 2000), timestamp: 3, direct: false, addressedToMe: true, longText: { id: "lt", size: long.length } });
+  assert.ok(prompts[0]!.includes("Point 299 about the plan."));
+  assert.ok(r.recorded[0]!.length <= 700); // the log line is cut as before
 });

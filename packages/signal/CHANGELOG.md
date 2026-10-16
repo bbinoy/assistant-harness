@@ -5,6 +5,7 @@
 ## 0.2.0 (unreleased)
 
 Added
+- Long messages: an attachment of type `text/x-signal-plain` (how Signal apps send the full text of a message over about 2000 characters) is delivered as `IncomingMessage.longText` (`LongTextRef`, `parseLongText`), never as `file`. `readLongText(ref, dir?)` reads it safely (plain file, no symlink, strict UTF-8 without NUL, at most `MAX_LONG_TEXT_BYTES` = 64 KB); `LONG_TEXT_TYPE`.
 - `IncomingMessage.file` / `parseFile` / `FileRef` / `MAX_FILE_BYTES`: the first attachment that is neither a picture nor audio (a document or any other file), with its id, size and the sender's file name. A message with only such a file is now delivered.
 
 - Audio files: an audio attachment that has a file name is delivered as `IncomingMessage.file` (with `FileRef.audio`), not as `audio`. `/voice` exports `probeAudio` (ffprobe: really audio, no video), `audioMagic`, `audioVerdict`, `MAX_AUDIO_FILE_BYTES`, `AUDIO_FILE_MAX_SECONDS`; `transcribe` takes an optional `maxSeconds`; `/tts` exports `looksLikeSpeech`, `ClipTools` has `probe`, and `buildReference` takes `{ file: true }`.
