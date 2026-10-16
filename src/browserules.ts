@@ -189,6 +189,29 @@ export function looksLikeCardNumber(text: string): boolean {
   return false;
 }
 
+// ---- the total on a page ----
+
+const CURRENCY = "(?:CHF|EUR|USD|GBP|SEK|NOK|DKK|PLN|CZK|Fr\\.|SFr\\.?|€|\\$|£)";
+const AMOUNT_NUM = "\\d{1,3}(?:[’'.,\\s]\\d{3})+(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?";
+const MONEY = new RegExp(`${CURRENCY}\\s?(?:${AMOUNT_NUM})(?![\\d])|(?<![\\d.,])(?:${AMOUNT_NUM})\\s?${CURRENCY}`, "i");
+const TOTAL_WORD = /total|gesamt|summe|zu zahlen|to pay|amount due|grand|betrag|montant|à payer|a payer|importe/i;
+const PRICE_WORD = /price|preis|prix|cost|fare|tarif|precio/i;
+
+// Pure. The amount a page shows as its total ("Total CHF 45.00", "Zu zahlen: 45,00 €"), as it is written, or undefined when no line of the
+// page view has a total word and an amount. A line with a price word is the second choice. This is only what the page SAYS; the shop's cart is not read.
+export function findTotal(view: string): string | undefined {
+  let strong: string | undefined;
+  let weak: string | undefined;
+  for (const line of view.split("\n")) {
+    if (line.length > 300) continue;
+    const m = MONEY.exec(line.replace(/\s+/g, " "));
+    if (!m) continue;
+    if (TOTAL_WORD.test(line)) strong = m[0].trim();
+    else if (PRICE_WORD.test(line)) weak = m[0].trim();
+  }
+  return strong ?? weak;
+}
+
 // ---- commit steps ----
 
 const NOT_A_BUTTON = new Set(["textbox", "searchbox", "checkbox", "radio", "combobox", "slider", "spinbutton", "switch", "option", "listbox", "tab", "heading", "paragraph", "text"]);
