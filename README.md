@@ -9,8 +9,8 @@
 - **A character, by default Ted Lasso.** Warm, folksy and relentlessly optimistic. Change it by telling Ted what you want.
 - **Typing, seen, reactions.** It marks your message read, shows "typing..." while it works, and sometimes answers with just an emoji on your message. 
 - **Voice in and out.** A voice note is transcribed on your Mac. Ted may answer with a voice message when that fits, generated locally. If you give it a 10s sample of the voice of your character it starts talking in that voice (by just sending it a voice message in the chat and ask to use it)
-- **Pictures.** Send a picture and Ted looks at it. When browsing the web it can send you screenshots of what it sees.
-- **Browse the web.** It has a browser it can use to research for you online. It can also take screenshots and send them to you.
+- **Pictures, PDFs and text files.** Send a picture, a PDF or a text file and Ted reads it. When browsing the web it can send you screenshots of what it sees.
+- **Browse the web.** It has a browser it can use to research for you online, and tells you what it is up to before a long errand.
 - **Groups, where it decides when to speak.** Add Ted to a group and a small model judges each message: Ted always answers when addressed and otherwise joins in only when it fits. Each group has its own notes and history, and Ted brings none of your private data there.
 - **Smart memory and context.** Ted remembers relevant details about you, your preferences and recurring tasks. A nightly dream organises memory. Context is automatically populated with relevant tools, recent messages, memory, and compacted above a threshold.
 - **Smart about asking for permission.** A small model judge decides what is a safe action and when to ask you for confirmation, like sending an email.
@@ -40,7 +40,8 @@ Step by step: [docs/SETUP.md](docs/SETUP.md).
 ## Safety
 
 - **A judge that can skip questions, inside a floor.** A small model may skip a few low-risk questions (such as a new calendar event with nobody else on it). The floor is code: sends, forwards, shares and anything involving other people always ask. Skips are logged, and `AUTO_APPROVE=off` turns the judge off.
-- **Approvals with the exact arguments.** Sending, forwarding, sharing and anything that involves other people ask first. 
+- **Approvals with the exact arguments.** Sending, forwarding, sharing and anything that involves other people ask first.
+- **A browser with guard rails.** Browsing runs in a separate, throwaway browser with no logins and none of your data. A small judge decides whether a step is read-only (searching, filtering) or books, buys or sends something, and anything like that asks you first. Payment and login fields always ask you, and the address checks that keep the browser away from your own machine and network are code, not a model decision.
 - **Permission policy in code.** Every tool call is allow, ask or deny in `src/policy.ts`, tested against real tool names. Deletes are denied. Memory can shape tone and priorities but never grant permissions.
 - **Untrusted content cleaned at the door.** Messages, mail, web pages and tool results lose hidden and look-alike characters and invisible HTML before a model reads them, and are treated as data.
 - **What this is not.** This is application-level policy running on your Mac as your user. It is **not** OS-level or container isolation. Prompt injection is contained and tested, not eliminated: a hostile mail can still try. `signal-cli` keeps its keys unencrypted on disk, so keep FileVault on.
@@ -78,18 +79,31 @@ Full details: [docs/SAFETY.md](docs/SAFETY.md).
 > **You:** remember that messages from Jamie are never urgent
 > **Ted:** Saved: Jamie's "URGENT!!!" emails will now wait their turn. Which, between you and me, is a long line.
 
-**11:20.** Anything involving other people waits for your say-so:
+**11:20.** Anything involving other people waits for your say-so, and Ted asks like a person would:
 
 > **You:** put "find a decent cup of tea" in my calendar tomorrow at 15:00, and invite Coach Beard
-> **Ted:** Approve?
-> 📅 Change calendar event
-> "find a decent cup of tea"
-> 👥 Coach Beard
->
-> Reply yes, no, or tell me what to change, or react 👍 / 👎 (15 min, then I assume no).
+> **Ted:** Happy to! That's "find a decent cup of tea" tomorrow at 15:00, with Coach Beard invited. Shall I send him the invite?
 >
 > **You:** yes but make it 16:00
-> **Ted:** Applied your change: startTime → 2026-10-14T16:00:00, endTime → 2026-10-14T17:00:00
+> **Ted:** Done: moved to 16:00 and the invite is on its way to Beard.
+
+**12:30.** The Richmond group chat. Ted is in there too, with notes and a memory of its own, and none of yours:
+
+> **Roy:** *(sends a voice note)* Ted, talk as me.
+> **Ted:** 🎤 Voice's saved: from now on I'll sound like Roy in this group only. Say "normal voice" and I'm back to me.
+> **Keeley:** Who's up for team drinks after training?
+> **Ted:** *(in Roy's gravelly voice)* Fine. But I'm not wearing the hat.
+
+**14:10.** You forward Rebecca's budget as a PDF:
+
+> **Ted:** Pages 3 and 7 are the ones to read. The stadium line is up 12%, and she's buried the reason on page 7. Want me to draft her a reply?
+
+**16:45.** The long errand:
+
+> **You:** find me a train to London on Tuesday
+> **Ted:** On it, checking SBB and Omio.
+> *(a minute later)*
+> **Ted:** The 06:59 is the one: 8h36, one change, around CHF 230 to 330. I couldn't confirm the exact fare, so call that a range. Here's what SBB showed me. *(screenshot)* I'd book it yourself from this link, since I stop before anything that costs money.
 
 ## How it compares
 
