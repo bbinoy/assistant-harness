@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { onPath, toolEnv } from "./internal/exec.ts";
 import { synthesizeRemote, type Fetch } from "./tts-remote.ts";
+import { activeVoiceRel, OWNER_SCOPE } from "./voices.ts";
 
 // Local cloned voice: Qwen3-TTS (Apple Silicon, mlx-audio) in its own Python environment (`npm run setup:tts-qwen`).
 // The model needs about 4 s to load and 3 to 4 GB of memory, so one small server (scripts/qwen-tts-server.py) is started
@@ -21,6 +22,7 @@ export interface QwenConfig {
   model: string; // Hugging Face repo of a Qwen3-TTS Base model
   refAudio: string; // path of the reference recording (a few seconds to ~20 s of clean speech)
   refText: string; // what is said in it
+  voiceRoot?: string; // the voice library (voices.ts): a conversation can have its own cloned voice there; the reference above is the default one
   timeoutMs: number; // per reply, including a cold start
   idleMs: number; // the server is stopped after this long without a request (0: kept until Ted stops)
   startTimeoutMs?: number;
@@ -68,7 +70,7 @@ class QwenServer {
   #start(): Promise<{ port: number; key: string }> {
     const key = randomBytes(24).toString("hex");
     const [cmd, ...args] = this.c.command ?? [python(this.c.dir), SCRIPT, this.c.model, this.c.refAudio];
-    const child = spawn(cmd!, args, { env: { ...toolEnv(), QWEN_TTS_REF_TEXT: this.c.refText, QWEN_TTS_NONCE: key, PYTHONUNBUFFERED: "1" }, stdio: ["pipe", "pipe", "pipe"] }) as ChildProcessWithoutNullStreams;
+    const child = spawn(cmd!, args, { env: { ...toolEnv(), QWEN_TTS_REF_TEXT: this.c.refText, QWEN_TTS_VOICE_ROOT: this.c.voiceRoot ?? "", QWEN_TTS_NONCE: key, PYTHONUNBUFFERED: "1" }, stdio: ["pipe", "pipe", "pipe"] }) as ChildProcessWithoutNullStreams;
     this.#child = child;
     return new Promise((resolve, reject) => {
       let out = "";
@@ -112,15 +114,16 @@ class QwenServer {
     this.#touch();
   }
 
-  async say(text: string): Promise<string> {
+  async say(text: string, scope: string = OWNER_SCOPE): Promise<string> {
     const started = Date.now();
     this.#busy++;
     clearTimeout(this.#idle);
     try {
       const { port, key } = await this.ensure();
+      const voice = this.c.voiceRoot ? activeVoiceRel(this.c.voiceRoot, scope) : undefined; // read per reply: a switch needs no restart
       const left = Math.max(1000, this.c.timeoutMs - (Date.now() - started));
       return await synthesizeRemote(
-        { url: `http://127.0.0.1:${port}/say`, headers: { "x-qwen-key": key }, body: { text }, secrets: [key], timeoutMs: left, fetchImpl: this.c.fetchImpl },
+        { url: `http://127.0.0.1:${port}/say`, headers: { "x-qwen-key": key }, body: voice ? { text, voice } : { text }, secrets: [key], timeoutMs: left, fetchImpl: this.c.fetchImpl },
         "Qwen voice server",
       );
     } catch (e) {
@@ -136,14 +139,14 @@ class QwenServer {
 
 const servers = new Map<string, QwenServer>();
 const serverFor = (c: QwenConfig): QwenServer => {
-  const id = JSON.stringify([c.dir, c.model, c.refAudio, c.refText, c.command]);
+  const id = JSON.stringify([c.dir, c.model, c.refAudio, c.refText, c.voiceRoot, c.command]);
   let s = servers.get(id);
   if (!s) servers.set(id, (s = new QwenServer(c)));
   return s;
 };
 
-/** Speaks `text` in the cloned voice and returns the path of an .m4a in a fresh temp folder (the caller deletes it). Starts the server if needed. */
-export const synthesizeQwen = (text: string, c: QwenConfig): Promise<string> => serverFor(c).say(text);
+/** Speaks `text` in the cloned voice (the active one of the conversation `scope`: "owner" or a group id) and returns the path of an .m4a in a fresh temp folder (the caller deletes it). Starts the server if needed. */
+export const synthesizeQwen = (text: string, c: QwenConfig, scope: string = OWNER_SCOPE): Promise<string> => serverFor(c).say(text, scope);
 
 /** Starts the server ahead of the first reply (at start-up). Never throws: a failure is returned for the log, and the first reply tries again. */
 export async function warmQwen(c: QwenConfig): Promise<string | undefined> {

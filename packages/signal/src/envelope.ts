@@ -39,6 +39,8 @@ export interface IncomingMessage {
   addressedToMe?: boolean;
   /** Set when the message is a reply to an earlier one. */
   quote?: Quote;
+  /** The message replies to a voice note: that voice note's timestamp (look it up among the voice notes received in this conversation). */
+  quotedAudio?: number;
   /** A voice message or audio file (the first one); resolve its file with {@link attachmentPath}. */
   audio?: AudioRef;
   /** A picture (the first one; `text` is its caption, possibly empty); resolve its file with {@link attachmentPath}. */
@@ -174,6 +176,13 @@ export function parseQuote(raw: any): Quote | undefined {
   return { text, author: String(raw.authorNumber ?? raw.author ?? ""), timestamp: Number(raw.id ?? 0) };
 }
 
+/** Pure: the timestamp of the voice note a reply quotes (signal-cli lists the quoted message's attachments), else undefined. */
+export function quotedAudio(raw: any): number | undefined {
+  const id = Number(raw?.id);
+  const has = Array.isArray(raw?.attachments) && raw.attachments.some((a: any) => String(a?.contentType ?? "").startsWith("audio/"));
+  return has && Number.isFinite(id) && id > 0 ? id : undefined;
+}
+
 /** An emoji reaction somebody added to (or removed from) a message. */
 export interface IncomingReaction {
   /** Who reacted. */
@@ -282,6 +291,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
       timestamp: body.timestamp ?? edit?.dataMessage?.timestamp ?? env.timestamp,
       direct,
       quote,
+      ...(quotedAudio(body.quote) ? { quotedAudio: quotedAudio(body.quote) } : {}),
       audio,
       ...(image ? { image } : {}),
       ...(file ? { file } : {}),
