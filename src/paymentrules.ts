@@ -110,7 +110,7 @@ export function cartLines(view: string): string[] {
 export const cartHash = (merchant: string, total: Money, lines: readonly string[]): string =>
   createHash("sha256").update(JSON.stringify([merchant.toLowerCase(), total.minor, total.currency, lines.map((l) => l.toLowerCase())])).digest("hex");
 // The id the owner sees and the idempotency key of one approval: the first 8 hex characters of a hash of everything it covers.
-export const approvalId = (parts: readonly (string | number)[]): string => createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 8);
+export const approvalId = (parts: readonly unknown[]): string => createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 8);
 
 // ---- where the card may be typed ----
 

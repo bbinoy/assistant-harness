@@ -22,7 +22,7 @@ const SPENT: ReadonlySet<PayStatus> = new Set(["clicked", "confirmed", "unconfir
 export const DUPLICATE_HOURS = 24;
 
 export class Ledger {
-  private readonly file: string;
+  readonly file: string;
   constructor(file = "state/payments.jsonl") {
     this.file = file;
   }

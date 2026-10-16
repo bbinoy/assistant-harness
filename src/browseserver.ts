@@ -63,7 +63,7 @@ export function browserServer(st: Extract<BrowseStatus, { ok: true }>, outDir: s
   // An ordinary language and the time zone of this machine, so the page sees what a browser on this computer would send.
   const configFile = join(outDir, "browser-config.json");
   // BROWSE_VISION=click only: the browser also listens on a debugging port on loopback, for the guard's own lookup of what is under a point (browsecdp.ts).
-  const launchOptions = vision.mode === "click" && vision.cdpPort ? { launchOptions: { args: [`--remote-debugging-port=${vision.cdpPort}`] } } : {};
+  const launchOptions = vision.cdpPort ? { launchOptions: { args: [`--remote-debugging-port=${vision.cdpPort}`] } } : {};
   writeFileSync(configFile, JSON.stringify({ browser: { ...launchOptions, contextOptions: { locale: settings.browseLocale, timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone } } }));
   return {
     type: "stdio",
