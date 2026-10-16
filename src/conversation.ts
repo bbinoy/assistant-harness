@@ -8,6 +8,8 @@ import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
 import { documentNote, takeDocuments, type Document } from "./document.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
 import { holdQuote, holdVoiceNote, rememberSender } from "./voicenote.ts";
+import { cardCommand } from "./card.ts";
+import { TYPED_YES_NEEDED } from "./paymentrules.ts";
 import { OWNER_KEY, withSend, type Content, type SendSink } from "./send.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
@@ -437,6 +439,12 @@ export function createPipeline(deps: PipelineDeps) {
 
   async function ownerTurn(conv: Conversation, m: Held, line: string, arrived: number, edited?: { of: number }): Promise<void> {
     record(conv, edited ? "edit" : "owner", m.timestamp, line, { by: m.from || m.fromUuid, ...(edited ? { of: edited.of } : {}) });
+    // The card's kill switch: handled here, in code, before any model sees the message, and only for the owner's own chat. It can only switch card
+    // use OFF; switching it on is the terminal's (card.ts).
+    if (!edited && !m.picture && !m.document) {
+      const said = cardCommand(m.text);
+      if (said !== undefined) return void (await out.reply(said, { plain: true }));
+    }
     // While an approval is pending, a message may be its answer. That must skip the queue.
     if (!edited && (await approvalAnswer(conv, m, m.from || m.fromUuid))) return;
     await burst(conv, m, async (b) => {
@@ -469,6 +477,7 @@ export function createPipeline(deps: PipelineDeps) {
   // it was on (looked up by timestamp in the log) and decides what, if anything, it means.
   async function ownerReaction(conv: Conversation, r: IncomingReaction): Promise<void> {
     const outcome = deps.approvals.answerReaction(r.emoji, r.targetTimestamp, conv.key, r.from || r.fromUuid);
+    if (outcome === "needs_text") return void (await out.reply(TYPED_YES_NEEDED, { plain: true })); // a payment is not approved by a reaction
     if (outcome !== "ignored") return void console.log(`approval ${outcome} (by reaction)`);
     await enqueue(conv, async () => {
       console.log(`owner reacted ${r.emoji}`);

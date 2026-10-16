@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Fake hosted payment page</title></head>
+<body>
+  <h1>Pay Fake Shop</h1>
+  <p>Ticket Zurich to Bern CHF 40.00</p>
+  <p>Seat reservation CHF 5.00</p>
+  <p>Total due today CHF 45.00</p>
+  <form action="/done" method="get">
+    <label>Card number <input name="number" autocomplete="cc-number"></label>
+    <label>Expiration date MM / YY <input name="exp" autocomplete="cc-exp"></label>
+    <label>Security code <input name="cvc" autocomplete="cc-csc"></label>
+    <button type="submit">Pay CHF 45.00</button>
+  </form>
+</body></html>

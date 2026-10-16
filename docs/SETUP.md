@@ -109,7 +109,23 @@ npm run profile -- domains passport sbb.ch   # change the sites
 npm run profile -- delete passport
 ```
 
-Keys are lowercase words (`first_name`, `email`, `address.street`, `loyalty.sbb`); the kind (name, email, phone, address, nationality, dob, id, other) is guessed from the key or set with `--kind`. Name, e-mail, phone, address and nationality may be typed on any https page; date of birth, ID or passport and everything else are typed only on the sites you list, and nowhere until you do. The data is in `state/profile.enc` (encrypted, not in git); the key is only in the Keychain (item `ted-profile-key`), so losing the Keychain item means entering the values again. Card numbers, passwords and bank details are refused: they are never stored or filled. The final submit of a form that used your details always asks you first. See [SAFETY](SAFETY.md).
+Keys are lowercase words (`first_name`, `email`, `address.street`, `loyalty.sbb`); the kind (name, email, phone, address, nationality, dob, id, other) is guessed from the key or set with `--kind`. Name, e-mail, phone, address and nationality may be typed on any https page; date of birth, ID or passport and everything else are typed only on the sites you list, and nowhere until you do. The data is in `state/profile.enc` (encrypted, not in git); the key is only in the Keychain (item `ted-profile-key`), so losing the Keychain item means entering the values again. Card numbers, passwords and bank details are refused here (a payment card has its own command, see the next section). The final submit of a form that used your details always asks you first. See [SAFETY](SAFETY.md).
+
+## Paying with a card (optional)
+
+The browse worker can pay for what you asked it to buy, with **one dedicated debit card**. Use a card that has a low limit and confirms every online payment in its own app (3-D Secure, for example a Wise card); Ted treats it as a standard debit card and its caps are a second layer, not the first. You enter the card **in a terminal on this Mac, never in the chat**:
+
+```
+npm run card -- set --currency CHF --label Wise   # hidden prompts: number, expiry, security code, optional name on the card
+npm run card -- list                              # the last four digits, caps, whether card payments are on
+npm run card -- disable                           # the kill switch (the chat has /card off too)
+npm run card -- enable                            # switch on again: only possible here, never from the chat
+npm run card -- payments                          # the last payments: merchant, amount, last four, status
+npm run card -- clear <id>                        # an unconfirmed payment you checked in the card app
+npm run card -- delete
+```
+
+The card, including its security code, is stored encrypted in the same file as your saved details (`state/profile.enc`, key in the Keychain); nothing shows more than the last four digits. Every payment asks you first on Signal: the question names the shop, where the card is typed, the total with its currency, the last four digits and an id, and **only a typed YES approves it** (a 👍 does not; 👎 or NO declines). The payment is then confirmed in the card's own app, where you should check the amount. Ted's own caps apply too: `CARD_CAP_PURCHASE` (25) per payment and `CARD_CAP_DAY` (50) per day in the card's currency, and `BROWSE_MAX_PAYMENTS` (1) per task; set a cap to 0 to turn card payments off. Groups and background tasks never get the card. If a shop's payment page cannot be checked (an embedded frame from a site Ted does not know, no clear total), Ted stops and gives you the link to pay yourself. A card run starts the browser with a debugging port on the loopback address. See [SAFETY](SAFETY.md).
 
 ## Daily use
 

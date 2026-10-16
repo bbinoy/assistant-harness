@@ -149,6 +149,11 @@ export function loadSettings(env: Env) {
     browseMaxUsd: num(env, "BROWSE_MAX_USD", 1.5, 0.05, 50),
     browseMaxMinutes: num(env, "BROWSE_MAX_MINUTES", 10, 1, 120),
     browseMaxCommits: num(env, "BROWSE_MAX_COMMITS", 8, 0, 20),
+    // Paying with the owner's dedicated debit card (src/card.ts, browseguard.ts): only the owner's chat run, only after a typed YES. These caps are
+    // ours, in code and in the card's currency, independent of the card issuer's own limit. 0 turns card payments off.
+    cardCapPurchase: num(env, "CARD_CAP_PURCHASE", 25, 0, 10_000), // the most one payment may be
+    cardCapDay: num(env, "CARD_CAP_DAY", 50, 0, 100_000), // the most paid in one local day (clicked, confirmed and unconfirmed payments count)
+    browseMaxPayments: num(env, "BROWSE_MAX_PAYMENTS", 1, 0, 3), // card payments one browse run may start
     // Screenshot vision for the browse worker (src/browsevision.ts), an experiment, off by default. read: screenshots reach the model, clicks stay by ref.
     // click: also clicks by coordinates, which the guard resolves to the element under the point itself (a debugging port on loopback, browsecdp.ts).
     browseVision: oneOf(env, "BROWSE_VISION", "off", ["off", "read", "click"] as const),

@@ -851,3 +851,37 @@ test("long message: in a group the whole text reaches the admission and is no fi
   assert.equal(got[0].text, LONG);
   assert.equal(got[0].document, undefined);
 });
+
+// ---- the card's kill switch ----
+
+test("owner chat: /card off is handled in code before any model, switches card use off, and /card on cannot switch it back on", async () => {
+  const { killSwitch } = await import("../src/card.ts");
+  killSwitch.turnOn();
+  const { r, pipeline } = rig({ run: async () => assert.fail("no model run for a card command") });
+  await pipeline.handleIncoming(owner(), msg({ text: "/card off" }));
+  assert.match(r.sent[0]!.text, /Card payments are off/);
+  assert.ok(killSwitch.off());
+  await pipeline.handleIncoming(owner(), msg({ text: "/card on", timestamp: 112 }));
+  assert.match(r.sent[1]!.text, /only possible at the terminal/);
+  assert.ok(killSwitch.off(), "still off");
+  assert.deepEqual(r.prompts, []);
+  killSwitch.turnOn();
+});
+
+test("a group message /card off from anyone, the owner included, goes to the group's pipeline and touches nothing", async () => {
+  const { killSwitch } = await import("../src/card.ts");
+  killSwitch.turnOn();
+  const seen: string[] = [];
+  const { r, pipeline } = rig({ admitGroup: async (_c: unknown, a: { text: string }) => void seen.push(a.text) });
+  await pipeline.handleIncoming(group("g1"), msg({ text: "/card off", direct: false, groupId: "g1" } as never));
+  assert.equal(killSwitch.off(), undefined);
+  assert.deepEqual(seen, ["/card off"]);
+  assert.deepEqual(r.sent, []);
+});
+
+test("a thumbs-up on a payment question is answered with 'type YES' and starts no model turn", async () => {
+  const { r, pipeline } = rig({ reactionApproval: "needs_text", run: async () => assert.fail("no turn for a refused reaction") });
+  await pipeline.handleIncoming(owner(), react({ targetTimestamp: 42 }));
+  assert.match(r.sent[0]!.text, /needs a typed YES/);
+  assert.deepEqual(r.prompts, []);
+});

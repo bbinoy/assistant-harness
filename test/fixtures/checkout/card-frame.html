@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Fake card frame</title></head>
+<body>
+  <form>
+    <label>Card number <input name="number" autocomplete="cc-number"></label>
+    <label>Expiration date MM / YY <input name="exp" autocomplete="cc-exp"></label>
+    <label>Security code <input name="cvc" autocomplete="cc-csc"></label>
+  </form>
+  <script>
+    addEventListener("message", () => {
+      const f = new FormData(document.forms[0]);
+      fetch("/frame-received?" + new URLSearchParams(f).toString());
+    });
+  </script>
+</body></html>

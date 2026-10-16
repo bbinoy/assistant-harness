@@ -11,6 +11,8 @@ import { inQuietHours } from "./actions.ts";
 import { Mailbird } from "./mailbird.ts";
 import { isPaused, localTime } from "./pause.ts";
 import { browseStatus, PLAYWRIGHT_MCP_VERSION, type BrowseStatus } from "./browseserver.ts";
+import { killSwitch } from "./card.ts";
+import { Ledger } from "./payments.ts";
 import { settings } from "./settings.ts";
 import { disconnected, NAMES, readConnectors } from "./connectors.ts";
 import { missingSetup, readNotes } from "./notes.ts";
@@ -152,6 +154,9 @@ export async function doctor() {
   const spent = spentToday();
   line(spent < settings.dailyBudgetUsd, "daily spend guard", `$${spent.toFixed(2)} of $${settings.dailyBudgetUsd} today (notional)`);
   line(isPaused() ? "warn" : true, "not paused", isPaused() ? `${dataPath("state/paused")} exists` : "");
+  const cardOff = killSwitch.off();
+  const unconfirmed = new Ledger().rows().filter((r) => r.status === "unconfirmed").length;
+  line(unconfirmed ? "warn" : true, "card payments", `${cardOff ? `OFF (${cardOff}); switch on: npm run card -- enable` : "not switched off (npm run card -- list shows the card, if one is saved)"}${unconfirmed ? `; ${unconfirmed} payment(s) unconfirmed: npm run card -- payments` : ""}`);
   const log = readText("logs/agent.log") ?? "";
   const hourAgo = new Date(Date.now() - 3600_000);
   const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

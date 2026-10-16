@@ -62,7 +62,7 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 function browseRunOptions(guard: BrowseGuard): RunOptions {
   return {
     source: PROFILES.browse.source,
-    systemPrompt: browseSystem(undefined, guard.vision, guard.profileKeys()),
+    systemPrompt: browseSystem(undefined, guard.vision, guard.profileKeys(), guard.cardInfo()),
     maxTurns: PROFILES.browse.maxTurns,
     maxBudgetUsd: PROFILES.browse.maxBudgetUsd,
     maxMinutes: settings.browseMaxMinutes,
@@ -161,6 +161,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     mcpServers,
     strictMcpConfig: isolated || undefined, // nothing private is even loaded
     resume,
+    persistSession: browsing ? false : undefined, // the browse worker's session is never written to ~/.claude: its tool calls can carry a card typed by code, and nothing resumes a browse run
     // Built-ins: Skill, and for chat Read / Write / Edit (confined to the notes folder by
     // policy.ts) and WebSearch / WebFetch (search freely, open a page only after approval). No Bash. Everything else the agent can do is an MCP tool (Mailbird,
     // Notion, Calendar...), gated by canUseTool.

@@ -25,6 +25,7 @@ import { createProposer } from "./propose.ts";
 import { preparePicture } from "./image.ts";
 import { prepareFile, type AudioTools } from "./document.ts";
 import { createOutbound } from "./outbound.ts";
+import { Ledger } from "./payments.ts";
 import { settings } from "./settings.ts";
 import { unsupportedForVoice } from "./lang.ts";
 import { openLog } from "./state.ts";
@@ -34,6 +35,7 @@ import { Limiter } from "./limiter.ts";
 import { probeAudio, transcribe, voiceReady } from "@ted-personal-assistant/signal/voice";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
+if (new Ledger().recover()) console.log("card: a payment that was clicked and never reported back is now unconfirmed (npm run card -- payments)"); // a crash between the click and the result
 
 const signal = new SignalClient({
   host: settings.signalHost,

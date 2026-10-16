@@ -79,6 +79,19 @@ export function factsOf(args: Record<string, unknown>, details: string): Facts {
       if (t) add(must, t.trim());
     }
   }
+  // A card payment (browseguard.ts payAsk): the shop, where the card is typed, the total with its currency, the card's last four digits, the
+  // approval id and the typed YES it needs must be in the question, all read from the details code wrote. No card number is ever in them.
+  if (details.includes("Card payment approval")) {
+    for (const line of details.split("\n")) {
+      const v = /^(Merchant|Card typed on|Approval id): (.+)$/.exec(line);
+      if (v) for (const part of v[1] === "Card typed on" ? v[2]!.split(", ") : [v[2]!]) add(must, part.trim());
+      const t = /^Total \(read from the page[^)]*\): (.+)$/.exec(line)?.[1];
+      if (t) add(must, t.trim());
+      const last4 = /^Card: .*••••(\d{4})/.exec(line)?.[1];
+      if (last4) add(must, last4);
+    }
+    add(must, "YES");
+  }
   for (const line of details.split("\n")) {
     const h =/^(To|Cc|Bcc|With|Address|Where):\s*(.*)$/.exec(line);
     if (!h) continue;

@@ -1,9 +1,14 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { addressProblem, BROWSER_PREFIX, classifyClick, dnsResolver, findTotal, hostOf, isAllowedBrowserTool, isRef, parseSnapshot, resolvesPublic, sensitiveKind, type Node, type Resolver, type VisionMode } from "./browserules.ts";
-import { hostMatches } from "./domains.ts";
+import { hostMatches, registeredDomain } from "./domains.ts";
 import { fieldFitsKey, isSensitive, maskValue, type Profile } from "./profile.ts";
-import type { Probe } from "./browsecdp.ts";
+import { APPROVAL_MINUTES, payDetails, PayRun, secretVariants } from "./browsecard.ts";
+import type { FrameProbe, Probe } from "./browsecdp.ts";
+import { expiryText, type CardAccess, type CardInfo } from "./card.ts";
+import { capProblem } from "./payments.ts";
+import { approvalId, CARD_PLACEHOLDER, cartHash, cartLines, expirySplit, findPayableTotal, formatMoney, frameVerdict, HAS_CARD_PLACEHOLDER, isPsp, kindOfFieldName, parseMoney, paymentOutcome, PSP_HOSTS, riskyBoxes, sameMoney, WORDS, type FieldKind, type Money } from "./paymentrules.ts";
+import { localDay } from "./pause.ts";
 import { clickProblem, MAX_POINT_CLICKS, MAX_SHOTS, nodeOfPoint, screenshotInput, validPoint } from "./browsevision.ts";
 import { audit } from "./audit.ts";
 import { clip } from "./format.ts";
@@ -26,6 +31,8 @@ export interface Decision {
   redacted?: Record<string, unknown>; // ask: the call as the owner's question and the audit may see it (typed secrets cut to a length)
   facts?: Record<string, unknown>; // ask: host, role and name of the element, added to the judge's audit row
   input?: Record<string, unknown>; // the call as it must run, when code narrowed it (a screenshot: jpeg, viewport only)
+  payment?: boolean; // ask: a card payment, approved only by the owner's typed yes (permissions.ts, approvals.ts)
+  resolve?: () => Promise<Record<string, unknown> | string>; // the call as it must run, built after it is allowed (a card typed by code); a string: refused with that reason
 }
 
 export interface GuardOptions {
@@ -39,6 +46,8 @@ export interface GuardOptions {
   cdpPort?: number; // click mode: the browser's debugging port on loopback (browseserver.ts starts the browser with it)
   shotsDir?: string; // vision on: where each screenshot is kept as a small jpeg, for the chat to pass on (shots.ts)
   profile?: Profile; // the owner's saved details (profile.ts): the owner's chat run only, a group's guard ignores it
+  card?: CardAccess; // the owner's payment card (card.ts): the owner's chat run only, a group's guard ignores it
+  frames?: FrameProbe; // the browser's own list of the page's frames (browsecdp.ts); without it a card is never typed into a frame
 }
 
 // A saved detail typed by code: the model names a key, never sees the value.
@@ -49,6 +58,8 @@ interface FillIntent { ref: string; label: string; key: string; shown: string; s
 export interface FilledField { host: string; label: string; key: string; shown: string; sensitive: boolean }
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const bare = (u: string) => u.split("#")[0]!;
+const HAND = " Stop with status needs_owner and give handoffUrl.";
 const SNAPSHOT_CAP = LIMITS.pageView; // bigger page views are cut with a visible marker
 const MAX_DENIED = 6;
 const AUTOFILL_SENSITIVE = /\b(cc-[a-z-]+|current-password|new-password|one-time-code)\b/i; // autocomplete tokens of card and login fields
@@ -84,6 +95,19 @@ export class BrowseGuard {
   filled: FilledField[] = []; // what was typed from the profile in this run (labels, keys, masked values), for the final approval
   private viewUrl = ""; // the address of the page view the refs come from
   private view = ""; // the last full page view, as the model reads it (for the total)
+  // A card payment (browsecard.ts, paymentrules.ts): the owner's card, only in the owner's chat run, only ever typed by code after a typed yes.
+  private readonly card?: CardAccess;
+  private readonly frames?: FrameProbe;
+  readonly pay = new PayRun();
+  private chain: { domain: string; by: "navigate" | "follow" }[] = []; // the sites the run has been on, in order; how each was entered
+  private navNext = false; // the next page change is the worker opening an address
+  private fullView = ""; // the last browser_snapshot (a whole page view, never a part): what a payment is read from
+  private fullUrl = "";
+  private fullSeq = 0;
+  private readonly cardIntents = new Map<string, FieldKind>(); // decided to type, not yet confirmed done
+  private payNote?: string; // the result of the payment for the owner, once the run is over ("" none)
+  private cardCvc?: string; // kept (not in `secrets`: three digits cut everywhere would wreck a page) to cut it where a page puts it in an address
+  private readonly cardSecrets = new Set<string>(); // the card's forms a page may echo: cut from the worker's final answer too
 
   constructor(o: GuardOptions) {
     this.mode = o.mode;
@@ -96,6 +120,8 @@ export class BrowseGuard {
     this.cdpPort = o.cdpPort;
     this.shotsDir = o.shotsDir;
     this.profile = o.mode === "owner" ? o.profile : undefined;
+    this.card = o.mode === "owner" ? o.card : undefined;
+    this.frames = o.frames;
   }
 
   // What the judge and the owner read for typing saved details: label, key and site, never the value.
@@ -116,7 +142,7 @@ export class BrowseGuard {
     const key = m[1]!.toLowerCase();
     const e = this.profile.entries[key];
     if (!e) return `There is no saved detail called ${clip(key, 40)}. The keys are: ${this.profileKeys().map((k) => k.key).join(", ")}.`;
-    if (/^f\d+e/.test(n.ref)) return "That field is inside an embedded frame whose content and origin cannot be checked, so a saved detail is not typed there. Stop with status needs_owner and give handoffUrl.";
+    if (n.inFrame) return "That field is inside an embedded frame whose content and origin cannot be checked, so a saved detail is not typed there. Stop with status needs_owner and give handoffUrl.";
     let u: URL;
     try {
       u = new URL(this.url);
@@ -158,6 +184,8 @@ export class BrowseGuard {
     if (!this.secrets.size) return text;
     let out = text;
     for (const ref of this.fillRefs) out = out.replace(new RegExp(`(\\[ref=${escapeRe(ref)}\\](?: \\[[^\\]]*\\])*):[ \\t].*$`, "gm"), "$1: [filled]");
+    // The security code, where a (bad) form put it in the address: a query value that is exactly the code.
+    if (this.cardCvc) out = out.replace(new RegExp(`([?&][^=&\\s"']+=)${escapeRe(this.cardCvc)}(?![\\p{L}\\p{N}])`, "gu"), "$1[filled]");
     for (const v of [...this.secrets].sort((a, b) => b.length - a.length)) {
       if (v.length < 3) continue;
       for (const variant of new Set([v, JSON.stringify(v).slice(1, -1), v.replace(/'/g, "\\'"), v.replace(/\s+/g, " ")])) out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(variant)}(?![\\p{L}\\p{N}])`, "gu"), "[filled]");
@@ -275,6 +303,244 @@ export class BrowseGuard {
     };
   }
 
+  // ---- paying with the owner's card ----
+
+  // What the worker's prompt may say of the card: its label, last four and currency. Undefined: no card in this run (a group, a wake-up, none
+  // saved, switched off).
+  cardInfo(): CardInfo | undefined {
+    return this.card && !this.card.off() ? this.card.info : undefined;
+  }
+
+  private payDeny(tool: string, input: Record<string, unknown>, reason: string, extra: Record<string, unknown> = {}): Decision {
+    audit("card_blocked", "deny", "browse", { reason: reason.slice(0, LIMITS.reason), host: hostOf(this.url), ...extra });
+    return this.deny(tool, input, reason, { card: true, ...extra });
+  }
+
+  // After the pay click nothing is typed or clicked again; while a card is typed, the keyboard cannot submit it.
+  private payLock(tool: string, input: Record<string, unknown>, name: string): Decision | undefined {
+    if (this.pay.attempted && /^(type|fill_form|select_option|press_key|handle_dialog|click|mouse_click_xy)$/.test(name)) return this.payDeny(tool, input, "A payment was already attempted in this run. Do not type or click again: read the page (browser_snapshot, browser_wait_for) and report exactly what it says.", { locked: true });
+    if (this.pay.active && name === "press_key" && /^(Enter|NumpadEnter|Space| )$/.test(String(input.key ?? ""))) return this.payDeny(tool, input, "A card is typed: use the page's pay button, not the keyboard.");
+    if (this.pay.active && name === "mouse_click_xy") return this.payDeny(tool, input, "A card is typed: click the pay button by its ref, not at a point.");
+    if (this.pay.active && name === "type" && input.submit === true) return this.payDeny(tool, { target: input.target }, "A card is typed: do not submit with Enter, use the page's pay button.");
+    return undefined;
+  }
+
+  // The shop and the payment hosts for a card typed on this page, or why not. The shop is the site the run came to; a payment provider's own
+  // page counts only when the run got there by following the shop's page, not by opening its address. A card is typed into an embedded frame
+  // only when the browser's own frame list shows nothing but the shop, known payment providers and blank frames.
+  private async payTarget(frame: boolean): Promise<{ merchant: string; psp: string[] } | string> {
+    const top = registeredDomain(hostOf(this.url));
+    let merchant = top;
+    let psp = [top];
+    if (isPsp(top)) {
+      const shop = [...this.chain].reverse().find((c) => !PSP_HOSTS.has(c.domain));
+      if (!shop) return "This payment page was not reached from a shop in this run.";
+      if (this.chain[this.chain.length - 1]?.by === "navigate") return "This payment page was opened by its address, not reached from the shop's own checkout.";
+      merchant = shop.domain;
+    }
+    if (frame) {
+      if (!this.frames) return "The frames of this page cannot be listed in this run, so a card is not typed into one.";
+      const fr = await this.frames(this.url);
+      if (typeof fr === "string") return `The frames of this page cannot be checked (${fr}), so a card is not typed into one.`;
+      const v = frameVerdict(fr, this.url, merchant);
+      if (typeof v === "string") return `A card is not typed into an embedded frame here: ${v}.`;
+      psp = v.psp;
+    }
+    return { merchant, psp };
+  }
+
+  // A card detail: the worker names a placeholder ({{card:number}}, {{card:expiry}}, {{card:cvc}}) and never sees a digit. The number is the
+  // first and asks the owner (a typed YES); the rest follow without a new question, bound to that approval.
+  private async cardField(tool: string, n: Node, text: string, input: Record<string, unknown>): Promise<Decision> {
+    const logged = { target: input.target };
+    const stop = (reason: string, extra?: Record<string, unknown>) => this.payDeny(tool, logged, `${reason}${HAND}`, extra);
+    const fix = (reason: string, extra?: Record<string, unknown>) => this.payDeny(tool, logged, reason, extra);
+    const m = CARD_PLACEHOLDER.exec(text.trim());
+    if (!m) return fix("A card detail is typed as the whole text, exactly {{card:number}}, {{card:expiry}} or {{card:cvc}}, nothing around it.");
+    const kind = m[1]!.toLowerCase() as FieldKind;
+    if (input.submit === true) return fix("Do not submit while typing a card detail. Type it, then use the page's pay button.");
+    const card = this.card;
+    if (!card) return stop("No card is available in this run.");
+    const off = card.off();
+    if (off) return stop(`Card payments are ${off}.`);
+    let u: URL;
+    try {
+      u = new URL(this.url);
+    } catch {
+      return fix("No page is open. Navigate first.");
+    }
+    if (u.protocol !== "https:") return stop("A card is only typed on https pages.");
+    if (!this.viewUrl || this.viewUrl !== this.url) return fix("The page changed since the last page view. Take a fresh browser_snapshot and use a ref from it.");
+    if (!FIELD_ROLES.test(n.role)) return fix(`${n.ref} is a ${n.role}, not a text field.`);
+    if (n.disabled) return fix(`${n.ref} cannot be typed into (disabled or read-only).`);
+    if (n.value) return fix("That field is not empty. A card detail is typed only into an empty field.");
+    if (kindOfFieldName(n.name) !== kind) return fix(`The field “${clip(n.name || n.ref, LIMITS.control)}” is not the ${WORDS[kind]} field.`);
+    if (kind === "expiry" && expirySplit(n.name)) return stop("The expiry date is asked in separate month and year fields, which are not supported.");
+    if (this.pay.typed.has(kind)) return fix(`The ${WORDS[kind]} is already typed.`);
+    if (kind !== "number" && !this.pay.approval) return fix("Type the card number first: that asks the owner to approve the payment.");
+    if (kind === "cvc" && !this.pay.typed.has("expiry")) return fix("Type the expiry date before the security code.");
+    const frame = !!n.inFrame; // by the page's structure: the ref prefix is not a sign of it (after a cross-site navigation the page's own fields are f1e..)
+    const target = await this.payTarget(frame);
+    if (typeof target === "string") return stop(target);
+    const a = this.pay.approval;
+    if (!a) return this.payAsk(tool, n, input, target, frame, stop, fix);
+    // later details of an approved payment: nothing may have changed since the yes
+    const gone = (why: string) => (this.pay.invalidate(), stop(`${why} Nothing more is typed; a new approval would be needed.`, { changed: true }));
+    if (Date.now() > a.expiresAt) return gone("The payment approval ran out (it lasts ten minutes).");
+    if (bare(this.url) !== a.url) return gone("The page address changed since the owner approved.");
+    if (target.merchant !== a.merchant || target.psp.some((h) => !a.psp.includes(h))) return gone("The shop or the payment provider changed since the owner approved.");
+    this.log(tool, "fill-card", logged, { role: n.role, name: n.name.slice(0, LIMITS.control), cardKind: kind });
+    return { kind: "allow", resolve: async () => this.cardInput(tool, kind, n.ref, input) };
+  }
+
+  // The first card detail of a payment: everything the owner is asked about is read here, by code, from the page and the ledger. Any doubt
+  // (no clear total, another currency, a cap, a cart that looks paid, a ticked save-the-card box) is no question and no payment.
+  private payAsk(tool: string, n: Node, input: Record<string, unknown>, target: { merchant: string; psp: string[] }, frame: boolean, stop: (r: string, e?: Record<string, unknown>) => Decision, fix: (r: string, e?: Record<string, unknown>) => Decision): Decision {
+    const card = this.card!;
+    const max = settings.browseMaxPayments;
+    if (max <= 0) return stop("Card payments are switched off for browse runs (BROWSE_MAX_PAYMENTS).");
+    if (this.pay.approved >= max) return stop(`This run already started its ${max} card payment(s).`);
+    if (this.pay.asks > max) return stop("The owner was asked about this payment already.");
+    if (this.fullUrl !== this.url) return fix("Take a browser_snapshot of this payment page first (a whole page view), then type the card number.");
+    const total = findPayableTotal(this.fullView);
+    if ("problem" in total) return stop(`The total to pay cannot be read: ${total.problem}.`);
+    if (total.money.currency !== card.info.currency) return stop(`The page asks for ${total.money.currency} but the card is in ${card.info.currency}.`);
+    const boxes = riskyBoxes(this.nodes.values());
+    if (boxes.length) return fix(`A box is ticked that saves the card or signs up for something (“${clip(boxes[0]!, LIMITS.control)}”). Untick it and take a new browser_snapshot, or stop with status needs_owner and give handoffUrl.`);
+    const lines = cartLines(this.fullView);
+    const hash = cartHash(target.merchant, total.money, lines);
+    const dup = card.ledger.duplicate(target.merchant, hash);
+    if (dup) return stop(`This cart looks already paid (payment ${dup.id} is ${dup.status}). Check the card app and the e-mail; nothing is paid twice.`, { duplicate: dup.id });
+    const capped = capProblem(total.money.minor, card.caps, card.ledger.spentToday(card.info.currency));
+    if (capped) return stop(`The payment is refused by the card caps: ${capped}.`, { cap: true });
+    this.pay.asks++;
+    const id = approvalId([localDay(new Date()), target.merchant, target.psp, total.money.minor, total.money.currency, hash, card.info.last4]);
+    const prior = card.ledger.rows().filter((r) => r.merchant === target.merchant && r.cartHash === hash && r.id !== id).map((r) => `${r.id} ${r.status}`);
+    const description = payDetails({ ...target, money: total.money, card: card.info, id, cart: lines, task: this.task, prior });
+    const meta = { id, merchant: target.merchant, pspHost: target.psp.join(","), total: formatMoney(total.money), currency: total.money.currency, last4: card.info.last4, cartHash: hash };
+    this.log(tool, "ask-pay", { target: input.target }, { role: n.role, step: "pay", ...meta });
+    audit("card_approval", "asked", "browse", meta);
+    const url = bare(this.url);
+    return {
+      kind: "ask",
+      judge: false,
+      payment: true,
+      description,
+      facts: { host: hostOf(this.url), step: "pay", merchant: target.merchant },
+      redacted: { target: input.target, text: "{{card:number}}" },
+      resolve: () => this.payApproved(tool, n, input, { ...meta, ...target, money: total.money, url, frame }),
+    };
+  }
+
+  // The owner said yes. Only now is the card opened (and checked against the one the run started with), and only if nothing changed meanwhile.
+  private async payApproved(tool: string, n: Node, input: Record<string, unknown>, a: { id: string; merchant: string; psp: string[]; money: Money; cartHash: string; url: string; frame: boolean; last4: string }): Promise<Record<string, unknown> | string> {
+    const card = this.card!;
+    const refuse = (why: string) => (audit("card_blocked", "deny", "browse", { reason: why, id: a.id, afterYes: true }), `${why} Nothing was typed.${HAND}`);
+    const off = card.off();
+    if (off) return refuse(`Card payments are ${off}.`);
+    if (bare(this.url) !== a.url) return refuse("The page changed while the owner was deciding.");
+    const total = findPayableTotal(this.fullView);
+    if (!("money" in total) || !sameMoney(total.money, a.money) || this.fullUrl !== this.url) return refuse("The total changed while the owner was deciding.");
+    const loaded = await card.load();
+    if (typeof loaded === "string") return refuse(`The card could not be opened (${loaded}).`);
+    this.pay.card = loaded;
+    for (const v of secretVariants(loaded)) (this.secrets.add(v), this.cardSecrets.add(v));
+    this.cardCvc = loaded.cvc;
+    this.pay.approval = { id: a.id, merchant: a.merchant, psp: a.psp, url: a.url, money: a.money, cartHash: a.cartHash, frames: a.frame, last4: a.last4, expiresAt: Date.now() + APPROVAL_MINUTES * 60_000 };
+    this.pay.approved++;
+    card.ledger.add({ id: a.id, merchant: a.merchant, totalMinor: a.money.minor, currency: a.money.currency, last4: a.last4, cartHash: a.cartHash, status: "approved" });
+    audit("card_approval", "approved", "browse", { id: a.id, merchant: a.merchant, pspHost: a.psp.join(","), total: formatMoney(a.money), currency: a.money.currency, last4: a.last4, cartHash: a.cartHash });
+    return this.cardInput(tool, "number", n.ref, input);
+  }
+
+  // The call as it runs: the card detail typed by code. Everything the model, the audit and the question see is the placeholder and a length.
+  private cardInput(tool: string, kind: FieldKind, ref: string, input: Record<string, unknown>): Record<string, unknown> | string {
+    const c = this.pay.card;
+    if (!c || !this.pay.approval) return `The card is not open. Nothing was typed.${HAND}`;
+    const value = kind === "number" ? c.pan : kind === "expiry" ? expiryText(c) : kind === "cvc" ? c.cvc : c.holder;
+    if (!value) return "No cardholder name is saved for this card, so that field is not filled. Stop with status needs_owner and give handoffUrl.";
+    this.cardIntents.set(ref, kind);
+    this.log(tool, "fill-card-run", { target: ref }, { cardKind: kind, valueLength: value.length });
+    return { ...input, text: value };
+  }
+
+  // The click that could submit the typed card. Everything is read again from the page as it is now; one mismatch and nothing is clicked.
+  private async payClick(tool: string, input: Record<string, unknown>, n: Node): Promise<Decision> {
+    const card = this.card!;
+    const a = this.pay.approval!;
+    const gone = (why: string) => {
+      this.pay.invalidate();
+      card.ledger.setStatus(a.id, "failed");
+      audit("card_pay", "aborted", "browse", { id: a.id, merchant: a.merchant, reason: why.slice(0, LIMITS.reason) });
+      return this.payDeny(tool, input, `Nothing was clicked: ${why} Do not try again: the order needs a new approval in a new run.${HAND}`, { changed: true });
+    };
+    if (Date.now() > a.expiresAt) return gone("the payment approval ran out (it lasts ten minutes).");
+    const off = card.off();
+    if (off) return gone(`card payments are ${off}.`);
+    if (bare(this.url) !== a.url) return gone("the page address changed since the owner approved.");
+    if (this.fullUrl !== this.url || this.fullSeq <= this.pay.lastFillSeq) return this.payDeny(tool, input, "Take a fresh browser_snapshot of this page, then click the pay button: the total is read again from it before the click.");
+    const target = await this.payTarget(a.frames);
+    if (typeof target === "string") return gone(target);
+    if (target.merchant !== a.merchant || target.psp.some((h) => !a.psp.includes(h))) return gone("the shop or the payment provider changed since the owner approved.");
+    // From here to the end of this method there is no await: two clicks at once cannot both pass.
+    const total = findPayableTotal(this.fullView);
+    if ("problem" in total) return gone(`the total cannot be read any more (${total.problem}).`);
+    if (!sameMoney(total.money, a.money)) return gone(`the total is now ${formatMoney(total.money)}, the owner approved ${formatMoney(a.money)}.`);
+    const label = parseMoney(n.name);
+    if (label && !sameMoney(label, a.money)) return gone(`the button says ${formatMoney(label)}, the owner approved ${formatMoney(a.money)}.`);
+    if (cartHash(a.merchant, total.money, cartLines(this.fullView)) !== a.cartHash) return gone("the cart changed since the owner approved.");
+    if (riskyBoxes(this.nodes.values()).length) return gone("a box that saves the card or signs up for something is ticked.");
+    const capped = capProblem(a.money.minor, card.caps, card.ledger.spentToday(a.money.currency));
+    if (capped) return gone(`the card caps: ${capped}.`);
+    if (this.pay.attempted || !this.pay.approval) return this.payDeny(tool, input, "A payment was already attempted in this run. Do not click again.", { locked: true });
+    this.pay.attempted = true; // before the click runs: a second click, a retry or a rephrased call finds it set
+    this.pay.card = undefined;
+    card.ledger.setStatus(a.id, "clicked");
+    this.log(tool, "pay-click", input, { role: n.role, name: n.name.slice(0, LIMITS.control), commit: true });
+    audit("card_pay", "clicked", "browse", { id: a.id, merchant: a.merchant, pspHost: a.psp.join(","), total: formatMoney(a.money), last4: a.last4, host: hostOf(this.url) });
+    return { kind: "allow" };
+  }
+
+  // The card details typed by this call are remembered; their field lines and any echo of them are cut from what the model reads.
+  private doneCard(name: string, input: Record<string, unknown>): FieldKind[] {
+    const kinds: FieldKind[] = [];
+    if (name !== "type") return kinds;
+    const ref = String(input.target);
+    const kind = this.cardIntents.get(ref);
+    if (!kind) return kinds;
+    this.cardIntents.delete(ref);
+    this.fillRefs.add(ref);
+    this.justFilled.add(ref);
+    this.typed.set(ref, { label: this.nodes.get(ref)?.name ?? "", value: HIDDEN });
+    this.pay.typed.add(kind);
+    kinds.push(kind);
+    return kinds;
+  }
+
+  // The end of the run: the card is dropped, and what the owner should be told about the payment (undefined: none was attempted).
+  finishPayment(): string | undefined {
+    this.pay.card = undefined;
+    if (this.payNote !== undefined) return this.payNote || undefined; // once: the ledger and the audit get one result
+    const a = this.pay.approval;
+    if (!a || !this.pay.attempted) return undefined;
+    return (this.payNote = this.paymentNote(a)) || undefined;
+  }
+  private paymentNote(a: NonNullable<PayRun["approval"]>): string {
+    const what = `${formatMoney(a.money)} at ${a.merchant} (card ••••${a.last4})`;
+    if (this.pay.settled === "confirmed") return `Card payment of ${what}: the page showed a confirmation. Check the amount in the card app too.`;
+    if (this.pay.settled === "failed") return `Card payment of ${what}: the page showed that it failed or was declined. Nothing is retried automatically.`;
+    this.card?.ledger.setStatus(a.id, "unconfirmed");
+    audit("card_pay", "unconfirmed", "browse", { id: a.id, merchant: a.merchant, last4: a.last4 });
+    return `Card payment of ${what} was started but NOT confirmed on the page. Check the card app and your e-mail before doing anything; it will not be paid again until you clear it (npm run card -- clear ${a.id}).`;
+  }
+
+  // Any trace of the card in a text the owner will read (the worker's final answer): cut.
+  scrub(text: string): string {
+    let out = text;
+    for (const v of [...this.cardSecrets].sort((a, b) => b.length - a.length)) if (v.length >= 3) out = out.split(v).join("[card]");
+    return out;
+  }
+
   async decide(toolName: string, input: Record<string, unknown>): Promise<Decision> {
     this.steps++;
     if (this.denied >= MAX_DENIED) return this.deny(toolName, input, "Too many refused calls in this run. Stop now and report what you have.");
@@ -282,6 +548,8 @@ export class BrowseGuard {
     if (!toolName.startsWith("mcp__browser__")) return this.deny(toolName, input, `${toolName} is not available in a browse run.`);
     if (!isAllowedBrowserTool(toolName, this.vision)) return this.deny(toolName, input, `${short(toolName)} is not available.`);
     const name = short(toolName);
+    const locked = this.payLock(toolName, input, name);
+    if (locked) return locked;
     switch (name) {
       case "navigate":
       case "tabs": {
@@ -289,6 +557,7 @@ export class BrowseGuard {
         const bad = addressProblem(input.url);
         if (bad) return this.deny(toolName, input, `Cannot open that address: ${bad}.`, { address: clip(String(input.url ?? ""), 80) });
         if (!(await resolvesPublic(hostOf(input.url), this.resolver))) return this.deny(toolName, input, "Cannot open that address: the name points to a private address.");
+        this.navNext = true;
         this.log(toolName, "nav", input);
         return { kind: "defer", description: `🌐 Browser: open a page\nAddress: ${clip(String(input.url), 300)}` };
       }
@@ -297,6 +566,8 @@ export class BrowseGuard {
         if (typeof n === "string") return this.deny(toolName, input, n);
         const text = String(input.text ?? "");
         this.intents.delete(n.ref);
+        this.cardIntents.delete(n.ref);
+        if (HAS_CARD_PLACEHOLDER.test(text)) return this.cardField(toolName, n, text, input);
         if (HAS_PLACEHOLDER.test(text)) {
           // A saved detail: code checks the field, the page and the site, then types the real value. The model, the question and the audit see the key.
           const logged = { target: input.target };
@@ -322,6 +593,7 @@ export class BrowseGuard {
         for (const f of fields) {
           const n = this.refNode(f.target);
           if (typeof n === "string") return this.deny(toolName, input, n);
+          if (HAS_CARD_PLACEHOLDER.test(String(f.value ?? ""))) return this.payDeny(toolName, { target: f.target }, "A card detail is typed with browser_type, one call per field, not with browser_fill_form.");
           this.intents.delete(n.ref);
           if (HAS_PLACEHOLDER.test(String(f.value ?? ""))) {
             const logged = { target: f.target };
@@ -380,6 +652,8 @@ export class BrowseGuard {
           if (bad) return this.deny(toolName, input, `That link is not allowed: ${bad}.`, { role: n.role });
         }
         const c = classifyClick(n);
+        // With a card typed for an approved payment, the next button that could submit it IS the pay click: checked again from the page, once.
+        if (this.pay.active && (c.commit || (n.role === "button" && n.inForm))) return this.payClick(toolName, input, n);
         this.log(toolName, c.commit ? "commit-check" : "click", input, { role: n.role, name: n.name.slice(0, LIMITS.control), commit: c.commit });
         if (c.commit) return this.commit(toolName, input, n, c.why, `Button: “${clip(n.name || "(no label)", 120)}” (${n.role})`);
         return { kind: "defer", description: `🖱️ Browser: click “${clip(n.name || n.ref, 80)}” (${n.role})` };
@@ -468,6 +742,11 @@ export class BrowseGuard {
       this.url = "";
       return `### Page\nThe page went to an address that is not allowed (${addressProblem(seen)}); its content is withheld. Go back or stop.`;
     }
+    const cardDone = this.doneCard(short(toolName), input);
+    if (cardDone.length) {
+      out = out.replace(/### Ran Playwright code[\s\S]*?(?=\n### |$)/, "").replace(/\n{3,}/g, "\n\n");
+      out = `Filled the ${cardDone.map((k) => WORDS[k]).join(", ")} from the saved card.\n${out}`;
+    }
     const done = this.doneFills(short(toolName), input);
     if (done.length) {
       // Saved details were typed: the server's echo of the typed code is dropped, the model is told only which fields were filled.
@@ -480,13 +759,34 @@ export class BrowseGuard {
     if (/\[ref=|### Snapshot|Page URL/.test(out)) audit("browse_view", "page", "browse", { tool: short(toolName), chars: out.length, cut: out.length > SNAPSHOT_CAP, fromFile: !!link });
     if (short(toolName) === "take_screenshot") audit("browse_view", "screenshot", "browse", { tool: short(toolName), chars: out.length });
     this.remember(toolName, input, out, seen);
+    if (cardDone.length) this.pay.lastFillSeq = this.fullSeq; // a whole page view (browser_snapshot) taken after this fill is needed before the click
+    if (this.pay.attempted && !this.pay.settled && this.pay.approval) this.afterClick(out);
     this.justFilled.clear();
     return out === text ? undefined : out;
   }
 
+  // Page views after the pay click: a confirmation or a decline, in the page's own words, is noted; nothing else is concluded.
+  private afterClick(view: string) {
+    const o = paymentOutcome(view);
+    const a = this.pay.approval!;
+    if (!o) return;
+    this.pay.settled = o;
+    this.card?.ledger.setStatus(a.id, o);
+    audit("card_pay", o, "browse", { id: a.id, merchant: a.merchant, last4: a.last4 });
+  }
+
   remember(toolName: string, input: Record<string, unknown>, text: string, seen: string | undefined) {
     const name = short(toolName);
-    if (seen && seen !== this.url) (this.typed.clear(), (this.url = seen));
+    if (seen && seen !== this.url) {
+      this.typed.clear();
+      this.url = seen;
+      const domain = registeredDomain(hostOf(seen));
+      if (domain && this.chain[this.chain.length - 1]?.domain !== domain) this.chain.push({ domain, by: this.navNext ? "navigate" : "follow" });
+      // A typed card belongs to the page it was approved on: another page, and the approval is void.
+      if (this.pay.approval && !this.pay.attempted && bare(seen) !== this.pay.approval.url) this.pay.invalidate();
+    }
+    this.navNext = false;
+    if (name === "snapshot" && /\[ref=/.test(text)) (this.fullView = text), (this.fullUrl = this.url), this.fullSeq++;
     if (name === "navigate" || name === "navigate_back") this.typed.clear();
     if (/\[ref=/.test(text)) {
       const fresh = parseSnapshot(text);

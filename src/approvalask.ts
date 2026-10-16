@@ -24,14 +24,16 @@ export const sameArgs = (a: Record<string, unknown>, b: Record<string, unknown>)
 export function makeApprove(send: (text: string) => Promise<number>, o: { background?: boolean; scope?: string; request?: typeof approvals.request; compose?: typeof composeQuestion } = {}): Approve {
   const { background = false, scope = approvals.OWNER_SCOPE, request = approvals.request, compose = composeQuestion } = o;
   const source: Source = scope !== approvals.OWNER_SCOPE ? "group" : background ? "background" : "chat";
-  return async (description, call, abort) => {
+  return async (description, call, abort, o) => {
+    // A card payment is asked in the owner's chat only, never in a group and never by an unattended run.
+    if (o?.typedYes && (background || scope !== approvals.OWNER_SCOPE)) return { approved: false, failure: "a card payment can only be approved in the owner's own chat" };
     // One model call writes it, code validates it. No question means no ask and no card: the agent gets the failure as the tool result.
     const c = await compose({ tool: call.tool, args: call.input, details: description, recent: scope === approvals.OWNER_SCOPE ? recentChat() : [], background, source });
     if (c.text === undefined) return { approved: false, failure: `no question could be written that states the exact arguments (${c.failure})` };
     const question = c.text;
     const asked = structuredClone(call.input);
     audit(call.tool, "approval-asked", source, { args: argsForAudit(asked), question, details: description, writeMs: c.ms, by: c.by });
-    const d = await request(send, description, call, abort, { background, question, scope });
+    const d = await request(send, description, call, abort, { background, question, scope, typedYes: o?.typedYes });
     // Post-hoc, never blocking: is what will run what the question was written for?
     audit(call.tool, "approval-outcome", source, { approved: d.approved, modified: !!d.updatedInput, argsEqual: sameArgs(asked, d.updatedInput ?? call.input), ...(d.feedback ? { feedback: d.feedback.slice(0, LIMITS.line) } : {}), ...(d.updatedInput ? { executed: argsForAudit(d.updatedInput) } : {}) });
     return d;

@@ -1,4 +1,5 @@
 import { createServer } from "node:net";
+import type { FrameInfo } from "./paymentrules.ts";
 import { LIMITS } from "./sanitize.ts";
 
 // What is under a point of the page: a lookup owned by CODE, never by the model (the vision-click experiment, BROWSE_VISION=click).
@@ -160,6 +161,31 @@ export const cdpProbe = (port: number): Probe => async (x, y, pageUrl) => {
   if (typeof s === "string") return s;
   try {
     return await describePoint(s.cdp, x, y, s.pageUrl);
+  } finally {
+    s.close();
+  }
+};
+
+// ---- the frames of the page (a card payment: paymentrules.ts frameVerdict) ----
+
+// The browser's own frame tree of the page the worker sees, main page first, then every frame under it (hidden ones too: a frame that is not in
+// the page view is still a frame). The address of a frame comes from the browser, not from the page.
+export type FrameProbe = (pageUrl: string) => Promise<FrameInfo[] | string>; // a string: why the frames could not be listed
+
+interface FrameTree { frame?: { url?: string }; childFrames?: FrameTree[] }
+export function flattenFrames(tree: FrameTree | undefined, depth = 0): FrameInfo[] {
+  if (!tree?.frame || depth > 8) return [];
+  return [{ url: String(tree.frame.url ?? "") }, ...(tree.childFrames ?? []).flatMap((c) => flattenFrames(c, depth + 1))];
+}
+
+export const cdpFrames = (port: number): FrameProbe => async (pageUrl) => {
+  const s = await openSession(port, 4000, pageUrl);
+  if (typeof s === "string") return s;
+  try {
+    const frames = flattenFrames((await s.cdp.send("Page.getFrameTree")).frameTree as FrameTree | undefined);
+    return frames.length ? frames : "the browser returned no frames";
+  } catch (e) {
+    return `the frames could not be listed (${String((e as Error)?.message ?? e).slice(0, LIMITS.reason)})`;
   } finally {
     s.close();
   }

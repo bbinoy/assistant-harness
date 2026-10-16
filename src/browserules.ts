@@ -79,6 +79,8 @@ export interface Node {
   name: string;
   value?: string; // what the page shows in the field now (textbox, combobox)
   checked?: boolean;
+  disabled?: boolean; // [disabled] or [readonly]: nothing can be typed into it
+  inFrame?: boolean; // inside an embedded frame (an ancestor is an iframe). The ref's f-prefix says nothing about that: after a cross-site navigation the page's own fields are f1e..
   url?: string; // a link's target, from its "/url:" child line
   inForm: boolean;
   formName?: string;
@@ -136,10 +138,11 @@ export function parseSnapshot(text: string): Map<string, Node> {
     const attrs = m[6] ?? "";
     const ref = /\[ref=([\w-]+)\]/.exec(attrs)?.[1];
     const form = [...stack].reverse().find((s) => s.role === "form") ?? (role === "form" ? { role, name } : undefined);
+    const inFrame = stack.some((s) => s.role === "iframe" || s.role === "frame");
     stack.push({ indent, role, name, ref });
     if (!ref) continue;
     const value = m[7] !== undefined && m[7] !== "" ? unquote(m[7]) : undefined;
-    const node: Node = { ref, role, name, inForm: !!form, ...(form?.name ? { formName: form.name } : {}), ...(value !== undefined ? { value } : {}), ...(/\[checked\]/.test(attrs) ? { checked: true } : {}) };
+    const node: Node = { ref, role, name, inForm: !!form, ...(form?.name ? { formName: form.name } : {}), ...(value !== undefined ? { value } : {}), ...(/\[checked\]/.test(attrs) ? { checked: true } : {}), ...(/\[(disabled|readonly)\]/.test(attrs) ? { disabled: true } : {}), ...(inFrame ? { inFrame: true } : {}) };
     out.set(ref, node);
     last = node;
   }
@@ -191,9 +194,9 @@ export function looksLikeCardNumber(text: string): boolean {
 
 // ---- the total on a page ----
 
-const CURRENCY = "(?:CHF|EUR|USD|GBP|SEK|NOK|DKK|PLN|CZK|Fr\\.|SFr\\.?|€|\\$|£)";
-const AMOUNT_NUM = "\\d{1,3}(?:[’'.,\\s]\\d{3})+(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?";
-const MONEY = new RegExp(`${CURRENCY}\\s?(?:${AMOUNT_NUM})(?![\\d])|(?<![\\d.,])(?:${AMOUNT_NUM})\\s?${CURRENCY}`, "i");
+export const CURRENCY = "(?:CHF|EUR|USD|GBP|SEK|NOK|DKK|PLN|CZK|Fr\\.|SFr\\.?|€|\\$|£)";
+export const AMOUNT_NUM = "\\d{1,3}(?:[’'.,\\s]\\d{3})+(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?";
+export const MONEY = new RegExp(`${CURRENCY}\\s?(?:${AMOUNT_NUM})(?![\\d])|(?<![\\d.,])(?:${AMOUNT_NUM})\\s?${CURRENCY}`, "i");
 const TOTAL_WORD = /total|gesamt|summe|zu zahlen|to pay|amount due|grand|betrag|montant|à payer|a payer|importe/i;
 const PRICE_WORD = /price|preis|prix|cost|fare|tarif|precio/i;
 

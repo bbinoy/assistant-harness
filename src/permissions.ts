@@ -11,10 +11,12 @@ import { OWNER, settings } from "./settings.ts";
 
 // Permissions as code: policy.ts decides allow / ask / deny; "ask" goes to the owner's phone (the Approve callback).
 
+// `o.typedYes`: a card payment, which only a typed yes from the owner's chat approves (approvals.ts); a group or an unattended run refuses it.
 export type Approve = (
   description: string,
   call: { tool: string; input: Record<string, unknown> },
   signal: AbortSignal,
+  o?: { typedYes?: boolean },
 ) => Promise<Decision>;
 
 // A group run never asks the owner for anything.
@@ -95,6 +97,8 @@ export interface GuardDecision {
   redacted?: Record<string, unknown>; // ask: the call as the question writer, the approval card and the audit see it (a typed secret cut to its length); the real input still runs
   facts?: Record<string, unknown>; // ask: what the judge's audit row records about the step (host, role, name)
   input?: Record<string, unknown>; // the call as it must run, when the guard narrowed it (the browse screenshot); the allowed call runs with this input
+  payment?: boolean; // ask: a card payment. Never judged, never auto-approved; only the owner's typed yes approves it (approvals.ts), and it is not remembered as done (the guard keeps its own once-only)
+  resolve?: () => Promise<Record<string, unknown> | string>; // the call as it must run, built only now that it is allowed (the card is opened here, after the owner said yes); a string: the call is refused with that reason
 }
 export interface CallGuard {
   decide: (tool: string, input: Record<string, unknown>) => Promise<GuardDecision>;
@@ -109,11 +113,19 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     }
     const base = classify(tool, input, source, memoryDir);
     const verdict = g?.kind === "allow" && base !== "deny" ? "allow" : g?.kind === "ask" && base !== "deny" ? "ask" : base;
+    // The call as it must run: what the guard narrowed, or built only now (a card typed by code after the yes), else the model's own.
+    const final = async (): Promise<{ input: Record<string, unknown> } | { deny: string }> => {
+      if (!g?.resolve) return { input: g?.input ?? input };
+      const r = await g.resolve();
+      return typeof r === "string" ? { deny: r } : { input: r };
+    };
     if (verdict === "allow") {
       // Reads log tool + decision only. Writes also log the ids they touch (ids, never
       // content), so "what did it archive?" can always be answered from the audit log.
       audit(tool, "allow", source, isReadTool(tool) ? undefined : idsOf(input));
-      return { behavior: "allow", updatedInput: g?.input ?? input };
+      const f = await final();
+      if ("deny" in f) return { behavior: "deny", message: f.deny };
+      return { behavior: "allow", updatedInput: f.input };
     }
     if (verdict === "deny") {
       if (isInboxArchive(tool, input) && settings.mailProvider === "gmail") {
@@ -127,7 +139,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
     // A small model's second opinion, only for what code puts on the floor (autojudge.ts). In shadow
     // mode it only logs; the owner is asked either way.
     const key = callKey(tool, input);
-    const onceOnly = g ? !!g.once : once(tool);
+    const onceOnly = g ? !!g.once && !g.payment : once(tool);
     const doneAt = onceOnly ? done.get(key) : undefined;
     if (doneAt !== undefined && Date.now() - doneAt < DONE_WINDOW_MS) {
       audit(tool, "deny-already-done", source);
@@ -163,7 +175,7 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       return { behavior: "deny", message: `Asking ${OWNER} about this exact call failed ${MAX_FAILED_ASKS} times, so it is not asked again. Do not retry it; tell ${OWNER} in your own words what you could not do, and drop it unless they bring it up again.` };
     }
     audit(tool, "ask-sent", source); // logged before the wait, so a stuck approval is visible
-    const d = await approve(description, { tool, input: g?.redacted ?? input }, signal);
+    const d = await approve(description, { tool, input: g?.redacted ?? input }, signal, g?.payment ? { typedYes: true } : undefined);
     if (d.failure) {
       failures.set(key, (failures.get(key) ?? 0) + 1);
       audit(tool, "ask-failed", source, { reason: d.failure });
@@ -177,6 +189,10 @@ export function makeCanUseTool(approve: Approve, source: Source, memoryDir: stri
       source,
     );
     if (d.approved && onceOnly) remember(key);
+    if (d.approved && g?.payment && g.resolve) {
+      const f = await final(); // the card is opened only now, after the owner's typed yes
+      return "deny" in f ? { behavior: "deny", message: f.deny } : { behavior: "allow", updatedInput: f.input };
+    }
     if (d.approved) return { behavior: "allow", updatedInput: g?.input ?? (g?.redacted ? input : (d.updatedInput ?? input)) }; // g.input: the call as code must run it (a saved detail typed by code), never the owner's edit
     return {
       behavior: "deny",

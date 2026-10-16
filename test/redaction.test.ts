@@ -39,7 +39,7 @@ test("redact: more kinds of credential are masked, and a JSON line stays JSON", 
 test("audit: a credential in an error message is masked, a sender and subject stay readable", () => {
   const token = body(24);
   audit("test_redaction", "failed", "chat", { error: `request failed: Bearer ${token}`, from: "Anna <anna@example.com>", subject: "Call +15555550105 back" });
-  const last = (readText("logs/audit.jsonl") ?? "").trim().split("\n").at(-1)!;
+  const last = (readText("logs/audit.jsonl") ?? "").trim().split("\n").filter((l) => l.includes('"test_redaction"')).at(-1)!; // other test files write to the same log at the same time
   const e = JSON.parse(last) as { meta: { error: string; from: string; subject: string } };
   assert.ok(!last.includes(token));
   assert.equal(e.meta.error, "request failed: Bearer ***");
