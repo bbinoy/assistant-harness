@@ -4,6 +4,9 @@
 
 ## 0.2.0 (unreleased)
 
+Added
+- `IncomingMessage.file` / `parseFile` / `FileRef` / `MAX_FILE_BYTES`: the first attachment that is neither a picture nor audio (a document or any other file), with its id, size and the sender's file name. A message with only such a file is now delivered.
+
 Breaking changes
 - The library no longer exits the process. `SignalClient` has `onClose(handler)` and `close()`; a socket error after connecting is reported through `onClose` instead of crashing. `ensureSignalDaemon` returns `{ started, stop(), exited }`, installs no process or signal handlers, and takes an options object.
 - `new SignalClient({ host, port, account, peer?, logger?, rpcTimeoutMs?, ownReactionMs? })` replaces the positional constructor.

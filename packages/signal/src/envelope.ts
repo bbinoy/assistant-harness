@@ -43,6 +43,8 @@ export interface IncomingMessage {
   audio?: AudioRef;
   /** A picture (the first one; `text` is its caption, possibly empty); resolve its file with {@link attachmentPath}. */
   image?: ImageRef;
+  /** Any other file (the first one that is neither a picture nor audio): a PDF, a text file, a zip... Its type is for the caller to decide from the bytes; resolve its file with {@link attachmentPath}. */
+  file?: FileRef;
   /**
    * Set when this is an EDIT: `text` is the new text, `timestamp` the edit's own timestamp, and `targetTimestamp` the
    * timestamp of the message it replaces (the original's, or an earlier edit's: Signal clients differ). An edit is
@@ -83,7 +85,19 @@ export interface ImageRef {
 
 /** Pictures larger than this (bytes) are not surfaced. */
 export const MAX_IMAGE_BYTES = 20_000_000;
+
+/** Other files larger than this (bytes) are not read; the sender is told. */
+export const MAX_FILE_BYTES = 20_000_000;
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"];
+
+/** Any other file signal-cli has downloaded. `name` is the file name the sender gave: untrusted text, shorter than 200 characters, never a path. */
+export interface FileRef {
+  id: string;
+  size: number;
+  name?: string;
+}
+
+const MAX_FILE_NAME = 200;
 
 // An attachment id becomes a file name, so only plain names pass (no path separators, nothing hidden).
 const safeId = (id: string) => /^[\w.-]{1,100}$/.test(id) && !id.startsWith(".");
@@ -116,6 +130,24 @@ export function parseImage(attachments: unknown): ImageRef | undefined {
     const size = Number(a?.size ?? 0);
     if (!IMAGE_TYPES.includes(String(a?.contentType ?? "").toLowerCase()) || !safeId(id)) continue;
     if (size > 0 && size <= MAX_IMAGE_BYTES) return { id, size };
+  }
+  return undefined;
+}
+
+/**
+ * Pure: the first attachment that is not a picture or audio (those have their own parsers), with a plain id and a size. The
+ * content type is not consulted beyond that: the caller decides what the bytes are. Any size is surfaced, so the caller can
+ * tell the sender when a file is too large; it must check the size again when it reads the file.
+ */
+export function parseFile(attachments: unknown): FileRef | undefined {
+  if (!Array.isArray(attachments)) return undefined;
+  for (const a of attachments) {
+    const id = typeof a?.id === "string" ? a.id : "";
+    const size = Number(a?.size ?? 0);
+    const type = String(a?.contentType ?? "").toLowerCase();
+    if (IMAGE_TYPES.includes(type) || type.startsWith("audio/") || !safeId(id) || !(size > 0)) continue;
+    const name = typeof a?.filename === "string" && a.filename ? a.filename.slice(0, MAX_FILE_NAME) : undefined;
+    return { id, size, ...(name ? { name } : {}) };
   }
   return undefined;
 }
@@ -239,7 +271,8 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
   }
   const audio = edit ? undefined : parseAudio(body.attachments);
   const image = edit ? undefined : parseImage(body.attachments);
-  if (!body.message && !audio && !image) return {};
+  const file = edit || audio || image ? undefined : parseFile(body.attachments);
+  if (!body.message && !audio && !image && !file) return {};
   const quote = parseQuote(body.quote);
   const mentioned = (Array.isArray(body.mentions) ? body.mentions : []).some((m: any) => m?.uuid === ch.account || m?.number === ch.account);
   return {
@@ -251,6 +284,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
       quote,
       audio,
       ...(image ? { image } : {}),
+      ...(file ? { file } : {}),
       ...(edit ? { edited: { targetTimestamp: target } } : {}),
       ...(group ? { group, addressedToMe: mentioned || quote?.author === ch.account, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}),
     },

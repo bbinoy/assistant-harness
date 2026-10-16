@@ -12,6 +12,7 @@ const names = (m: object) => Object.keys(m).sort();
 test("exports: core entry", () => {
   assert.deepEqual(names(core), [
     "MAX_AUDIO_BYTES",
+    "MAX_FILE_BYTES",
     "MAX_IMAGE_BYTES",
     "SignalClient",
     "attachmentPath",
@@ -19,6 +20,7 @@ test("exports: core entry", () => {
     "ensureSignalDaemon",
     "interpretEnvelope",
     "parseAudio",
+    "parseFile",
     "parseImage",
     "parseQuote",
     "silentLogger",

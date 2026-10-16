@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { interpretEnvelope, parseImage } from "../src/envelope.ts";
+import { interpretEnvelope, parseFile, parseImage } from "../src/envelope.ts";
 
 const ME = "+10000000000"; // the owner
 const BOT = "+10000000001"; // the assistant's own account
@@ -99,7 +99,21 @@ test("images: a picture with or without a caption is a message, in a private cha
   assert.deepEqual([direct?.text, direct?.image, direct?.direct], ["", { id: "p1.jpg", size: 1000 }, true]);
   const grp = interpretEnvelope({ sourceNumber: "+15555550105", timestamp: 8, dataMessage: { timestamp: 8, message: "look", attachments: att, groupInfo: { groupId: "g1" } } }, peer).message;
   assert.deepEqual([grp?.text, grp?.image?.id, grp?.group?.id], ["look", "p1.jpg", "g1"]);
-  assert.equal(interpretEnvelope({ sourceNumber: ME, timestamp: 9, dataMessage: { timestamp: 9, attachments: [{ contentType: "video/mp4", id: "v", size: 5 }] } }, peer).message, undefined);
+  const video = interpretEnvelope({ sourceNumber: ME, timestamp: 9, dataMessage: { timestamp: 9, attachments: [{ contentType: "video/mp4", id: "v", size: 5 }] } }, peer).message;
+  assert.deepEqual([video?.image, video?.file], [undefined, { id: "v", size: 5 }]); // a video is a file now: the app tells the sender it is not supported
+});
+
+test("files: the first attachment that is not a picture or audio; ids and sizes are checked, the name is cut and never a path", () => {
+  assert.deepEqual(parseFile([{ contentType: "application/pdf", id: "d1", size: 900, filename: "Report 2026.pdf" }]), { id: "d1", size: 900, name: "Report 2026.pdf" });
+  assert.deepEqual(parseFile([{ contentType: "image/jpeg", id: "p", size: 5 }, { contentType: "audio/aac", id: "a", size: 5 }, { id: "z", size: 7 }]), { id: "z", size: 7 });
+  assert.equal(parseFile([{ contentType: "image/png", id: "p", size: 5 }]), undefined);
+  assert.equal(parseFile([{ contentType: "application/pdf", id: "../../etc/passwd", size: 5 }]), undefined);
+  assert.equal(parseFile([{ contentType: "application/pdf", id: ".hidden", size: 5 }]), undefined);
+  assert.equal(parseFile([{ contentType: "application/pdf", id: "empty", size: 0 }]), undefined);
+  assert.equal(parseFile("nope"), undefined);
+  assert.equal(parseFile([{ contentType: "application/pdf", id: "d", size: 5, filename: "x".repeat(500) }])?.name?.length, 200);
+  const m = interpretEnvelope({ sourceNumber: "+15555550105", timestamp: 8, dataMessage: { timestamp: 8, message: "see", attachments: [{ contentType: "application/pdf", id: "d2", size: 50, filename: "a.pdf" }], groupInfo: { groupId: "g1" } } }, peer).message;
+  assert.deepEqual([m?.text, m?.file?.id, m?.group?.id, m?.image], ["see", "d2", "g1", undefined]);
 });
 
 // The shapes below follow signal-cli's JSON-RPC output (JsonMessageEnvelope, JsonEditMessage, JsonSyncDataMessage, JsonRemoteDelete).

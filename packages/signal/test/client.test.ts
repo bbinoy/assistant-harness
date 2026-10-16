@@ -43,6 +43,19 @@ test("client: framing handles several lines in one chunk and one line split over
   await done();
 });
 
+test("client: a document attachment arrives as a file with its id and name; only the plain id is joined to the folder", async () => {
+  const { d, c, done } = await connected(PEER);
+  const got: { text: string; file?: { id: string; size: number; name?: string } }[] = [];
+  c.onMessage((m) => got.push({ text: m.text, file: m.file }));
+  d.push({ sourceNumber: PEER.number, dataMessage: { timestamp: 5, message: "the contract", attachments: [{ contentType: "application/pdf", id: "doc-1.pdf", size: 1234, filename: "contract.pdf" }] } });
+  d.push({ sourceNumber: PEER.number, dataMessage: { timestamp: 6, message: "sneaky", attachments: [{ contentType: "application/pdf", id: "../../secret", size: 10 }] } });
+  await until(() => got.length === 2);
+  assert.deepEqual(got[0], { text: "the contract", file: { id: "doc-1.pdf", size: 1234, name: "contract.pdf" } });
+  assert.deepEqual(got[1], { text: "sneaky", file: undefined });
+  assert.equal(attachmentPath(got[0]!.file!, "/data/att"), "/data/att/doc-1.pdf");
+  await done();
+});
+
 test("client: an unparseable line is skipped and later lines still work", async () => {
   const { d, c, done } = await connected();
   const got: string[] = [];
