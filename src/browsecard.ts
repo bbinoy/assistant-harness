@@ -68,5 +68,5 @@ export function secretVariants(c: CardRecord): string[] {
   const groups = c.pan.length === 15 ? [c.pan.slice(0, 4), c.pan.slice(4, 10), c.pan.slice(10)] : (c.pan.match(/.{1,4}/g) ?? [c.pan]);
   const mm = String(c.expMonth).padStart(2, "0");
   const yy = String(c.expYear % 100).padStart(2, "0");
-  return [c.pan, groups.join(" "), groups.join("-"), `${mm}/${yy}`, `${mm} / ${yy}`, `${mm}/${c.expYear}`, `${mm} / ${c.expYear}`, expiryText(c), ...(c.holder ? [c.holder] : [])];
+  return [c.pan, groups.join(" "), groups.join("-"), `${mm}/${yy}`, `${mm} / ${yy}`, `${mm}/${c.expYear}`, `${mm} / ${c.expYear}`, `${mm}%2F${yy}`, `${mm}%2F${c.expYear}`, expiryText(c), ...(c.holder ? [c.holder] : [])];
 }

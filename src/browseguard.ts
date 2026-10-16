@@ -106,6 +106,7 @@ export class BrowseGuard {
   private fullSeq = 0;
   private readonly cardIntents = new Map<string, FieldKind>(); // decided to type, not yet confirmed done
   private payNote?: string; // the result of the payment for the owner, once the run is over ("" none)
+  private cardCvc?: string; // kept (not in `secrets`: three digits cut everywhere would wreck a page) to cut it where a page puts it in an address
   private readonly cardSecrets = new Set<string>(); // the card's forms a page may echo: cut from the worker's final answer too
 
   constructor(o: GuardOptions) {
@@ -141,7 +142,7 @@ export class BrowseGuard {
     const key = m[1]!.toLowerCase();
     const e = this.profile.entries[key];
     if (!e) return `There is no saved detail called ${clip(key, 40)}. The keys are: ${this.profileKeys().map((k) => k.key).join(", ")}.`;
-    if (/^f\d+e/.test(n.ref)) return "That field is inside an embedded frame whose content and origin cannot be checked, so a saved detail is not typed there. Stop with status needs_owner and give handoffUrl.";
+    if (n.inFrame) return "That field is inside an embedded frame whose content and origin cannot be checked, so a saved detail is not typed there. Stop with status needs_owner and give handoffUrl.";
     let u: URL;
     try {
       u = new URL(this.url);
@@ -183,6 +184,8 @@ export class BrowseGuard {
     if (!this.secrets.size) return text;
     let out = text;
     for (const ref of this.fillRefs) out = out.replace(new RegExp(`(\\[ref=${escapeRe(ref)}\\](?: \\[[^\\]]*\\])*):[ \\t].*$`, "gm"), "$1: [filled]");
+    // The security code, where a (bad) form put it in the address: a query value that is exactly the code.
+    if (this.cardCvc) out = out.replace(new RegExp(`([?&][^=&\\s"']+=)${escapeRe(this.cardCvc)}(?![\\p{L}\\p{N}])`, "gu"), "$1[filled]");
     for (const v of [...this.secrets].sort((a, b) => b.length - a.length)) {
       if (v.length < 3) continue;
       for (const variant of new Set([v, JSON.stringify(v).slice(1, -1), v.replace(/'/g, "\\'"), v.replace(/\s+/g, " ")])) out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(variant)}(?![\\p{L}\\p{N}])`, "gu"), "[filled]");
@@ -376,7 +379,7 @@ export class BrowseGuard {
     if (this.pay.typed.has(kind)) return fix(`The ${WORDS[kind]} is already typed.`);
     if (kind !== "number" && !this.pay.approval) return fix("Type the card number first: that asks the owner to approve the payment.");
     if (kind === "cvc" && !this.pay.typed.has("expiry")) return fix("Type the expiry date before the security code.");
-    const frame = /^f\d+e/.test(n.ref);
+    const frame = !!n.inFrame; // by the page's structure: the ref prefix is not a sign of it (after a cross-site navigation the page's own fields are f1e..)
     const target = await this.payTarget(frame);
     if (typeof target === "string") return stop(target);
     const a = this.pay.approval;
@@ -442,6 +445,7 @@ export class BrowseGuard {
     if (typeof loaded === "string") return refuse(`The card could not be opened (${loaded}).`);
     this.pay.card = loaded;
     for (const v of secretVariants(loaded)) (this.secrets.add(v), this.cardSecrets.add(v));
+    this.cardCvc = loaded.cvc;
     this.pay.approval = { id: a.id, merchant: a.merchant, psp: a.psp, url: a.url, money: a.money, cartHash: a.cartHash, frames: a.frame, last4: a.last4, expiresAt: Date.now() + APPROVAL_MINUTES * 60_000 };
     this.pay.approved++;
     card.ledger.add({ id: a.id, merchant: a.merchant, totalMinor: a.money.minor, currency: a.money.currency, last4: a.last4, cartHash: a.cartHash, status: "approved" });

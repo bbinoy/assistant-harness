@@ -80,6 +80,7 @@ export interface Node {
   value?: string; // what the page shows in the field now (textbox, combobox)
   checked?: boolean;
   disabled?: boolean; // [disabled] or [readonly]: nothing can be typed into it
+  inFrame?: boolean; // inside an embedded frame (an ancestor is an iframe). The ref's f-prefix says nothing about that: after a cross-site navigation the page's own fields are f1e..
   url?: string; // a link's target, from its "/url:" child line
   inForm: boolean;
   formName?: string;
@@ -137,10 +138,11 @@ export function parseSnapshot(text: string): Map<string, Node> {
     const attrs = m[6] ?? "";
     const ref = /\[ref=([\w-]+)\]/.exec(attrs)?.[1];
     const form = [...stack].reverse().find((s) => s.role === "form") ?? (role === "form" ? { role, name } : undefined);
+    const inFrame = stack.some((s) => s.role === "iframe" || s.role === "frame");
     stack.push({ indent, role, name, ref });
     if (!ref) continue;
     const value = m[7] !== undefined && m[7] !== "" ? unquote(m[7]) : undefined;
-    const node: Node = { ref, role, name, inForm: !!form, ...(form?.name ? { formName: form.name } : {}), ...(value !== undefined ? { value } : {}), ...(/\[checked\]/.test(attrs) ? { checked: true } : {}), ...(/\[(disabled|readonly)\]/.test(attrs) ? { disabled: true } : {}) };
+    const node: Node = { ref, role, name, inForm: !!form, ...(form?.name ? { formName: form.name } : {}), ...(value !== undefined ? { value } : {}), ...(/\[checked\]/.test(attrs) ? { checked: true } : {}), ...(/\[(disabled|readonly)\]/.test(attrs) ? { disabled: true } : {}), ...(inFrame ? { inFrame: true } : {}) };
     out.set(ref, node);
     last = node;
   }
