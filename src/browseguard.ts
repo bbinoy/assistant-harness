@@ -374,7 +374,7 @@ export class BrowseGuard {
     if (!FIELD_ROLES.test(n.role)) return fix(`${n.ref} is a ${n.role}, not a text field.`);
     if (n.disabled) return fix(`${n.ref} cannot be typed into (disabled or read-only).`);
     if (n.value) return fix("That field is not empty. A card detail is typed only into an empty field.");
-    if (kindOfFieldName(n.name) !== kind) return fix(`The field “${clip(n.name || n.ref, 60)}” is not the ${WORDS[kind]} field.`);
+    if (kindOfFieldName(n.name) !== kind) return fix(`The field “${clip(n.name || n.ref, LIMITS.control)}” is not the ${WORDS[kind]} field.`);
     if (kind === "expiry" && expirySplit(n.name)) return stop("The expiry date is asked in separate month and year fields, which are not supported.");
     if (this.pay.typed.has(kind)) return fix(`The ${WORDS[kind]} is already typed.`);
     if (kind !== "number" && !this.pay.approval) return fix("Type the card number first: that asks the owner to approve the payment.");
@@ -406,7 +406,7 @@ export class BrowseGuard {
     if ("problem" in total) return stop(`The total to pay cannot be read: ${total.problem}.`);
     if (total.money.currency !== card.info.currency) return stop(`The page asks for ${total.money.currency} but the card is in ${card.info.currency}.`);
     const boxes = riskyBoxes(this.nodes.values());
-    if (boxes.length) return fix(`A box is ticked that saves the card or signs up for something (“${clip(boxes[0]!, 60)}”). Untick it and take a new browser_snapshot, or stop with status needs_owner and give handoffUrl.`);
+    if (boxes.length) return fix(`A box is ticked that saves the card or signs up for something (“${clip(boxes[0]!, LIMITS.control)}”). Untick it and take a new browser_snapshot, or stop with status needs_owner and give handoffUrl.`);
     const lines = cartLines(this.fullView);
     const hash = cartHash(target.merchant, total.money, lines);
     const dup = card.ledger.duplicate(target.merchant, hash);

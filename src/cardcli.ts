@@ -2,6 +2,7 @@ import { cardProblem, capsFromSettings, expiryText, parseExpiry, CardStore, type
 import { formatMoney } from "./paymentrules.ts";
 import type { Ledger } from "./payments.ts";
 import { ProfileError } from "./profile.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The owner's local command for the payment card: npm run card -- set|list|enable|disable|delete|payments|clear. The card number, expiry
 // and security code are typed at hidden terminal prompts, never given as an argument (shell history, process list) and never through
@@ -39,14 +40,14 @@ export async function cardCli(argv: string[], d: CardCliDeps): Promise<number> {
   try {
     if (cmd === "set") {
       const currency = (flag(args, "currency") ?? "CHF").trim().toUpperCase();
-      const label = (flag(args, "label") ?? "Card").trim().slice(0, 20) || "Card";
+      const label = (flag(args, "label") ?? "Card").trim().slice(0, LIMITS.name) || "Card";
       const pan = (await d.readHidden("Card number (hidden): ")).replace(/[\s-]/g, "");
       if (!/^\d+$/.test(pan)) return fail(d, "Not saved: the card number is digits only.");
       const exp = parseExpiry(await d.readHidden("Expiry, month and year like 12/29 (hidden): "));
       if (!exp) return fail(d, "Not saved: the expiry date is a month and year like 12/29.");
       const cvc = (await d.readHidden("Security code (hidden): ")).trim();
       const holder = (await d.readHidden("Name on the card, if a payment form asks for it (hidden, Enter to skip): ")).trim();
-      const card: CardRecord = { pan, ...exp, cvc, label, last4: pan.slice(-4), currency, ...(holder ? { holder: holder.slice(0, 60) } : {}) };
+      const card: CardRecord = { pan, ...exp, cvc, label, last4: pan.slice(-4), currency, ...(holder ? { holder: holder.slice(0, LIMITS.name) } : {}) };
       const problem = cardProblem(card, d.now);
       if (problem) return fail(d, `Not saved: ${problem}.`);
       await d.store.save(card);

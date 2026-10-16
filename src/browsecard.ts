@@ -1,7 +1,7 @@
 import { expiryText, maskCard, type CardInfo, type CardRecord } from "./card.ts";
 import { clip } from "./format.ts";
 import { formatMoney, type FieldKind, type Money } from "./paymentrules.ts";
-import { cleanText } from "./sanitize.ts";
+import { cleanText, LIMITS } from "./sanitize.ts";
 
 // The state of a card payment inside one browse run (browseguard.ts decides every call; the rules are paymentrules.ts). One per guard.
 // The card's plaintext exists in `card` only between the owner's typed yes and the pay click (or the end of the run).
@@ -45,7 +45,7 @@ export class PayRun {
 // The text the owner and the question writer read before a payment. All of it from code; the cart lines are page text and are cleaned and cut.
 // No card number, expiry or security code is in it, only the label, the last four digits and the currency.
 export function payDetails(a: { merchant: string; psp: string[]; money: Money; card: CardInfo; id: string; cart: readonly string[]; task: string; prior: string[] }): string {
-  const cart = a.cart.slice(0, 6).map((l) => `• ${clip(cleanText(l, { line: true }).text, 90)}`);
+  const cart = a.cart.slice(0, 6).map((l) => `• ${clip(cleanText(l, { line: true }).text, LIMITS.gist)}`);
   return [
     "💳 Card payment approval: only a typed YES pays",
     `Merchant: ${a.merchant}`,
@@ -56,7 +56,7 @@ export function payDetails(a: { merchant: string; psp: string[]; money: Money; c
     "Cart (from the page):",
     ...(cart.length ? cart : ["• (no lines with an amount)"]),
     ...(a.prior.length ? [`Earlier payments for this cart: ${a.prior.join(", ")}`] : []),
-    `Task: ${clip(cleanText(a.task, { line: true }).text, 200)}`,
+    `Task: ${clip(cleanText(a.task, { line: true }).text, LIMITS.preview)}`,
     "Approving lets the assistant type the card into that page and click pay once; the payment is then confirmed in the card's own app, where the amount is shown.",
   ].join("\n");
 }

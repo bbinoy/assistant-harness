@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readAudit } from "../src/audit.ts";
+import { makeApprove } from "../src/approvalask.ts";
 import type { Verdict } from "../src/autojudge.ts";
 import { browse, browseSystem } from "../src/browse.ts";
 import { BrowseGuard } from "../src/browseguard.ts";
@@ -566,4 +567,29 @@ test("frames: a card goes into a payment frame only when the browser's frame lis
   r.g.shape(`${B}snapshot`, {}, framed("f1e4"));
   evil = true;
   assert.match(((await step(r, "click", { target: "e8" })).res as Denied).message, /Nothing was clicked: .*frame from evil\.example/);
+});
+
+test("the real asking path: the audited ask holds the placeholder and the code-written details, the approval call is the placeholder, and a model-written question must carry the facts", async () => {
+  const { access } = await newAccess();
+  const g = new BrowseGuard({ mode: "owner", task: "buy the ticket", outDir: join(tmpdir(), "nope"), resolver: publicDns, card: access });
+  let typedYes: boolean | undefined;
+  const approve = makeApprove(async () => 1, {
+    request: (async (_send: unknown, _d: unknown, _call: unknown, _abort: unknown, o: { typedYes?: boolean; question?: string }) => ((typedYes = o.typedYes), { approved: true })) as never,
+    compose: async (q) => ({ text: `Pay shop.test? ${q.details.includes("Card payment approval") ? "ok" : ""}`, ms: 1, by: "model" as const }),
+  });
+  const judge = async (): Promise<Verdict> => ({ decision: "auto", reason: "test" });
+  const canUse = makeCanUseTool(approve, "browse", undefined, "buy", judge, g);
+  const r = { g, canUse } as unknown as Rig;
+  await toPsp(r);
+  const res = (await canUse(`${B}type`, { target: "e4", text: "{{card:number}}" }, opts)) as Allowed;
+  assert.equal(res.behavior, "allow");
+  assert.equal(res.updatedInput.text, PAN);
+  assert.equal(typedYes, true, "request() is told the question needs a typed yes");
+  const asked = readAudit((e) => e.tool === `${B}type` && e.decision === "approval-asked").at(-1)!;
+  assert.deepEqual(asked.meta?.args, { target: "e4", text: "{{card:number}}" });
+  assert.match(String(asked.meta?.details), /Merchant: shop\.test/);
+  assert.match(String(asked.meta?.details), /Total \(read from the page by code, not checked by the shop\): CHF 45\.00/);
+  assert.ok(![PAN, EXPIRY, CVC].some((v) => JSON.stringify(asked).includes(v)));
+  const outcome = readAudit((e) => e.tool === `${B}type` && e.decision === "approval-outcome").at(-1)!;
+  assert.equal(outcome.meta?.argsEqual, true);
 });

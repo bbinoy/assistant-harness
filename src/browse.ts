@@ -15,7 +15,7 @@ import { clip } from "./format.ts";
 import { isPaused } from "./pause.ts";
 import { loadProfile, type Profile } from "./profile.ts";
 import { OWNER_KEY } from "./send.ts";
-import { cleanText } from "./sanitize.ts";
+import { cleanText, LIMITS } from "./sanitize.ts";
 import { adoptShots, newShotsDir } from "./shots.ts";
 import { OWNER, settings } from "./settings.ts";
 
@@ -72,6 +72,7 @@ export interface BrowseResult {
   commits: number;
 }
 
+const ANSWER_MAX = 2500; // the worker's answer, as the chat run reads it
 const clean1 = (s: unknown, max: number) => clip(cleanText(String(s ?? "")).text, max);
 const goodUrl = (u: unknown): string | undefined => (typeof u === "string" && !addressProblem(u) ? clip(u, 500) : undefined);
 
@@ -80,7 +81,7 @@ const goodUrl = (u: unknown): string | undefined => (typeof u === "string" && !a
 export function sanitizeResult(structured: unknown, fallbackText: string, guard: Pick<BrowseGuard, "steps" | "commits"> & { scrub?: (text: string) => string }): BrowseResult {
   const o = (structured && typeof structured === "object" ? structured : {}) as Record<string, unknown>;
   const status = o.status === "done" || o.status === "needs_owner" || o.status === "failed" ? o.status : "failed";
-  const answer = clean1(guard.scrub ? guard.scrub(typeof o.answer === "string" ? o.answer : fallbackText) : typeof o.answer === "string" ? o.answer : fallbackText, 2500); // a card detail the worker repeated (an error that echoed it) never reaches the chat
+  const answer = clean1(guard.scrub ? guard.scrub(typeof o.answer === "string" ? o.answer : fallbackText) : typeof o.answer === "string" ? o.answer : fallbackText, ANSWER_MAX); // a card detail the worker repeated (an error that echoed it) never reaches the chat
   const sources = (Array.isArray(o.sources) ? o.sources : []).map(goodUrl).filter((u): u is string => !!u).slice(0, 8);
   const handoffUrl = goodUrl(o.handoffUrl);
   return { status, answer: answer || "(no answer)", sources, ...(handoffUrl ? { handoffUrl } : {}), steps: guard.steps, commits: guard.commits };
@@ -137,19 +138,19 @@ export async function browse(ctx: BrowseContext, rawTask: string, o: { resolver?
   // The owner's payment card goes to the owner's chat run only, like the profile: not a group, not a wake-up. It is a handle (last four, a way to
   // open the card after a typed yes), not the card. A store that cannot be read, a kill switch that is on or a cap of 0 mean no card.
   const ownerChat = ctx.mode === "owner" && ctx.key === OWNER_KEY;
-  const card = ownerChat ? (o.card === undefined ? await openCardAccess({ onProblem: (reason) => audit("browse_run", "card-unavailable", "browse", { reason: reason.slice(0, 120) }) }) : (o.card ?? undefined)) : undefined;
+  const card = ownerChat ? (o.card === undefined ? await openCardAccess({ onProblem: (reason) => audit("browse_run", "card-unavailable", "browse", { reason: reason.slice(0, LIMITS.reason) }) }) : (o.card ?? undefined)) : undefined;
   card?.ledger.recover(); // a payment clicked in a run that never ended is unconfirmed now
   const cdpPort = vision === "click" || card ? await freePort() : undefined; // a card run needs the browser's own list of frames
   const shotsDir = vision !== "off" ? newShotsDir(o.now) : undefined;
   // The owner's saved details go to the owner's chat run only: not a group, not a wake-up. A profile that cannot be read is left out (and audited).
-  const profile = ctx.mode === "owner" && ctx.key === OWNER_KEY ? (o.profile === undefined ? await loadProfile(undefined, (reason) => audit("browse_run", "profile-unavailable", "browse", { reason: reason.slice(0, 120) })) : (o.profile ?? undefined)) : undefined;
+  const profile = ctx.mode === "owner" && ctx.key === OWNER_KEY ? (o.profile === undefined ? await loadProfile(undefined, (reason) => audit("browse_run", "profile-unavailable", "browse", { reason: reason.slice(0, LIMITS.reason) })) : (o.profile ?? undefined)) : undefined;
   const guard = new BrowseGuard({ mode: ctx.mode, task, outDir, resolver: o.resolver, vision, shotsDir, profile, card, frames: o.frames ?? (card && cdpPort ? cdpFrames(cdpPort) : undefined), ...(cdpPort ? { cdpPort } : {}), ...(vision === "click" && cdpPort ? { probe: o.probe ?? cdpProbe(cdpPort) } : {}) });
   const started = Date.now();
   try {
     const r = await ctx.run(browsePrompt(task), guard);
     const result = sanitizeResult(r.structured, r.text, guard);
     const paid = guard.finishPayment(); // what the owner must know about a payment, from code and first, so a long answer cannot cut it
-    if (paid) result.answer = clean1(`${paid} ${result.answer}`, 2500);
+    if (paid) result.answer = clean1(`${paid} ${result.answer}`, ANSWER_MAX);
     // The screenshots move into the turn of the conversation that asked (removed when it ends); a wake-up has none to give them to.
     const shots = ctx.key ? adoptShots(ctx.key, guard.kept, shotCaptions(r.structured)) : [];
     if (shots.length) result.shots = shots.map((s) => ({ id: s.id, caption: s.caption }));
@@ -160,7 +161,7 @@ export async function browse(ctx: BrowseContext, rawTask: string, o: { resolver?
     audit("browse_run", "failed", "browse", { mode: ctx.mode, seconds: Math.round((Date.now() - started) / 1000), steps: guard.steps, error: msg });
     const failed = sanitizeResult({ status: "failed", answer: `The browser run stopped: ${msg}` }, "", guard);
     const paid = guard.finishPayment();
-    if (paid) failed.answer = clean1(`${paid} ${failed.answer}`, 2500);
+    if (paid) failed.answer = clean1(`${paid} ${failed.answer}`, ANSWER_MAX);
     return resultMessage(failed);
   } finally {
     guard.finishPayment(); // the card is dropped whatever happened (the notes above are for the owner)

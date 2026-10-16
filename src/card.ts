@@ -3,6 +3,7 @@ import { luhnValid } from "./browserules.ts";
 import { Ledger } from "./payments.ts";
 import { ProfileError, ProfileStore } from "./profile.ts";
 import { dataPath, readText, writeText } from "./state.ts";
+import { LIMITS } from "./sanitize.ts";
 import { settings } from "./settings.ts";
 
 // The owner's dedicated debit card for the browse worker: the card number, expiry and security code in the SAME sealed file as the saved
@@ -52,7 +53,7 @@ export const expiryText = (c: Pick<CardRecord, "expMonth" | "expYear">, long = f
 export function cardOf(raw: unknown): CardRecord | undefined {
   const o = raw as Partial<CardRecord> | null | undefined;
   if (!o || typeof o !== "object" || typeof o.pan !== "string" || typeof o.cvc !== "string" || typeof o.currency !== "string") return undefined;
-  const c: CardRecord = { pan: o.pan, expMonth: Number(o.expMonth), expYear: Number(o.expYear), cvc: o.cvc, label: typeof o.label === "string" && o.label ? o.label.slice(0, 20) : "Card", last4: o.pan.slice(-4), currency: o.currency, ...(typeof o.holder === "string" && o.holder ? { holder: o.holder.slice(0, 60) } : {}) };
+  const c: CardRecord = { pan: o.pan, expMonth: Number(o.expMonth), expYear: Number(o.expYear), cvc: o.cvc, label: typeof o.label === "string" && o.label ? o.label.slice(0, LIMITS.name) : "Card", last4: o.pan.slice(-4), currency: o.currency, ...(typeof o.holder === "string" && o.holder ? { holder: o.holder.slice(0, LIMITS.name) } : {}) };
   return luhnValid(c.pan) && c.expMonth >= 1 && c.expMonth <= 12 && /^\d{3,4}$/.test(c.cvc) && /^[A-Z]{3}$/.test(c.currency) ? c : undefined;
 }
 
