@@ -84,12 +84,15 @@ export function bestWindow(levels: number[], max = MAX_SECONDS): { from: number;
   let bestScore = -Infinity;
   // Most speech wins, and a long silence inside the window costs more than the frames it lacks: a stretch of continuous talking beats
   // one with a pause in the middle (or music that fades in and out around a few words). Ties keep the earliest stretch.
+  // Speech rises and falls from syllable to syllable; a steady tone or hum (an intro jingle, a held note) does not, so a loud frame only counts
+  // when the level moves by a dB or more next to it.
+  const lively = levels.map((l, i) => Math.abs(l - (levels[i - 1] ?? l)) >= 1 || Math.abs(l - (levels[i + 1] ?? l)) >= 1);
   for (let s = 0; s + w <= levels.length; s++) {
     let voiced = 0;
     let run = 0;
     let longest = 0;
     for (let i = s; i < s + w; i++) {
-      if (levels[i]! > gate) (voiced++, (run = 0));
+      if (levels[i]! > gate) (lively[i] && voiced++, (run = 0));
       else longest = Math.max(longest, ++run);
     }
     const score = voiced - 2 * Math.max(0, longest - 5); // pauses up to half a second are speech rhythm

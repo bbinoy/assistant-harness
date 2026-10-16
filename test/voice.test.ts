@@ -299,6 +299,12 @@ test("clip: an audio file must really be audio (no video, no fake mp3); a long o
 test("clip: for a long file the best stretch has continuous speech, not the start (a hum, a long pause)", async () => {
   const hum = (s: number) => new Int16Array(s * RATE).map((_, i) => Math.round(120 * Math.sin(i / 9)));
   const pcm = new Int16Array([...hum(40), ...speech(12), ...hum(40)]);
+  const tone = (s: number) => new Int16Array(s * RATE).map((_, i) => Math.round(9000 * Math.sin(i / 11))); // a loud steady intro jingle: loud, but not speech
+  const withJingle = new Int16Array([...tone(25), ...speech(12)]);
+  const j = await buildReference(join(tmp, "in"), fakeClip(withJingle), { file: true });
+  const jb = j.wav.subarray(44);
+  const js = new Int16Array(jb.buffer.slice(jb.byteOffset, jb.byteOffset + jb.length));
+  assert.ok(js.filter((v) => Math.abs(v) > 2000).length / js.length > 0.3 && j.seconds < 14, "the jingle is skipped");
   const ref = await buildReference(join(tmp, "in"), fakeClip(pcm), { file: true });
   const body = ref.wav.subarray(44);
   const samples = new Int16Array(body.buffer.slice(body.byteOffset, body.byteOffset + body.length));
