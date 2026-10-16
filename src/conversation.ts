@@ -140,6 +140,7 @@ export function createPipeline(deps: PipelineDeps) {
       let told: string;
       if (c.kind === "reaction") {
         if (!t.target) return "Nothing to react to.";
+        if (t.target.author === deps.account) return "That is your own message; do not react to it."; // the one rule: no emoji on its own messages
         void signal.react(c.emoji, t.target, conv.groupId);
         state.reacted = true;
         told = "Reacted.";
@@ -181,7 +182,7 @@ export function createPipeline(deps: PipelineDeps) {
     const chosen = splitVoice(replied);
     const { reaction, text } = splitReaction(chosen.text);
     await d.send({ kind: "text", text, voice: !!chosen.voice }, false);
-    if (reaction && t.target && !t.reaction) await d.send({ kind: "reaction", emoji: reaction }, false); // never an emoji for an emoji: a reaction turn does not answer with one (no ping-pong)
+    if (reaction && t.target) await d.send({ kind: "reaction", emoji: reaction }, false);
     else if (!t.reaction && !d.state.reacted) status(conv, "✅", t.target); // a reaction the model already put on that message stays
   }
 
