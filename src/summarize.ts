@@ -4,6 +4,7 @@ import { haikuOptions } from "./haiku.ts";
 import { fence } from "./fence.ts";
 import type { Sent, Summarize } from "./messages.ts";
 import { OWNER, settings } from "./settings.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The small model that folds old messages into the log's one-line summary (messages.ts).
 
@@ -19,7 +20,7 @@ const summaryPrompt = (previous: string | undefined, old: readonly Sent[], words
   [
     `Summarize in at most ${words} words. ${OWNER} is the owner.`,
     previous ? `Previous summary:\n${fence("previous_summary", previous)}` : "",
-    `Messages now folded in (oldest first):\n${fence("messages", old.map((m) => `[${m.at.slice(0, 16)} ${m.kind}] ${m.text.slice(0, 200).replace(/\s+/g, " ")}`).join("\n").slice(0, MAX_INPUT_CHARS))}`,
+    `Messages now folded in (oldest first):\n${fence("messages", old.map((m) => `[${m.at.slice(0, 16)} ${m.kind}] ${m.text.slice(0, LIMITS.preview).replace(/\s+/g, " ")}`).join("\n").slice(0, MAX_INPUT_CHARS))}`,
   ]
     .filter(Boolean)
     .join("\n\n");

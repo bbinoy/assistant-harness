@@ -8,6 +8,7 @@ import { MAX_NOTE_CHARS, type Note } from "./notes.ts";
 import { settings } from "./settings.ts";
 import { readText } from "./state.ts";
 import { summarizeWithHaiku } from "./summarize.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // Everything a group has: its own notes (what members asked the assistant to remember there) and its own
 // message history, in the same formats as the owner's, but in separate places that nothing private reads
@@ -77,7 +78,7 @@ export function recordGroup(groupId: string, kind: Kind, ts: number, text: strin
 export const groupHistorySince = (groupId: string, sinceIso?: string): Sent[] => messagesSince(sinceIso, groupLogFile(groupId));
 
 const MAX_UNSEEN = 60;
-const lineOf = (m: Sent) => `[${new Date(m.at).toTimeString().slice(0, 5)}] ${m.kind === "chat" ? `${settings.assistant}: ` : m.kind === "edit" ? "(edited an earlier message, this is its new text) " : ""}${m.text.replace(/\n+/g, " / ").slice(0, 600)}`;
+const lineOf = (m: Sent) => `[${new Date(m.at).toTimeString().slice(0, 5)}] ${m.kind === "chat" ? `${settings.assistant}: ` : m.kind === "edit" ? "(edited an earlier message, this is its new text) " : ""}${m.text.replace(/\n+/g, " / ").slice(0, LIMITS.logLine)}`;
 
 // The lines a run should be shown, oldest first. A fresh session gets the last n lines. A resumed one already
 // holds everything up to `since` (and the assistant's own replies), so it gets only what members wrote after

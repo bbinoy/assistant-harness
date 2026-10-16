@@ -17,6 +17,7 @@ import type { OwnerProfile } from "./profiles.ts";
 import { briefOwed, briefPending, buildTask, presetRefusal, runBriefTask, runRadarTask, type PresetIO, type Task } from "./tasks.ts";
 import { OWNER, settings } from "./settings.ts";
 import { MIN_GAP_MINUTES } from "./radar-rules.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The clock half of the gate (gate.ts). On every heartbeat tick, for the owner's chat and for every group the owner
 // is in, whose next look has come (or where something was said or a note changed since the last look), the gate is
@@ -233,7 +234,7 @@ export function createWakeups(deps: WakeDeps) {
       return runPreset(conv, task, st, now, () => recordWake(pipeline, conv, out.nextCheckMinutes, now));
     }
     const result = await act(conv, task.instructions, now).catch((e) => (console.error(`wake: ${conv.kind} run failed:`, (e as Error).message), "failed" as const));
-    pipeline.record(conv, "action", Date.now(), `wake-up: ${task.instructions.slice(0, 200)} → ${result === "posted" ? "posted" : result === "silent" ? "stayed silent" : "failed"}`);
+    pipeline.record(conv, "action", Date.now(), `wake-up: ${task.instructions.slice(0, LIMITS.preview)} → ${result === "posted" ? "posted" : result === "silent" ? "stayed silent" : "failed"}`);
     audit("wake", result, source(conv));
     recordWake(pipeline, conv, out.nextCheckMinutes, now); // after the act: notes it wrote are not news
     return result;

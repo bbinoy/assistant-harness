@@ -147,5 +147,5 @@ export const cleanIncoming = (m: IncomingMessage): IncomingMessage => ({
   ...m,
   text: clean("message", m.text, { max: LIMITS.message }),
   ...(m.fromName ? { fromName: oneLine("group member name", m.fromName, LIMITS.name) } : {}),
-  ...(m.quote ? { quote: { ...m.quote, text: clean("quoted message", m.quote.text, { max: LIMITS.line }) } } : {}),
+  ...(m.quote ? { quote: { ...m.quote, text: clean("quoted message", m.quote.text, { max: LIMITS.quote }) } } : {}),
 });

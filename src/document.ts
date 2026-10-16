@@ -3,7 +3,7 @@ import { MAX_FILE_BYTES } from "@ted-personal-assistant/signal";
 import { AUDIO_FILE_MAX_SECONDS, audioMagic, MAX_AUDIO_FILE_BYTES, type AudioInfo } from "@ted-personal-assistant/signal/voice";
 import { looksLikeSpeech } from "@ted-personal-assistant/signal/tts";
 import { fence } from "./fence.ts";
-import { oneLine } from "./sanitize.ts";
+import { oneLine, LIMITS } from "./sanitize.ts";
 
 // Files people send that are not pictures, made ready for the model, the way image.ts does for pictures: the BYTES decide what
 // a file is (never its name or the type the sender claimed), it is read only from the one file signal-cli saved (the caller
@@ -19,7 +19,7 @@ export type Document =
 
 export const MAX_DOCUMENTS = 3; // per turn, newest first (a PDF is thousands of tokens)
 export const MAX_PDF_PAGES = 100; // what the API accepts in one request
-export const MAX_TEXT_BYTES = 200_000; // a longer text file is cut here, with a note
+export const MAX_TEXT_BYTES = LIMITS.textFile; // a longer text file is cut here, with a note
 export const MAX_PDF_TOTAL_BYTES = 22_000_000; // PDFs of one turn together: the API refuses a request over 32 MB, and base64 is a third bigger
 const AUDIO_EXTENSIONS = ["mp3", "m4a", "wav", "ogg", "oga", "opus", "aac", "flac", "aif", "aiff", "amr", "wma", "weba"];
 const TEXT_EXTENSIONS = ["txt", "md", "csv", "json", "log", "ics", "vcf"];

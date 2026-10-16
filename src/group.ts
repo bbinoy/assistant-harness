@@ -30,8 +30,6 @@ import { OWNER, settings } from "./settings.ts";
 // the group can ask it to remember or forget things; a nightly dream (groupdream.ts) tidies the group's notes
 // from the group's own words, touching nothing else.
 
-const MAX_TEXT = 600;
-
 // Pure: who is speaking, as the model should see it. The owner is named; others are labelled by their
 // own profile name (untrusted text, kept short and single-line), or "a member".
 export function speaker(m: { fromName?: string; isOwner: boolean }): string {
@@ -161,7 +159,7 @@ export function createGroupBrain(brain: Brain) {
   return async function onMessage(m: GroupMessage, now = new Date()): Promise<void> {
     const conv = group(m.groupId);
     // Cleaned again here (idempotent) so a caller that skipped the door in conversation.ts still records clean text.
-    const line = m.reaction ? `${speaker(m)} reacted ${oneLine("reaction", m.reaction.emoji, 16)} to: ${defuseSpeakers(clean("reaction", m.reaction.on, { max: 200 }))}` : `${speaker(m)}: ${defuseSpeakers(clean("group message", m.text, { max: MAX_TEXT }))}`;
+    const line = m.reaction ? `${speaker(m)} reacted ${oneLine("reaction", m.reaction.emoji, 16)} to: ${defuseSpeakers(clean("reaction", m.reaction.on, { max: LIMITS.preview }))}` : `${speaker(m)}: ${defuseSpeakers(clean("group message", m.text, { max: LIMITS.logLine }))}`;
     // A message its author took back: a marker in the log, a pending address of it forgotten, nothing said, nothing run.
     if (m.deletion) {
       const st = state.get(m.groupId) ?? {};
@@ -176,7 +174,7 @@ export function createGroupBrain(brain: Brain) {
     let edit: { before?: string } | undefined;
     if (m.edit) {
       const e = m.edit;
-      const before = e.prior === undefined || !e.pending ? e.prior : `${speaker(m)}: ${defuseSpeakers(clean("group message", e.prior, { max: MAX_TEXT }))}`;
+      const before = e.prior === undefined || !e.pending ? e.prior : `${speaker(m)}: ${defuseSpeakers(clean("group message", e.prior, { max: LIMITS.logLine }))}`;
       if (before !== undefined && sameText(before, line)) return void console.log("group: edit changes nothing, ignored");
       pipeline.record(conv, "edit", m.timestamp, line, { by: m.author, of: e.targetTimestamp });
       if (e.pending) {
@@ -194,7 +192,7 @@ export function createGroupBrain(brain: Brain) {
     if (!st.running && !isPaused(now) && !budgetSpent()) warm?.(conv, false);
     // The message that addressed us goes to the model whole (a long message too); the 600-character line is for the log and the gate's view.
     const asked = m.reaction ? line : `${speaker(m)}: ${defuseSpeakers(clean("group message", m.text, { max: LIMITS.message }))}`;
-    if (direct) st.addressed = { line: asked, quote: { text: m.text.slice(0, 200), author: m.author ?? "", timestamp: m.timestamp }, incoming: m.quote, voice: !!m.voice, picture: m.picture, document: m.document, at: now.getTime(), edit }; // sticky until answered, or until it is too old to answer (GROUP_STICKY_MINUTES)
+    if (direct) st.addressed = { line: asked, quote: { text: m.text.slice(0, LIMITS.preview), author: m.author ?? "", timestamp: m.timestamp }, incoming: m.quote, voice: !!m.voice, picture: m.picture, document: m.document, at: now.getTime(), edit }; // sticky until answered, or until it is too old to answer (GROUP_STICKY_MINUTES)
     // Still waiting for an answer to a direct address? (It lapses after GROUP_STICKY_MINUTES: answering hours later would be odd.)
     const pending = () => {
       if (st.addressed && now.getTime() - st.addressed.at > stickyMs()) st.addressed = undefined;

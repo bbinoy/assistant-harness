@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Agent, fetch as undiciFetch } from "undici";
+import { LIMITS } from "./sanitize.ts";
 
 // Direct MCP client for Mailbird's local server: no model call, no mcp-remote.
 // Connection details come from the same entry Claude Code uses, read here so the
@@ -73,7 +74,7 @@ export class Mailbird {
     // A hung call must not stall the heartbeat forever: fail after 60s, reconnect next time.
     const res: any = await this.client!.callTool({ name, arguments: args }, undefined, { timeout: 60_000 });
     const text: string = res.content?.find((c: any) => c.type === "text")?.text ?? "";
-    if (res.isError) throw new Error(`mailbird ${name} failed: ${text.slice(0, 200)}`);
+    if (res.isError) throw new Error(`mailbird ${name} failed: ${text.slice(0, LIMITS.preview)}`);
     try {
       return JSON.parse(text) as T;
     } catch {

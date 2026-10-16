@@ -14,6 +14,7 @@ import { isPaused, localDay } from "./pause.ts";
 import { dreamSystem } from "./persona.ts";
 import { OWNER, settings } from "./settings.ts";
 import { readJson, writeJson } from "./state.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The dream: once a day, before the daily brief, a model with NO tools reads what the owner said
 // since the last dream (their messages and reactions) next to the current notes, and proposes
@@ -44,7 +45,7 @@ export function conversationLines(messages: readonly Sent[]): { lines: string[];
   for (const m of foldEdits(withoutDeleted(messages))) {
     if (m.kind === "owner") { lines.push(`[${hhmm(m.at)}] ${OWNER}: ${m.text.replace(/\n+/g, " / ")}`); owner.push(m.text); }
     else if (m.kind === "reaction") { lines.push(`[${hhmm(m.at)}] ${OWNER} reacted ${m.text.replace(/\n+/g, " / ")}`); } // shows what was reacted to, which may quote mail: never evidence
-    else if (m.kind === "chat") lines.push(`[${hhmm(m.at)}] assistant (context only): ${m.text.slice(0, 300).replace(/\n+/g, " / ")}`);
+    else if (m.kind === "chat") lines.push(`[${hhmm(m.at)}] assistant (context only): ${m.text.slice(0, LIMITS.line).replace(/\n+/g, " / ")}`);
   }
   return { lines, ownerText: owner.join("\n") };
 }
@@ -73,7 +74,7 @@ export function groupConversation(messages: readonly Sent[]): { lines: string[];
   const member: string[] = [];
   for (const m of foldEdits(withoutDeleted(messages))) {
     if (m.kind === "member") { lines.push(`[${hhmm(m.at)}] ${m.text.replace(/\n+/g, " / ")}`); member.push(m.text); }
-    else if (m.kind === "chat") lines.push(`[${hhmm(m.at)}] assistant (context only): ${m.text.slice(0, 300).replace(/\n+/g, " / ")}`);
+    else if (m.kind === "chat") lines.push(`[${hhmm(m.at)}] assistant (context only): ${m.text.slice(0, LIMITS.line).replace(/\n+/g, " / ")}`);
   }
   return { lines, memberText: member.join("\n") };
 }
@@ -191,7 +192,7 @@ export function createDreamer(deps: { run?: Runner } = {}) {
       if (snap) console.log(`dream: ${describePlan(plan).join("; ")}`); // silent: logged here and in audit.jsonl, undoable from chat
     } catch (e) {
       console.error("dream: failed:", (e as Error).message);
-      audit("dream_run", "failed", "dream", { error: (e as Error).message.slice(0, 200) });
+      audit("dream_run", "failed", "dream", { error: (e as Error).message.slice(0, LIMITS.preview) });
     }
   }
 

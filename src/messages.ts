@@ -2,6 +2,7 @@ import { skipForCooldown } from "./cooldown.ts";
 import { statSync } from "node:fs";
 import { appendLine, dataPath, readText, writeText } from "./state.ts";
 import { settings } from "./settings.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // Every message the assistant sends on Signal, with its Signal timestamp: one append-only file.
 // It answers three questions the chat session cannot: what does a reaction (which carries only a
@@ -14,7 +15,6 @@ import { settings } from "./settings.ts";
 
 
 export const FILE = "logs/messages.jsonl"; // the owner's chat; a group has its own log, same format (groupstore.ts)
-const MAX_TEXT = 4000;
 const KEEP_AFTER_COMPACTION = 0.7; // compact down to this share of the limit, so it does not run on every message
 
 // What was said: the assistant's own messages (chat, notice, approval, draft, brief, other), the OWNER's messages
@@ -117,7 +117,7 @@ const compacting = new Set<string>(); // files being compacted: one run at a tim
 
 export function recordMessage(kind: Kind, ts: number, text: string, now = new Date(), file: string = FILE, extra: Extra = {}): void {
   if (!text.trim()) return;
-  appendLine(file, JSON.stringify({ ts, at: now.toISOString(), kind, text: text.slice(0, MAX_TEXT), ...(extra.by ? { by: extra.by } : {}), ...(extra.of ? { of: extra.of } : {}) } satisfies Sent));
+  appendLine(file, JSON.stringify({ ts, at: now.toISOString(), kind, text: text.slice(0, LIMITS.logEntry), ...(extra.by ? { by: extra.by } : {}), ...(extra.of ? { of: extra.of } : {}) } satisfies Sent));
 }
 
 // ---- edits and deletes ----
@@ -203,7 +203,7 @@ export function noticeLines(sent: readonly Sent[], now: Date, keep = 8): string[
   return sent
     .filter((m) => NOTICE_KINDS.has(m.kind) && now.getTime() - Date.parse(m.at) < NOTICE_AGE_MS)
     .slice(-keep)
-    .map((m) => `[${new Date(m.at).toTimeString().slice(0, 5)}] ${m.text.slice(0, 700).replace(/\s*\n\s*/g, " / ")}`);
+    .map((m) => `[${new Date(m.at).toTimeString().slice(0, 5)}] ${m.text.slice(0, LIMITS.logLine).replace(/\s*\n\s*/g, " / ")}`);
 }
 
 export const recentNotices = (now = new Date()) => noticeLines(readAll().sent, now);

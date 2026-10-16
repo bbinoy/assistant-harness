@@ -7,7 +7,7 @@ import type { Probe } from "./browsecdp.ts";
 import { clickProblem, MAX_POINT_CLICKS, MAX_SHOTS, nodeOfPoint, screenshotInput, validPoint } from "./browsevision.ts";
 import { audit } from "./audit.ts";
 import { clip } from "./format.ts";
-import { cleanText } from "./sanitize.ts";
+import { cleanText, LIMITS } from "./sanitize.ts";
 import { isJpeg, MAX_PICTURE_BYTES } from "./shots.ts";
 import { settings } from "./settings.ts";
 
@@ -49,7 +49,7 @@ interface FillIntent { ref: string; label: string; key: string; shown: string; s
 export interface FilledField { host: string; label: string; key: string; shown: string; sensitive: boolean }
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const SNAPSHOT_CAP = 24_000; // characters (~7k tokens) of one page view: bigger ones are cut with a visible marker (MCP results over 25k tokens would be written to a file the run cannot read)
+const SNAPSHOT_CAP = LIMITS.pageView; // bigger page views are cut with a visible marker
 const MAX_DENIED = 6;
 const AUTOFILL_SENSITIVE = /\b(cc-[a-z-]+|current-password|new-password|one-time-code)\b/i; // autocomplete tokens of card and login fields
 const nolabel = (s: string) => s.replace(/\s*:\s*$/, ""); // "Customer name:" as the page labels it

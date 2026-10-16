@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MAX_IMAGE_BYTES } from "@ted-personal-assistant/signal";
 import type { Document } from "./document.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // Pictures people send, made ready for the model: checked by their bytes (not the name or the claimed type), shrunk,
 // and wrapped as image content next to the text. The bytes live only in memory for the one turn: never in a log or a note.
@@ -66,7 +67,7 @@ export async function preparePicture(file: string, maxPixels: number = MAX_PIXEL
     if (statSync(out).size > MAX_SENT_BYTES) throw new Error("too big");
     return { mediaType: "image/jpeg", data: readFileSync(out).toString("base64") };
   } catch (e) {
-    console.error("picture: could not be prepared:", (e as Error).message.slice(0, 200));
+    console.error("picture: could not be prepared:", (e as Error).message.slice(0, LIMITS.preview));
     if (kind !== "heic" && bytes.length <= MAX_SENT_BYTES && side === Infinity) return { mediaType: kind, data: bytes.toString("base64") }; // no sips: send it as it is
     throw new Error("I couldn't open that picture. Try sending it again or as a JPEG.");
   } finally {

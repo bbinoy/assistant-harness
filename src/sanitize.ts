@@ -97,7 +97,22 @@ function collapse(text: string): { text: string; cut: number } {
 // Zalgo: a pile of combining marks on one letter. Real scripts stack a handful at most.
 const MARK_PILE = /(\p{M}{8})\p{M}+/gu;
 
-export const LIMITS = { name: 100, subject: 300, line: 2000, body: 20_000, message: 70_000, block: 100_000 } as const; // message: what a person typed to us, a long message included (64 KB of text and a note)
+// The text-length tiers, by purpose (docs/ARCHITECTURE.md, "Text length tiers"). Characters unless the name says bytes.
+export const LIMITS = {
+  name: 100, // a person's or sender's name: a label, one line
+  subject: 300, // a mail subject, the default for oneLine
+  preview: 200, // a short preview of a message, reaction target or log entry (thread quote, wake-up log, summary input, error text in an audit row)
+  line: 240, // one message as one line a model skims (gate and tail lines, helper-model context): the start says what it is about, and every extra character costs on every gate call
+  logLine: 600, // one message or ledger entry in a group or notice log shown in a prompt: room for a real sentence or two
+  quote: 1500, // the earlier message someone replies to, stored and shown as context
+  logEntry: 4000, // one entry kept in a conversation log file (messages.ts): the log stays small, the model-visible message is not cut here
+  body: 20_000, // a mail body or voice transcript
+  message: 70_000, // what a person typed to us, a long message included (64 KB of text and a note; pairs with MAX_LONG_TEXT_BYTES in packages/signal)
+  block: 100_000, // one fenced block of data in a prompt
+  args: 6000, // tool arguments in an audit row (audit size)
+  textFile: 200_000, // bytes of a text file shown to the model (the PDF cap is MAX_FILE_BYTES in packages/signal, 20 MB)
+  pageView: 24_000, // one browse page view (~7k tokens; MCP results over 25k tokens would be written to a file the run cannot read)
+} as const;
 const HARD_INPUT = 4_000_000; // the work itself is bounded, whatever comes in
 
 export interface CleanOptions {

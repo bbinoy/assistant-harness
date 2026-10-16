@@ -8,6 +8,7 @@ import { recentNotices } from "./messages.ts";
 import { radarInstructions, radarPrompt } from "./radar.ts";
 import { acceptMessages, MIN_GAP_MINUTES, WINDOW_MINUTES } from "./radar-rules.ts";
 import { settings } from "./settings.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The one Task type: everything the gate can start. `profile` is HOW the run may work (agent.ts PROFILES: policy source,
 // system prompt, skills, turns, budget, output schema), fixed in code. `after` is what happens with the result.
@@ -132,7 +133,7 @@ export async function runRadarTask(io: PresetIO, task: Task, st: LookState, now:
     return sentKeys.length ? "posted" : "quiet";
   } catch (e) {
     console.error("radar: run failed:", (e as Error).message);
-    audit("radar_run", "failed", "radar", { error: (e as Error).message.slice(0, 200) });
+    audit("radar_run", "failed", "radar", { error: (e as Error).message.slice(0, LIMITS.preview) });
     io.record(ledger.radarFailed((e as Error).message));
     return "failed";
   }
