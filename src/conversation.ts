@@ -8,6 +8,7 @@ import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
 import { documentNote, takeDocuments, type Document } from "./document.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
 import { holdQuote, holdVoiceNote, rememberSender } from "./voicenote.ts";
+import { TYPED_YES_NEEDED } from "./paymentrules.ts";
 import { OWNER_KEY, withSend, type Content, type SendSink } from "./send.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
 import { splitVoice, VOICE_FAILED_NOTE, voiceOption } from "./voicereply.ts";
@@ -469,6 +470,7 @@ export function createPipeline(deps: PipelineDeps) {
   // it was on (looked up by timestamp in the log) and decides what, if anything, it means.
   async function ownerReaction(conv: Conversation, r: IncomingReaction): Promise<void> {
     const outcome = deps.approvals.answerReaction(r.emoji, r.targetTimestamp, conv.key, r.from || r.fromUuid);
+    if (outcome === "needs_text") return void (await out.reply(TYPED_YES_NEEDED, { plain: true })); // a payment is not approved by a reaction
     if (outcome !== "ignored") return void console.log(`approval ${outcome} (by reaction)`);
     await enqueue(conv, async () => {
       console.log(`owner reacted ${r.emoji}`);

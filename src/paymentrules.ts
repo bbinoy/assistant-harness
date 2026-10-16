@@ -168,6 +168,7 @@ export function paymentOutcome(view: string): "confirmed" | "failed" | undefined
 
 // Pure. Is this reply, as typed, an unambiguous yes to a payment? The word yes (or ja, oui) alone or with one plain word of consent. Not an
 // emoji, not "ok" or "sure", not a sentence, not a question, not a transcript of a voice message (the caller checks that).
+export const TYPED_YES_NEEDED = "A payment needs a typed YES: reply YES to pay, or NO to cancel. A reaction does not count.";
 const TYPED_YES = /^(yes|ja|oui)( (please|pay|pay it|pay now|go ahead|do it|approved?|i approve|confirm|confirmed|bitte|zahlen|bezahlen|gerne|merci|payer))?$/;
 export function isTypedYes(text: string): boolean {
   if (/[?？]/.test(text)) return false;

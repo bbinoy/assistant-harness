@@ -5,6 +5,7 @@ import { audit } from "./audit.ts";
 import { judgeAnswer } from "./approvalmodel.ts";
 import type { OpenView, Recent } from "./approvalprompt.ts";
 import { recentChat } from "./recentchat.ts";
+import { isTypedYes, TYPED_YES_NEEDED } from "./paymentrules.ts";
 
 // Human-in-the-loop approvals over Signal. Several questions may be open at once; each is
 // answered by its own reaction or quoted reply, or by a plain yes / no for the newest chat one.
@@ -56,6 +57,7 @@ interface Open {
   askedAt: number;
   source: "chat" | "background" | "group";
   scope: string; // the conversation it was asked in (Conversation.key): an answer from another conversation never applies
+  typedYes: boolean; // a card payment: only a typed yes approves it (isTypedYes); never a reaction, an emoji, a voice message or the judge's own reading
 }
 const open = new Map<number, Open>();
 let openChat = 0; // open approvals (background ones too): they share the one warm judge
@@ -71,12 +73,17 @@ export function formatWait(minutes: number): string {
 const REACT_YES = new Set(["👍", "✅"]);
 const REACT_NO = new Set(["👎", "❌"]);
 
-// A reaction counts only if it is on an open "Approve?" message itself; it answers that one.
+// A reaction counts only if it is on an open "Approve?" message itself; it answers that one. A card payment is the exception: a 👍 never
+// approves it ("needs_text": the question stays open and the owner is told to type yes); a 👎 declines it like any other.
 export const OWNER_SCOPE = "owner";
-export function answerReaction(emoji: string, targetTimestamp: number, scope: string = OWNER_SCOPE, by?: string): "approved" | "declined" | "ignored" {
+export function answerReaction(emoji: string, targetTimestamp: number, scope: string = OWNER_SCOPE, by?: string): "approved" | "declined" | "ignored" | "needs_text" {
   const current = open.get(targetTimestamp);
   if (!current || current.done || current.scope !== scope) return "ignored";
   const e = emoji.replace(/[︎️]/g, ""); // drop variation selectors
+  if (current.typedYes && REACT_YES.has(e)) {
+    audit(current.call.tool, "answer-reaction-refused", current.source, { by, scope, question: current.shown });
+    return "needs_text";
+  }
   if (REACT_YES.has(e) || REACT_NO.has(e)) {
     audit(current.call.tool, "answer-reaction", current.source, { by, scope, approved: REACT_YES.has(e), question: current.shown });
     current.resolve({ approved: REACT_YES.has(e) });
@@ -121,10 +128,14 @@ async function read(text: string, onJudging: () => void, quote: { timestamp: num
   const found = quote && quote.timestamp !== 0 ? open.get(quote.timestamp) : undefined;
   const quoted = found?.scope === (ctx.scope ?? OWNER_SCOPE) ? found : undefined;
   const direct = quoted && !quoted.done ? quoted : live.length === 1 && !quote ? live[0] : undefined;
-  if (direct && (YES.has(t) || NO.has(t))) {
-    audit(direct.call.tool, "answer-fast", direct.source, { by: ctx.by, scope: direct.scope, reply: text, approved: YES.has(t), question: direct.shown });
-    direct.resolve({ approved: YES.has(t) });
-    return { outcome: YES.has(t) ? "approved" : "declined" };
+  // A card payment: the fast path approves only a typed yes (not 👍, ok, sure, and not a transcript of a voice message); any other yes is asked for again.
+  const typedOk = (o: Open) => !o.typedYes || (isTypedYes(text) && !ctx.voice);
+  if (direct && (YES.has(t) || NO.has(t) || (direct.typedYes && isTypedYes(text)))) {
+    if (!NO.has(t) && !typedOk(direct)) return audit(direct.call.tool, "answer-refused", direct.source, { by: ctx.by, scope: direct.scope, reply: text, question: direct.shown }), { outcome: "clarify", reply: TYPED_YES_NEEDED };
+    const approved = !NO.has(t);
+    audit(direct.call.tool, "answer-fast", direct.source, { by: ctx.by, scope: direct.scope, reply: text, approved, question: direct.shown });
+    direct.resolve({ approved });
+    return { outcome: approved ? "approved" : "declined" };
   }
   const ids = new Map(live.map((o, i) => [`A${i + 1}`, o]));
   const views: OpenView[] = live.map((o, i) => ({
@@ -133,6 +144,7 @@ async function read(text: string, onJudging: () => void, quote: { timestamp: num
     ageMs: Date.now() - o.askedAt,
     question: o.shown,
     args: isModifiable(o.call.tool) ? o.call.input : undefined,
+    typedYes: o.typedYes,
   }));
   const quotedId = quoted && [...ids].find(([, o]) => o === quoted)?.[0];
   onJudging();
@@ -147,7 +159,7 @@ async function read(text: string, onJudging: () => void, quote: { timestamp: num
     let declined = 0;
     for (const p of parts) {
       const o = ids.get(p.target);
-      if (!o || o.done || p.outcome === "other") continue;
+      if (!o || o.done || p.outcome === "other" || (p.outcome === "approve" && o.typedYes)) continue; // "yes to both" is no typed yes to a payment
       record(p.outcome === "approve" ? "approved" : "declined", o);
       o.resolve({ approved: p.outcome === "approve" });
       if (p.outcome === "approve") approved++;
@@ -180,10 +192,18 @@ async function read(text: string, onJudging: () => void, quote: { timestamp: num
     current.resolve({ approved: false });
     return { outcome: "declined" };
   }
+  if (j.outcome === "approve" && !typedOk(current)) {
+    record("refused", current); // the judge read a yes, but a payment needs the typed word itself
+    return { outcome: "clarify", reply: TYPED_YES_NEEDED };
+  }
   if (j.outcome === "approve") {
     record("approved", current);
     current.resolve({ approved: true });
     return { outcome: "approved" };
+  }
+  if (j.outcome === "approve_modified" && current.typedYes) {
+    record("refused", current);
+    return { outcome: "clarify", reply: TYPED_YES_NEEDED }; // a payment is never edited
   }
   if (j.outcome === "approve_modified") {
     const patched = applyChanges(call.tool, call.input, j.changes ?? []);
@@ -207,7 +227,7 @@ export function request(
   description: string,
   call: { tool: string; input: Record<string, unknown> },
   signal?: AbortSignal,
-  opts: { background?: boolean; question?: string; scope?: string } = {},
+  opts: { background?: boolean; question?: string; scope?: string; typedYes?: boolean } = {},
 ): Promise<Decision> {
   if (signal?.aborted) return Promise.resolve({ approved: false });
   const background = !!opts.background;
@@ -230,7 +250,7 @@ export function request(
       if (why) console.log(`approval ${why}: ${label}`);
       resolve(d);
     };
-    const entry: Open = { resolve: finish, label, call, background, ts: 0, done: false, shown, askedAt: Date.now(), source: opts.scope && opts.scope !== OWNER_SCOPE ? "group" : background ? "background" : "chat", scope: opts.scope ?? OWNER_SCOPE };
+    const entry: Open = { resolve: finish, label, call, background, ts: 0, done: false, shown, askedAt: Date.now(), source: opts.scope && opts.scope !== OWNER_SCOPE ? "group" : background ? "background" : "chat", scope: opts.scope ?? OWNER_SCOPE, typedYes: !!opts.typedYes };
     const onAbort = () => finish({ approved: false });
     const timer = setTimeout(
       () => finish({ approved: false }, `expired after ${formatWait(minutes)}${background ? " (background)" : ""}`),
