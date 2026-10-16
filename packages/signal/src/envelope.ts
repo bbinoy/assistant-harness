@@ -94,7 +94,7 @@ export interface ImageRef {
 /** Pictures larger than this (bytes) are not surfaced. */
 export const MAX_IMAGE_BYTES = 20_000_000;
 
-/** Other files larger than this (bytes) are not read; the sender is told. */
+/** Other files larger than this (bytes) are not read; the sender is told. Pairs with LIMITS.textFile in src/sanitize.ts (the part of a text file shown to the model). */
 export const MAX_FILE_BYTES = 20_000_000;
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"];
 
@@ -115,11 +115,11 @@ export interface LongTextRef {
 
 /** Signal's content type for the full text of a long message. */
 export const LONG_TEXT_TYPE = "text/x-signal-plain";
-/** The most of a long message that is read (bytes); the rest is cut. */
+/** The most of a long message that is read (bytes); the rest is cut. Pairs with LIMITS.message in src/sanitize.ts (70,000 characters: this plus the note), which must stay above it. */
 export const MAX_LONG_TEXT_BYTES = 64 * 1024;
 const isLongTextType = (a: any) => String(a?.contentType ?? "").split(";")[0]!.trim().toLowerCase() === LONG_TEXT_TYPE;
 
-const MAX_FILE_NAME = 200;
+const MAX_FILE_NAME = 200; // a file name is a label; pairs with LIMITS.preview in src/sanitize.ts
 
 // An attachment id becomes a file name, so only plain names pass (no path separators, nothing hidden).
 const safeId = (id: string) => /^[\w.-]{1,100}$/.test(id) && !id.startsWith(".");

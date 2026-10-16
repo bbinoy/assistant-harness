@@ -16,6 +16,7 @@ import { buildOptions } from "../src/agentrun.ts";
 import { compactOptions } from "../src/chatsession.ts";
 import { owner } from "../src/conversation.ts";
 import { NOTES_DIR } from "../src/notes.ts";
+import { LIMITS } from "../src/sanitize.ts";
 import { GROUPS_DIR, groupKey } from "../src/groupstore.ts";
 
 const OWNER = "+10000000000";
@@ -628,7 +629,7 @@ test("groups: a gate slower than the settling pause is waited for; a failing gat
   assert.equal(tagged.sent.length, 1);
 });
 
-test("groups: a long message that addressed us reaches the model whole (the 600-character line is only for the log)", async () => {
+test("groups: a long message that addressed us reaches the model whole (the LIMITS.logLine cut is only for the log)", async () => {
   const long = Array.from({ length: 300 }, (_, i) => `Point ${i} about the plan.`).join(" ");
   const dir = mkdtempSync(join(tmpdir(), "grp-long-"));
   writeFileSync(join(dir, "lt"), long);
@@ -637,5 +638,5 @@ test("groups: a long message that addressed us reaches the model whole (the 600-
   const r = rig({ longText: (m: any) => readLongText(m.longText, dir), run: async (build: (s?: string) => { prompt: string }) => (prompts.push(build().prompt), "ok") });
   await (r as any).pipelineOn(g, { from: "+15555550105", text: long.slice(0, 2000), timestamp: 3, direct: false, addressedToMe: true, longText: { id: "lt", size: long.length } });
   assert.ok(prompts[0]!.includes("Point 299 about the plan."));
-  assert.ok(r.recorded[0]!.length <= 700); // the log line is cut as before
+  assert.ok(r.recorded[0]!.length <= LIMITS.logLine + 100); // the log line is cut as before
 });

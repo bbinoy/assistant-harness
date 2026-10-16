@@ -8,6 +8,7 @@ import { groupHistorySince, groupScope, listGroups } from "./groupstore.ts";
 import { dreamSystem } from "./persona.ts";
 import { isPaused, localDay } from "./pause.ts";
 import { settings } from "./settings.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The dream of each group's notes: the same tidy-up as the owner's (dream.ts), over that group's notes and
 // that group's own words only, silently, once a day before the brief. Anything it changed is logged, and
@@ -48,7 +49,7 @@ export function createGroupDreamer(deps: { run?: DreamRunner } = {}) {
         if (snapshot) console.log(`group dream (${g.name || "a group"}): ${describePlan(plan).join("; ")}`); // silent: logged, undoable from chat
       } catch (e) {
         console.error("group dream: failed:", (e as Error).message);
-        audit("group_dream", "failed", "dream", { error: (e as Error).message.slice(0, 200) });
+        audit("group_dream", "failed", "dream", { error: (e as Error).message.slice(0, LIMITS.preview) });
       }
     }
   }

@@ -251,7 +251,7 @@ export function createPipeline(deps: PipelineDeps) {
       turn.timing?.mark("total");
       turn.timing?.report();
       console.error(background ? `agent error (${turn.background ? "wake-up" : "reaction"}):` : `${conv.kind}: run failed:`, (e as Error).message); // a reaction needs no apology
-      if (conv.kind === "group") audit("group_reply", "failed", "group", { error: (e as Error).message.slice(0, 200) });
+      if (conv.kind === "group") audit("group_reply", "failed", "group", { error: (e as Error).message.slice(0, LIMITS.preview) });
       let noticed = false;
       if (!background) status(conv, "⚠️", turn.target);
       // Someone is waiting: say what is wrong (but not over and over, in a group).
@@ -340,7 +340,7 @@ export function createPipeline(deps: PipelineDeps) {
     }
     console.log(`long message: ${got.text.length} chars from the attachment (body ${m.text.length} chars)`);
     const norm = (s: string) => s.replace(/\s+/g, " ").trim();
-    const head = norm(m.text).slice(0, 200);
+    const head = norm(m.text).slice(0, LIMITS.preview);
     const whole = !head || norm(got.text).startsWith(head) ? got.text : `${m.text}\n${got.text}`;
     return { ...rest, text: got.cut ? `${whole}\n${LONG_CUT_AT}` : whole };
   }
@@ -453,7 +453,7 @@ export function createPipeline(deps: PipelineDeps) {
           await runTurn(conv, {
             run: (hooks) => deps.runOwner(prompt, ms.map((x) => x.text).join("\n"), ms.flatMap((x) => x.picture ?? []).slice(-MAX_PICTURES), hooks, takeDocuments(ms.map((x) => x.document))),
             target: { author: last.from, timestamp: last.timestamp },
-            threadUnder: { text: last.text.slice(0, 200), author: last.from, timestamp: last.timestamp },
+            threadUnder: { text: last.text.slice(0, LIMITS.preview), author: last.from, timestamp: last.timestamp },
             hadQuote: ms.some((x) => x.quote),
             announce: true,
             timing: b.timing,
@@ -473,7 +473,7 @@ export function createPipeline(deps: PipelineDeps) {
     await enqueue(conv, async () => {
       console.log(`owner reacted ${r.emoji}`);
       const on = findMessage(r.targetTimestamp, conv.logFile);
-      record(conv, "reaction", now(), `${r.emoji} on: ${(on?.text ?? "an older message").slice(0, 200)}`);
+      record(conv, "reaction", now(), `${r.emoji} on: ${(on?.text ?? "an older message").slice(0, LIMITS.preview)}`);
       const prompt = reactionPrompt(r.emoji, on);
       await runTurn(conv, { run: () => deps.runOwner(prompt, prompt), target: { author: r.targetAuthor ?? deps.account, timestamp: r.targetTimestamp }, reaction: true, announce: false });
     });

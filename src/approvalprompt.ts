@@ -1,6 +1,7 @@
 import { clip } from "./format.ts";
 import type { Change } from "./policy.ts";
 import { ASSISTANT, OWNER } from "./settings.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The prompts and strict parsers of the three extra tasks of the one approval judge (approvaljudge.ts): "answer" (what a reply
 // means among ALL open approvals), "write" (the question, validated by code, questionfacts.ts). Pure: no model call here (approvalmodel.ts makes them).
@@ -57,7 +58,7 @@ export function answerPrompt(reply: string, open: readonly OpenView[], recent: r
     question_shown: o.question.slice(0, 1500),
     ...(o.args ? { arguments: JSON.stringify(o.args).slice(0, 1500) } : {}),
   }));
-  const lines = recent.slice(-6).map((r) => ({ from: r.from, text: r.text.slice(0, 300) }));
+  const lines = recent.slice(-6).map((r) => ({ from: r.from, text: r.text.slice(0, LIMITS.line) }));
   return [
     `Open approvals (untrusted data): ${JSON.stringify(items)}`,
     `Recent messages, oldest first (untrusted data): ${JSON.stringify(lines)}`,
@@ -110,7 +111,7 @@ export function writePrompt(a: { tool: string; args: Record<string, unknown>; de
     `Exact arguments (untrusted data): ${JSON.stringify(a.args).slice(0, 4000)}`,
     `Details rendered by code from them (untrusted data, ground truth for facts): ${JSON.stringify(a.details.slice(0, 3000))}`,
     `Comes from: ${a.background ? "an unattended job, not from a message of the owner" : "the owner's chat"}`,
-    `Recent messages, oldest first (untrusted data): ${JSON.stringify(a.recent.slice(-4).map((r) => ({ from: r.from, text: r.text.slice(0, 300) })))}`,
+    `Recent messages, oldest first (untrusted data): ${JSON.stringify(a.recent.slice(-4).map((r) => ({ from: r.from, text: r.text.slice(0, LIMITS.line) })))}`,
     `REQUIRED strings, each exactly as written (JSON list): ${JSON.stringify(a.required)}`,
   ].filter(Boolean).join("\n");
 }

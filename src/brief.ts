@@ -7,6 +7,7 @@ import { LAST_BRIEF } from "./notes.ts";
 import { localDay } from "./pause.ts";
 import { settings } from "./settings.ts";
 import { readJson, readText, writeJson, writeText } from "./state.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The daily brief's HOW (when it runs is the gate's and the backstop's, wake.ts). Its memory is local: the
 // last brief (memory/last-brief.md) and what the heartbeat did since (the audit log).
@@ -118,7 +119,7 @@ export async function runBriefAttempt(deps: BriefAttemptDeps, prompt: string, at
     return "delivered";
   } catch (e) {
     console.error("brief: failed:", (e as Error).message);
-    audit("daily_brief", "failed", "brief", { attempt, error: (e as Error).message.slice(0, 200) });
+    audit("daily_brief", "failed", "brief", { attempt, error: (e as Error).message.slice(0, LIMITS.preview) });
     if (e instanceof AuthError) {
       await deps.notify("My login expired, so the daily brief could not run. On the Mac, run `claude auth login`; I'll retry on the next heartbeat.");
     }

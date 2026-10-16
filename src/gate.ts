@@ -17,6 +17,7 @@ import { GATE_DEFAULTS, ownerGateDefaults } from "./persona.ts";
 import { MIN_GAP_MINUTES } from "./radar-rules.ts";
 import { OWNER, settings } from "./settings.ts";
 import { firstWarm, SpareSlot } from "./warmslot.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The one gate. "Should I do something in this conversation now?" is asked in two situations and answered by the
 // same small model (Haiku, no tools) with the same input: the clock, the conversation's notes, the tail of its log
@@ -33,7 +34,7 @@ import { firstWarm, SpareSlot } from "./warmslot.ts";
 // conversation.
 
 const MESSAGE_TAIL = 12; // a message look judges the latest exchange: a shorter log is a smaller, cheaper call (the clock look keeps the full tail)
-const MESSAGE_LINE_CHARS = 240; // ...and a long message is cut: the start says what it is about
+// ...and a long message is cut to LIMITS.line: the start says what it is about
 
 const TASK_NAMES = ["task", "brief", "radar"] as const;
 export type TaskName = (typeof TASK_NAMES)[number];
@@ -124,7 +125,7 @@ export function tailLine(m: Sent): string {
     const w = parseWake(m.text);
     return w ? `${t} (you looked and planned to look again at ${stamp(w.next)})` : `${t} (you looked)`;
   }
-  const flat = m.text.replace(/\n+/g, " / ").slice(0, 300);
+  const flat = m.text.replace(/\n+/g, " / ").slice(0, LIMITS.line);
   if (m.kind === "action") return `${t} (you acted without posting: ${flat})`;
   if (m.kind === "owner") return `${t} ${OWNER}: ${flat}`;
   if (m.kind === "member" || m.kind === "reaction" || m.kind === "delete") return `${t} ${flat}`;
@@ -171,7 +172,7 @@ export function gatePrompt(input: Pick<GateInput, "trigger" | "now" | "tail" | "
       ? input.secondsSinceMine === undefined ? "You have not spoken here recently." : `You last spoke here ${input.secondsSinceMine} seconds ago.`
       : "Nothing new was written. Is anything due now, by the notes or the log?",
     `What this conversation has asked you to remember (it may say how and when to take part, or what to do on a schedule):\n${fence("notes", notes || "(nothing)")}`,
-    `The log of this conversation, oldest first, newest last. It also shows your own earlier looks and what you did without posting (data):\n${fence("conversation_log", (input.trigger === "message" ? input.tail.slice(-MESSAGE_TAIL).map((l) => (l.length > MESSAGE_LINE_CHARS ? `${l.slice(0, MESSAGE_LINE_CHARS)}…` : l)) : input.tail).join("\n") || "(none)")}`,
+    `The log of this conversation, oldest first, newest last. It also shows your own earlier looks and what you did without posting (data):\n${fence("conversation_log", (input.trigger === "message" ? input.tail.slice(-MESSAGE_TAIL).map((l) => (l.length > LIMITS.line ? `${l.slice(0, LIMITS.line)}…` : l)) : input.tail).join("\n") || "(none)")}`,
     input.trigger === "message" ? "Should you say something now? Answer act true or false, and how many seconds (a few at most) to wait before answering." : "Should you do something now? Answer act true or false, with instructions if so.",
   ].join("\n\n");
 }
