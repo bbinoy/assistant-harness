@@ -1,0 +1,271 @@
+import { test, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildOptions } from "../src/agentrun.ts";
+import { classify } from "../src/policy.ts";
+import { flagFor } from "../src/toolmanifest.ts";
+import { holdQuote, holdVoiceNote, resetVoiceNotes } from "../src/voicenote.ts";
+import { withSend } from "../src/send.ts";
+import { voiceNow, type VoiceDeps } from "../src/voicetool.ts";
+import {
+  activeVoice, activeVoiceRel, buildReference, deleteVoice, listVoices, MAX_VOICES, sanitizeVoiceName, saveVoice, scopeRoot, setActiveVoice, voiceFiles,
+  type ClipTools,
+} from "@ted-personal-assistant/signal/tts";
+import { synthesizeQwen, stopQwen } from "@ted-personal-assistant/signal/tts";
+
+// The cloned voice: a library per conversation, built from voice notes received in that conversation, read by the speech provider per reply.
+
+const RATE = 24_000;
+const NOW = Date.UTC(2026, 9, 16, 12, 0, 0);
+const speech = (seconds: number): Int16Array => {
+  const out = new Int16Array(seconds * RATE);
+  for (let i = 0; i < out.length; i++) out[i] = Math.round(((Math.floor(i / (0.3 * RATE)) % 3 === 2 ? 300 : 9000) * Math.sin(i / 17)));
+  return out;
+};
+const silence = (seconds: number) => new Int16Array(seconds * RATE).map((_, i) => (i % 7) - 3);
+const noise = (seconds: number) => new Int16Array(seconds * RATE).map((_, i) => Math.round(4000 * Math.sin(i * 12.9898) * Math.cos(i * 4.1414)));
+
+const fakeClip = (pcm: Int16Array, text = "hello this is my own voice speaking"): ClipTools => ({ decode: async () => pcm, transcribe: async () => text });
+
+let tmp: string;
+let attachments: string;
+let deps: VoiceDeps;
+const mk = (clip: ClipTools = fakeClip(speech(12)), o: Partial<VoiceDeps> = {}): VoiceDeps => ({
+  voiceRoot: join(tmp, "voice"), problem: () => undefined, clip, audioFile: (id) => join(attachments, id), groups: () => [{ id: "grp-1", name: "Family" }], now: () => NOW, ...o,
+});
+const note = (key: string, ts: number, by = "+1", o: { id?: string; file?: boolean; byName?: string } = {}) => {
+  const id = o.id ?? `att${ts}`;
+  if (o.file !== false) writeFileSync(join(attachments, id), "audio");
+  holdVoiceNote(key, { ts, id, size: 5000, by, byName: o.byName, snippet: "use my voice please" }, NOW);
+};
+const asMember = (key: string, author: string, ts: number, owner: boolean, run: () => Promise<void>) => withSend(key, undefined, run, { author, timestamp: ts, owner });
+
+beforeEach(() => {
+  tmp = mkdtempSync(join(tmpdir(), "voice-test-"));
+  attachments = join(tmp, "att");
+  mkdirSync(attachments);
+  resetVoiceNotes();
+  deps = mk();
+});
+
+test("names: sanitised to [a-z0-9-] up to 32, and nothing climbs out of the library", () => {
+  assert.equal(sanitizeVoiceName("Anna's Voice!"), "anna-s-voice");
+  assert.equal(sanitizeVoiceName("../../etc/passwd"), "etc-passwd");
+  assert.equal(sanitizeVoiceName("Zoë Ünal"), "zoe-unal");
+  assert.equal(sanitizeVoiceName("x".repeat(80)).length, 32);
+  assert.equal(sanitizeVoiceName("   "), "");
+  const root = join(tmp, "lib");
+  for (const bad of ["../x", "a/b", "..", "A", "x".repeat(33), ""]) assert.throws(() => saveVoice(root, bad, { wav: Buffer.alloc(4), text: "t", meta: { created: "", source: "", seconds: 1 } }, 5), /bad voice name/, bad);
+  assert.equal(voiceFiles(root, "../../etc"), undefined);
+  assert.throws(() => deleteVoice(root, "../.."), /no voice/);
+  assert.ok(!existsSync(join(tmp, "x")));
+});
+
+test("library: create, switch, delete, cap, default is built in and cannot be deleted or replaced", () => {
+  const root = join(tmp, "lib");
+  const v = (t: string) => ({ wav: Buffer.from("RIFF"), text: t, meta: { created: new Date().toISOString(), source: "voice note", seconds: 5 } });
+  assert.equal(activeVoice(root), "default");
+  saveVoice(root, "anna", v("a"), 3);
+  saveVoice(root, "bo", v("b"), 3);
+  assert.throws(() => saveVoice(root, "anna", v("again"), 3), /exists already/);
+  assert.throws(() => saveVoice(root, "default", v("d"), 3), /built-in/);
+  setActiveVoice(root, "anna");
+  assert.equal(activeVoice(root), "anna");
+  assert.equal(voiceFiles(root, "anna")?.text, "a");
+  assert.throws(() => setActiveVoice(root, "nobody"), /no voice/);
+  saveVoice(root, "cy", v("c"), 3);
+  assert.throws(() => saveVoice(root, "di", v("d"), 3), /holds 3 voices/);
+  assert.deepEqual(listVoices(root).map((x) => x.name).sort(), ["anna", "bo", "cy"]);
+  assert.throws(() => deleteVoice(root, "default"), /cannot be deleted/);
+  deleteVoice(root, "anna"); // the active one: the default is active again
+  assert.equal(activeVoice(root), "default");
+  setActiveVoice(root, "bo");
+  setActiveVoice(root, "default");
+  assert.equal(activeVoice(root), "default");
+  assert.equal(MAX_VOICES.owner, 10);
+  assert.equal(MAX_VOICES.group, 5);
+});
+
+test("library: a group has its own folder named by a hash, never its id", () => {
+  const id = "Zm9vYmFyLWdyb3VwLWlkLXdpdGgtc2VjcmV0cw==";
+  const root = scopeRoot(join(tmp, "voice"), id);
+  assert.ok(root.includes("/groups/") && !root.includes(id) && !root.includes("secrets"));
+  assert.notEqual(root, scopeRoot(join(tmp, "voice"), "other"));
+  assert.equal(scopeRoot(join(tmp, "voice"), "owner"), join(tmp, "voice"));
+  saveVoice(root, "kid", { wav: Buffer.from("RIFF"), text: "t", meta: { created: "", source: "", seconds: 4 } }, 5);
+  setActiveVoice(root, "kid");
+  assert.match(activeVoiceRel(join(tmp, "voice"), id) ?? "", /^groups\/[0-9a-f]{16}\/voices\/kid$/);
+  assert.equal(activeVoiceRel(join(tmp, "voice"), "owner"), undefined, "another conversation is unaffected");
+  assert.equal(activeVoiceRel(join(tmp, "voice"), "other"), undefined);
+});
+
+test("clip: too short, silent, noise, no words and too long are refused; a long good one is cut to 30 s", async () => {
+  const f = join(tmp, "in");
+  await assert.rejects(buildReference(f, fakeClip(speech(2))), /too short/);
+  await assert.rejects(buildReference(f, fakeClip(silence(10))), /almost silent|mostly silence/);
+  await assert.rejects(buildReference(f, fakeClip(noise(10))), /noise|silence/);
+  await assert.rejects(buildReference(f, fakeClip(speech(10), "")), /clear speech/);
+  await assert.rejects(buildReference(f, fakeClip(speech(10), "(music) [noise]"), ), /clear speech/);
+  await assert.rejects(buildReference(f, fakeClip(speech(10), "uh")), /clear speech/);
+  await assert.rejects(buildReference(f, { decode: async () => new Int16Array(301 * RATE), transcribe: async () => "x" }), /over 5 minutes/);
+  await assert.rejects(buildReference(f, { decode: async () => { throw new Error("bad"); }, transcribe: async () => "x" }), /couldn't read/);
+  const ok = await buildReference(f, fakeClip(speech(8)));
+  assert.ok(ok.seconds > 7 && ok.wav.subarray(0, 4).toString() === "RIFF" && ok.wav.readUInt32LE(24) === RATE);
+  const long = await buildReference(f, fakeClip(speech(70)));
+  assert.ok(long.seconds <= 30 && long.seconds >= 20, String(long.seconds));
+});
+
+test("tool: the owner turns a voice note into the active voice; the consent line comes once", async () => {
+  note("owner", NOW - 60_000, "owner");
+  const first = await voiceNow("owner", { action: "use", name: "My Voice" }, deps);
+  assert.match(first, /now using the voice "my-voice"/);
+  assert.match(first, /right to use/);
+  assert.equal(activeVoice(join(tmp, "voice")), "my-voice");
+  const files = voiceFiles(join(tmp, "voice"), "my-voice")!;
+  assert.equal(files.text, "hello this is my own voice speaking");
+  const meta = JSON.parse(readFileSync(join(tmp, "voice/voices/my-voice/meta.json"), "utf8"));
+  assert.equal(meta.source, "voice note");
+  assert.ok(meta.created && meta.seconds > 0);
+  note("owner", NOW - 30_000, "owner");
+  assert.doesNotMatch(await voiceNow("owner", { action: "use" }, deps), /right to use/);
+  assert.match(await voiceNow("owner", { action: "list" }, deps), /- default: the built-in voice\n- my-voice: .*\n- voice \(active\)/);
+  assert.match(await voiceNow("owner", { action: "switch", name: "normal" }, deps), /default voice/);
+  assert.equal(activeVoice(join(tmp, "voice")), "default");
+  assert.match(await voiceNow("owner", { action: "delete", name: "default" }, deps), /cannot be deleted/);
+  assert.match(await voiceNow("owner", { action: "delete", name: "my-voice" }, deps), /Deleted/);
+  assert.match(await voiceNow("owner", { action: "switch", name: "my-voice" }, deps), /no voice called/);
+});
+
+test("tool: not available unless the Qwen voice is set up", async () => {
+  const d = mk(undefined, { problem: () => "Voice cloning needs the Qwen voice (TTS_PROVIDER=qwen); it is not set up here." });
+  assert.match(await voiceNow("owner", { action: "list" }, d), /needs the Qwen voice/);
+  assert.ok(!existsSync(join(tmp, "voice")));
+});
+
+test("tool: in a group the default source is the asking message's own note or the one it replies to; both people are recorded", async () => {
+  const T = NOW - 100_000;
+  note("g1", T + 1000, "+2", { byName: "Eve" });
+  note("g1", T + 2000, "+3", { byName: "Max" });
+  holdQuote("g1", T + 3000, T + 2000); // a message by +2 replies to Max's voice note
+  const root = scopeRoot(deps.voiceRoot, "g1");
+  await asMember("g1", "+2", T + 1000, false, async () => {
+    const r = await voiceNow("g1", { action: "use", name: "eve" }, deps);
+    assert.match(r, /Eve's voice/);
+    assert.match(r, /only in this group|only used in this group|used only in this group/);
+    assert.match(r, /normal voice/);
+  });
+  const m1 = JSON.parse(readFileSync(join(root, "voices/eve/meta.json"), "utf8"));
+  assert.equal(m1.by, "+2");
+  assert.equal(m1.from, "+2");
+  await asMember("g1", "+2", T + 3000, false, async () => {
+    const r = await voiceNow("g1", { action: "use", name: "max" }, deps);
+    assert.match(r, /Max's voice/);
+    assert.match(r, /at /);
+  });
+  const m2 = JSON.parse(readFileSync(join(root, "voices/max/meta.json"), "utf8"));
+  assert.equal(m2.by, "+2");
+  assert.equal(m2.from, "+3");
+  assert.equal(m2.fromName, "Max");
+  assert.equal(activeVoice(deps.voiceRoot), "default", "the owner's chat is untouched");
+  assert.equal(activeVoiceRel(deps.voiceRoot, "g1"), `groups/${root.split("/groups/")[1]!.split("/")[0]}/voices/max`);
+});
+
+test("tool: a source from another conversation, an unknown or too old id, or a missing file is refused", async () => {
+  note("g2", NOW - 5000, "+9", { byName: "Other" });
+  const noSource = await asMember("g1", "+2", 7777, false, async () => assert.match(await voiceNow("g1", { action: "use" }, deps), /no voice note to use/));
+  void noSource;
+  await asMember("g1", "+2", 7777, false, async () => {
+    assert.match(await voiceNow("g1", { action: "use", source: String(NOW - 5000) }, deps), /not a voice note from this conversation/);
+    assert.match(await voiceNow("g1", { action: "use", source: "../../etc/passwd" }, deps), /id from the sources list/);
+  });
+  note("g1", NOW - 8 * 24 * 3_600_000, "+2", { id: "old" });
+  await asMember("g1", "+2", 7777, false, async () => assert.match(await voiceNow("g1", { action: "use", source: String(NOW - 8 * 24 * 3_600_000) }, deps), /not a voice note from this conversation/));
+  note("g1", NOW - 5000, "+2", { id: "vanished", file: false });
+  await asMember("g1", "+2", NOW - 5000, false, async () => assert.match(await voiceNow("g1", { action: "use" }, deps), /no longer on this device/));
+  assert.deepEqual(listVoices(scopeRoot(deps.voiceRoot, "g1")), []);
+});
+
+test("tool: a source id is only joined to the attachments folder (the id is the only thing trusted)", async () => {
+  let asked = "";
+  const d = mk(undefined, { audioFile: (id) => ((asked = id), join(attachments, id)) });
+  note("owner", NOW - 1000, "owner", { id: "abc123" });
+  await voiceNow("owner", { action: "use" }, d);
+  assert.equal(asked, "abc123");
+});
+
+test("tool: sources lists this conversation's notes with sender, age and a snippet", async () => {
+  note("g1", NOW - 2 * 3_600_000, "+2", { byName: "Eve" });
+  note("g2", NOW - 1000, "+9", { byName: "Other" });
+  const r = await asMember("g1", "+2", NOW - 2 * 3_600_000, false, async () => {
+    const s = await voiceNow("g1", { action: "sources" }, deps);
+    assert.match(s, /from Eve, 2 h ago/);
+    assert.match(s, /the message you are answering/);
+    assert.doesNotMatch(s, /Other/);
+  });
+  void r;
+});
+
+test("tool: group rules: a group library is capped, anyone can switch back, only the maker or the owner delete, the owner resets from the chat", async () => {
+  const root = scopeRoot(deps.voiceRoot, "g1");
+  for (let i = 1; i <= 5; i++) note("g1", NOW - 1000 * i, "+2", { byName: "Eve" });
+  for (let i = 1; i <= 5; i++) await asMember("g1", "+2", NOW - 1000 * i, false, async () => assert.match(await voiceNow("g1", { action: "use", name: `v${i}` }, deps), /Saved/));
+  note("g1", NOW - 9000, "+2");
+  await asMember("g1", "+2", NOW - 9000, false, async () => assert.match(await voiceNow("g1", { action: "use", name: "v6" }, deps), /holds 5 voices/));
+  await asMember("g1", "+7", 1, false, async () => {
+    assert.match(await voiceNow("g1", { action: "switch", name: "default" }, deps), /default voice/);
+    assert.match(await voiceNow("g1", { action: "switch", name: "v3" }, deps), /Now using/);
+    assert.match(await voiceNow("g1", { action: "delete", name: "v1" }, deps), /Only the member who made/);
+  });
+  await asMember("g1", "+2", 1, false, async () => assert.match(await voiceNow("g1", { action: "delete", name: "v1" }, deps), /Deleted/));
+  await asMember("g1", "+owner", 1, true, async () => assert.match(await voiceNow("g1", { action: "delete", name: "v2" }, deps), /Deleted/));
+  assert.equal(activeVoice(root), "v3");
+  assert.match(await voiceNow("g1", { action: "reset_group", group: "x" }, deps), /Only the owner/);
+  assert.match(await voiceNow("owner", { action: "reset_group", group: "Nope" }, deps), /No group named/);
+  assert.match(await voiceNow("owner", { action: "reset_group", group: "family" }, mk(undefined, { groups: () => [{ id: "g1", name: "Family" }] })), /default voice again/);
+  assert.equal(activeVoice(root), "default");
+});
+
+test("tool: manifest and policy: chat and group without approval, never an unattended run", () => {
+  const TOOL = "mcp__voice__voice";
+  assert.equal(flagFor(TOOL, "chat"), "no");
+  assert.equal(classify(TOOL, { action: "list" }, "chat"), "allow");
+  assert.equal(classify(TOOL, { action: "list" }, "group"), "allow");
+  for (const source of ["brief", "radar", "handler", "heartbeat", "dream", "browse", "background"] as const) {
+    assert.equal(flagFor(TOOL, source), undefined, source);
+    assert.equal(classify(TOOL, { action: "list" }, source), "deny", source);
+  }
+  // the test settings use Kokoro, so no run is offered the tool
+  const servers = (source: "chat" | "group" | "brief") => Object.keys(buildOptions(async () => ({ approved: true }), { systemPrompt: "x", maxTurns: 1, maxBudgetUsd: 1, source, ...(source === "chat" ? { memory: { dir: "/tmp/n" } } : source === "group" ? { memory: { dir: "/tmp/n", groupId: "g" } } : {}) }, undefined).mcpServers ?? {});
+  for (const s of ["chat", "group", "brief"] as const) assert.equal(servers(s).includes("voice"), false, s);
+});
+
+test("provider: the speech request names the conversation's active voice, read per reply (no restart)", async () => {
+  const bodies: unknown[] = [];
+  const voiceRoot = join(tmp, "voice");
+  const fakeServer = join(tmp, "fake.mjs");
+  writeFileSync(fakeServer, `
+import http from "node:http";
+const n = 800, b = Buffer.alloc(44 + n * 2);
+b.write("RIFF", 0); b.writeUInt32LE(36 + n * 2, 4); b.write("WAVEfmt ", 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22);
+b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(n * 2, 40);
+http.createServer((req, res) => { req.resume(); req.on("end", () => { res.writeHead(200, { "content-type": "audio/wav" }); res.end(b); }); }).listen(0, "127.0.0.1", function () { console.log("READY " + this.address().port); });
+process.stdin.on("end", () => process.exit(0)); process.stdin.resume();
+`);
+  const fetchImpl = ((u: string, init: RequestInit) => (bodies.push(JSON.parse(String(init.body))), fetch(u, init))) as typeof fetch;
+  const cfg = { dir: tmp, model: "m", refAudio: fakeServer, refText: "ref", voiceRoot, timeoutMs: 20_000, idleMs: 0, startTimeoutMs: 5000, command: [process.execPath, fakeServer], fetchImpl };
+  const gone = (f: string) => void readdirSync(join(f, ".."));
+  try {
+    gone(await synthesizeQwen("one", cfg));
+    saveVoice(voiceRoot, "anna", { wav: Buffer.from("RIFF"), text: "t", meta: { created: "", source: "", seconds: 4 } }, 5);
+    setActiveVoice(voiceRoot, "anna");
+    await synthesizeQwen("two", cfg);
+    await synthesizeQwen("three", cfg, "some-group"); // another conversation: its own (default) voice
+    setActiveVoice(voiceRoot, "default");
+    await synthesizeQwen("four", cfg);
+  } finally {
+    stopQwen();
+  }
+  assert.deepEqual(bodies, [{ text: "one" }, { text: "two", voice: "voices/anna" }, { text: "three" }, { text: "four" }]);
+});

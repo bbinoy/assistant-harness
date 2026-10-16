@@ -92,6 +92,8 @@ export const MANIFEST: readonly ToolEntry[] = [
   // send (send.ts): a message, voice note, picture (a browse screenshot of this run) or reaction in the conversation the run is for, while it continues.
   // Chat and groups only, never an unattended run or a wake-up (a group's rights are in classify).
   ...rows("mcp__send__", "send", "send", "no", "send", { only: ["chat", "group"] }),
+  // voice (voicetool.ts): the conversation's own cloned voice, Qwen only. A low-risk local change (undo is switching): no approval. Chat and groups, never an unattended run.
+  ...rows("mcp__voice__", "voice", "voice", "no", "voice", { only: ["chat", "group"] }),
   // --- the browse sub-task (browse.ts). The entry tool: the owner's chat starts a run freely, a wake-up asks first (a group's rights are in classify). ---
   ...rows("mcp__browse__", "browse", "browse", { chat: "no", background: "yes" }, "browse", { only: ["chat", "background"] }),
   // The browser server's tools, in the browse run only (denied everywhere else). Which element a click or a field is, and which

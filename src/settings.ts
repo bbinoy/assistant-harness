@@ -70,6 +70,7 @@ function ttsProvider(env: Env, kokoro: { dir: string; voice: string; speed: numb
         model: env.TTS_QWEN_MODEL?.trim() || "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
         refAudio: path(env.TTS_REF_AUDIO),
         refText: isFile ? readFileSync(textFile, "utf8").trim() : textRaw,
+        voiceRoot: join(dataDir, "state/voice"), // the voice library (a cloned voice per conversation, voices.ts); the reference above is its default voice
         timeoutMs,
         idleMs,
       },
