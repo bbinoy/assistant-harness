@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { MAX_NOTE_CHARS, NOTES_DIR, parseNote, type Category } from "./notes.ts";
 import { settings } from "./settings.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The dream's rules, pure: which of the model's proposals may be applied (see dream.ts for the whole picture). Never trusts
 // shape or content; a scope says where a dream works and what it may touch.
@@ -98,7 +99,7 @@ export function planOps(raw: unknown, ctx: { ownerText: string; notes: readonly 
 
     if (o.op !== "write") { reject(file, "unknown operation"); continue; }
     const text = typeof o.text === "string" ? o.text.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "").trim() : "";
-    const description = typeof o.description === "string" ? o.description.replace(/\s+/g, " ").trim().slice(0, 160) : "";
+    const description = typeof o.description === "string" ? o.description.replace(/\s+/g, " ").trim().slice(0, LIMITS.gist) : "";
     if (!text || text.length > MAX_NOTE_CHARS || !description) { reject(file, "empty, or longer than a note may be"); continue; }
     if (o.expires !== undefined && !(typeof o.expires === "string" && DATE.test(o.expires) && o.expires >= ctx.today)) { reject(file, "bad expiry date"); continue; }
     if (writes >= MAX_WRITES) { reject(file, "too many changes in one run"); continue; }

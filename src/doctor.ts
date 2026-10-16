@@ -1,3 +1,4 @@
+import { LIMITS } from "./sanitize.ts";
 import { providerReady, qwenReady } from "@ted-personal-assistant/signal/tts";
 import { voiceReady } from "@ted-personal-assistant/signal/voice";
 import { execFileSync } from "node:child_process";
@@ -23,7 +24,7 @@ export async function mailCheck(line: Line, mail: boolean, connect: () => Promis
   try {
     line(true, "Mailbird MCP reachable", `${await connect()} inbox(es)`);
   } catch (e) {
-    line(false, "Mailbird MCP reachable", (e as Error).message.slice(0, 80));
+    line(false, "Mailbird MCP reachable", (e as Error).message.slice(0, LIMITS.reason));
   }
 }
 

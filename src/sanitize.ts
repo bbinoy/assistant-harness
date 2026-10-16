@@ -99,6 +99,10 @@ const MARK_PILE = /(\p{M}{8})\p{M}+/gu;
 
 // The text-length tiers, by purpose (docs/ARCHITECTURE.md, "Text length tiers"). Characters unless the name says bytes.
 export const LIMITS = {
+  reason: 120, // why something failed or was decided: error text, a reason in an audit row or notice
+  control: 80, // the name of a page control in an audit row or approval fact
+  gist: 160, // a one-line gist: a style note, a description, a shown row
+  brief: 1500, // a short report, or a question and its arguments as logged
   name: 100, // a person's or sender's name: a label, one line
   subject: 300, // a mail subject, the default for oneLine
   preview: 200, // a short preview of a message, reaction target or log entry (thread quote, wake-up log, summary input, error text in an audit row)

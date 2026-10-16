@@ -55,8 +55,8 @@ export function answerPrompt(reply: string, open: readonly OpenView[], recent: r
     id: o.id,
     asked_by: o.background ? "an unattended job (the owner may not be expecting it)" : "the chat assistant",
     asked: agoText(o.ageMs),
-    question_shown: o.question.slice(0, 1500),
-    ...(o.args ? { arguments: JSON.stringify(o.args).slice(0, 1500) } : {}),
+    question_shown: o.question.slice(0, LIMITS.brief),
+    ...(o.args ? { arguments: JSON.stringify(o.args).slice(0, LIMITS.brief) } : {}),
   }));
   const lines = recent.slice(-6).map((r) => ({ from: r.from, text: r.text.slice(0, LIMITS.line) }));
   return [

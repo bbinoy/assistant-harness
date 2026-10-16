@@ -2,6 +2,7 @@ import { readdirSync, statSync } from "node:fs";
 import type { Conversation } from "./conversation.ts";
 import type { Kind, Sent } from "./messages.ts";
 import { localDay } from "./pause.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // The wake/action ledger: the conversation's own log (messages.ts) holds kind "wake" lines (the chosen next look, the last
 // one is the state) and kind "action" lines (something done without posting; the presets' progress, see below). Everything
@@ -39,7 +40,7 @@ export const ledger = {
   briefEnded: (n: number, outcome: string) => `[brief] attempt ${n} → ${outcome}`,
   radarStarted: () => "[radar] started",
   radarRan: (sent: number, events: number, nextMeeting: string | undefined, keys: readonly string[]) => `[radar] ran: ${sent} message(s) sent, ${events} event(s) read${nextMeeting ? `, next meeting at ${nextMeeting}` : ""}. keys: ${JSON.stringify(keys)}`,
-  radarFailed: (why: string) => `[radar] failed: ${why.slice(0, 120)}`,
+  radarFailed: (why: string) => `[radar] failed: ${why.slice(0, LIMITS.reason)}`,
   nudge: () => "[nudge] I changed the calendar, so the radar should look again soon",
 };
 const RADAR_KEYS = /\. keys: (\[.*\])\s*$/s;

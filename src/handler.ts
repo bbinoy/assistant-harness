@@ -1,5 +1,5 @@
 import { runHandlerTurn } from "./agent.ts";
-import { oneLine } from "./sanitize.ts";
+import { oneLine, LIMITS } from "./sanitize.ts";
 import type { Approve } from "./permissions.ts";
 import { audit } from "./audit.ts";
 import { draftCollector } from "./propose.ts";
@@ -54,7 +54,7 @@ export function handledLines(text: string, owner: string): string[] {
 
 export function formatReport(text: string, owner: string): string {
   const done = handledLines(text, owner);
-  return done.length ? `🤝 Handled ${done.length}:\n${done.join("\n")}`.slice(0, 1500) : "";
+  return done.length ? `🤝 Handled ${done.length}:\n${done.join("\n")}`.slice(0, LIMITS.brief) : "";
 }
 
 export function createHandler(deps: { approve: Approve; notify: (text: string) => Promise<void>; write?: NoticeWriter; propose?: (draftIds: readonly number[]) => Promise<number> }) {

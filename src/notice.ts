@@ -6,7 +6,7 @@ import { fence } from "./fence.ts";
 import { haikuOptions } from "./haiku.ts";
 import { styleLines } from "./gate.ts";
 import { PERSONALITY } from "./persona.ts";
-import { cleanText } from "./sanitize.ts";
+import { cleanText, LIMITS } from "./sanitize.ts";
 import { ASSISTANT, OWNER } from "./settings.ts";
 
 // Informational messages to the owner are WRITTEN by a model from facts code collected, instead of assembled from a template:
@@ -18,7 +18,7 @@ import { ASSISTANT, OWNER } from "./settings.ts";
 // own deterministic text goes out instead, so a message is never lost and never carries something the facts do not.
 // Never used for approval questions, error notices, security notices or exact data (draft text): those stay code (docs/SAFETY.md).
 
-export const NOTICE_MAX_CHARS = 600;
+export const NOTICE_MAX_CHARS = LIMITS.logLine;
 export const NOTICE_TIMEOUT_MS = 15_000;
 
 export interface NoticeRequest {
@@ -127,7 +127,7 @@ export function createNoticeWriter(io: { model?: NoticeModel; now?: () => Date }
       if ("text" in got) return got.text;
       why = got.why;
     } catch (e) {
-      why = (e as Error).message.slice(0, 100);
+      why = (e as Error).message.slice(0, LIMITS.reason);
     }
     console.log(`notice: ${req.kind}: fallback text sent (${why})`);
     return req.fallback;

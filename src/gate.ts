@@ -97,12 +97,12 @@ export type Gate = (input: GateInput) => Promise<GateOutput>;
 
 // The owner's style notes: the personality the assistant takes into groups (and what a group's gate is told of it).
 export const styleLines = (now: Date): string =>
-  readNotes(now).filter((n) => n.category === "style").map((n) => `- ${n.text.replace(/\s*\n\s*/g, " ").slice(0, 600)}`).join("\n");
+  readNotes(now).filter((n) => n.category === "style").map((n) => `- ${n.text.replace(/\s*\n\s*/g, " ").slice(0, LIMITS.logLine)}`).join("\n");
 
 // What the gate is told of that personality: it decides whether and when to speak, not how, so a compact one-liner
 // (the first words of each note, a few notes) is enough. The run that writes the reply gets the full styleLines.
 const STYLE_NOTES = 6;
-const STYLE_CHARS = 160;
+const STYLE_CHARS = LIMITS.gist;
 export const styleSummary = (now: Date): string =>
   readNotes(now).filter((n) => n.category === "style").slice(0, STYLE_NOTES).map((n) => n.text.replace(/\s+/g, " ").trim().slice(0, STYLE_CHARS)).join("; ");
 

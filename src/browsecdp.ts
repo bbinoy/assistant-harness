@@ -1,4 +1,5 @@
 import { createServer } from "node:net";
+import { LIMITS } from "./sanitize.ts";
 
 // What is under a point of the page: a lookup owned by CODE, never by the model (the vision-click experiment, BROWSE_VISION=click).
 // The browser is asked over its own debugging port (loopback, a random port, only while a click-mode run lives; browseserver.ts). The
@@ -95,7 +96,7 @@ export async function describePoint(cdp: Cdp, x: number, y: number, pageUrl: str
   } catch (e) {
     // "No node found for given location": the point is on nothing. A timeout, a closed target or any other error is a failed lookup.
     if (NO_NODE.test(String((e as Error)?.message ?? e))) return nothingAt(pageUrl);
-    return `the lookup failed (${String((e as Error)?.message ?? e).slice(0, 80)})`;
+    return `the lookup failed (${String((e as Error)?.message ?? e).slice(0, LIMITS.reason)})`;
   }
 }
 
@@ -139,7 +140,7 @@ export async function openSession(port: number, timeoutMs = 4000, pageUrl?: stri
     const send: Cdp["send"] = (method, params = {}) => withTimeout(new Promise((res, rej) => (pending.set(++id, { res, rej }), ws.send(JSON.stringify({ id, method, params })))), timeoutMs, method);
     return { cdp: { send }, pageUrl: pick.url, close: () => ws.close() };
   } catch (e) {
-    return `the browser could not be reached (${String((e as Error)?.message ?? e).slice(0, 80)})`;
+    return `the browser could not be reached (${String((e as Error)?.message ?? e).slice(0, LIMITS.reason)})`;
   }
 }
 

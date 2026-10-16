@@ -194,7 +194,7 @@ export class BrowseGuard {
   }
   private deny(tool: string, input: Record<string, unknown>, reason: string, extra: Record<string, unknown> = {}): Decision {
     this.denied++;
-    this.log(tool, "deny", input, { reason: reason.slice(0, 120), ...extra });
+    this.log(tool, "deny", input, { reason: reason.slice(0, LIMITS.reason), ...extra });
     return { kind: "deny", reason };
   }
   private refNode(ref: unknown): Node | string {
@@ -219,7 +219,7 @@ export class BrowseGuard {
     for (const n of this.nodes.values()) if ((n.value || n.checked) && n.role !== "link") rows.set(n.ref, `${nolabel(n.name) || n.role}: ${n.value && sensitiveKind(n.name, n.value) ? HIDDEN : (n.value ?? (n.checked ? "ticked" : ""))}`);
     for (const [ref, t] of this.typed) rows.set(ref, `${nolabel(t.label) || ref}: ${t.value}`);
     for (const [label, value] of extraValues) rows.set(`x${label}`, `${nolabel(label)}: ${value}`);
-    const values = [...rows.values()].slice(0, 30).map((r) => `• ${clip(r, 160)}`);
+    const values = [...rows.values()].slice(0, 30).map((r) => `• ${clip(r, LIMITS.gist)}`);
     const here = hostOf(this.url);
     // Saved details typed in this run: field label, the key it came from, and the value (masked to its last 4 characters for a sensitive key).
     const profile = this.filled.length
@@ -254,9 +254,9 @@ export class BrowseGuard {
   private commit(tool: string, input: Record<string, unknown>, node: Node | undefined, why: string, control: string, extraValues: [string, string][] = [], judge = true): Decision {
     if (this.commits >= this.maxCommits) return this.deny(tool, input, `This run already took its ${this.maxCommits} confirmed step(s). Stop and report what is left for the owner.`, { commit: true, cap: true });
     if (this.filled.length) (judge = false), (why = `${why}; details from your saved profile were typed in this run, so you always confirm`);
-    this.log(tool, judge ? "judge" : "ask-owner", input, { commit: true, why, role: node?.role, name: node?.name?.slice(0, 80), ...(this.filled.length ? { profileKeys: this.filled.map((f) => f.key) } : {}) });
+    this.log(tool, judge ? "judge" : "ask-owner", input, { commit: true, why, role: node?.role, name: node?.name?.slice(0, LIMITS.control), ...(this.filled.length ? { profileKeys: this.filled.map((f) => f.key) } : {}) });
     this.pending = tool + JSON.stringify(input);
-    return { kind: "ask", description: this.commitText(control, why, extraValues, node?.formName), once: true, judge, facts: { host: hostOf(this.url), role: node?.role, name: node?.name?.slice(0, 80), step: short(tool) } };
+    return { kind: "ask", description: this.commitText(control, why, extraValues, node?.formName), once: true, judge, facts: { host: hostOf(this.url), role: node?.role, name: node?.name?.slice(0, LIMITS.control), step: short(tool) } };
   }
 
   // Payment and login fields: the owner is ALWAYS asked (no judge, no cap, no skipping). The question names the page, the field and the kind of
@@ -304,13 +304,13 @@ export class BrowseGuard {
           const r = this.fillFrom(n, text);
           if (typeof r === "string") return this.deny(toolName, logged, r, { profile: true });
           this.intents.set(n.ref, r.intent);
-          this.log(toolName, "fill-profile", logged, { role: n.role, name: n.name.slice(0, 60), profileKey: r.intent.key, valueLength: r.value.length });
+          this.log(toolName, "fill-profile", logged, { role: n.role, name: n.name.slice(0, LIMITS.control), profileKey: r.intent.key, valueLength: r.value.length });
           return { kind: "defer", input: { ...input, text: r.value }, description: this.fillDescription([r.intent]) };
         }
         const kind = sensitiveKind(n.name, text);
         if (kind) return this.sensitive(toolName, input, [{ name: n.name, kind }]);
         if (input.submit === true) return this.commit(toolName, input, n, "typing with Enter would submit the form", `Typing into “${clip(n.name || n.ref, 120)}” (${n.role}) and pressing Enter`, [[n.name || n.ref, text]]);
-        this.log(toolName, "type", input, { role: n.role, name: n.name.slice(0, 60) });
+        this.log(toolName, "type", input, { role: n.role, name: n.name.slice(0, LIMITS.control) });
         return { kind: "defer", description: `⌨️ Browser: type into “${clip(n.name || n.ref, 80)}” (${n.role})\nSite: ${clip(hostOf(this.url), 100)}\nText: ${clip(text, 200)}` };
       }
       case "fill_form": {
@@ -380,7 +380,7 @@ export class BrowseGuard {
           if (bad) return this.deny(toolName, input, `That link is not allowed: ${bad}.`, { role: n.role });
         }
         const c = classifyClick(n);
-        this.log(toolName, c.commit ? "commit-check" : "click", input, { role: n.role, name: n.name.slice(0, 80), commit: c.commit });
+        this.log(toolName, c.commit ? "commit-check" : "click", input, { role: n.role, name: n.name.slice(0, LIMITS.control), commit: c.commit });
         if (c.commit) return this.commit(toolName, input, n, c.why, `Button: “${clip(n.name || "(no label)", 120)}” (${n.role})`);
         return { kind: "defer", description: `🖱️ Browser: click “${clip(n.name || n.ref, 80)}” (${n.role})` };
       }
@@ -442,7 +442,7 @@ export class BrowseGuard {
     const node = nodeOfPoint(info, pt.x, pt.y);
     const c = classifyClick(node);
     // An empty area, or a canvas/svg/map surface with no link, button, field or form around it, is a plain click: logged with what was hit.
-    this.log(tool, c.commit ? "commit-check" : "click", input, { role: node.role, name: node.name.slice(0, 80), commit: c.commit, point: true, tag: info.tag, ...(info.nothing ? { hit: "nothing" } : {}) });
+    this.log(tool, c.commit ? "commit-check" : "click", input, { role: node.role, name: node.name.slice(0, LIMITS.control), commit: c.commit, point: true, tag: info.tag, ...(info.nothing ? { hit: "nothing" } : {}) });
     if (c.commit) return this.commit(tool, input, node, c.why, `Click at ${at}: “${clip(node.name || "(no label)", 120)}” (${node.role})`);
     return { kind: "defer", description: `🖱️ Browser: click at ${at}: “${clip(node.name || node.role, 80)}” (${node.role})` };
   }

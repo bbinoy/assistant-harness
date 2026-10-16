@@ -127,7 +127,7 @@ async function classifyGroup(mails: MailInput[], memory: string, run: typeof que
         if (!Number.isInteger(i) || i < 0 || i >= mails.length || filled.has(i)) continue;
         if (!LABELS.includes(it.label) || !KINDS.includes(it.kind)) continue;
         filled.add(i);
-        out[i] = { label: it.label, kind: it.kind, reason: String(it.reason ?? "").slice(0, 120), protected: false };
+        out[i] = { label: it.label, kind: it.kind, reason: String(it.reason ?? "").slice(0, LIMITS.reason), protected: false };
       }
       if (filled.size !== mails.length) console.error(`triage: model returned ${filled.size}/${mails.length} valid items`);
       break;
@@ -157,7 +157,7 @@ export async function triageBatch(mails: MailInput[], run: typeof query = query)
     results[i] = (await classifyGroup([mails[i]!], memory, run))[0]!;
     // Never archived, whatever the model said.
     if (results[i]!.label === "archive") results[i] = { ...results[i]!, label: "read_later", protected: true };
-    results[i] = { ...results[i]!, reason: `suspicious text; ${results[i]!.reason}`.slice(0, 120) };
+    results[i] = { ...results[i]!, reason: `suspicious text; ${results[i]!.reason}`.slice(0, LIMITS.reason) };
   }
 
   return results;

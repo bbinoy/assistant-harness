@@ -3,6 +3,7 @@ import { fence } from "./fence.ts";
 import { OWNER } from "./settings.ts";
 import { actionOf, flagFor, type MailView } from "./toolmanifest.ts";
 import type { Source } from "./audit.ts";
+import { LIMITS } from "./sanitize.ts";
 
 // A small second opinion on actions that would otherwise ask the owner on their phone: "is this
 // plainly what they wanted, or routine upkeep that touches only their own data?".
@@ -93,7 +94,7 @@ interface JudgeInput {
 export function judgePrompt(i: JudgeInput): string {
   const before = i.earlier?.length ? `${OWNER}'s earlier messages in this conversation, oldest first:\n${fence("earlier_messages", i.earlier.map((m) => m.slice(0, 400)).join("\n---\n"))}\n\n` : "";
   const asked = i.ownerMessage
-    ? `${before}${OWNER}'s message that led here:\n${fence("owner_message", i.ownerMessage.slice(0, 600))}`
+    ? `${before}${OWNER}'s message that led here:\n${fence("owner_message", i.ownerMessage.slice(0, LIMITS.logLine))}`
     : `This came from a background job (${i.source}), not from a message of ${OWNER}'s.${i.task ? `\nThe instructions the job was given:\n${fence("job_instructions", i.task.slice(0, 800))}` : ""}`;
   return `${asked}\n\nThe action:\n${fence("action", i.description.slice(0, 2400))}`;
 }
@@ -101,7 +102,7 @@ export function judgePrompt(i: JudgeInput): string {
 // Pure: whatever came back, as a verdict. Anything but an exact "auto" is "ask".
 export function parseVerdict(out: unknown): Verdict {
   const o = out as { decision?: unknown; reason?: unknown } | null | undefined;
-  return { decision: o?.decision === "auto" ? "auto" : "ask", reason: String(o?.reason ?? "no answer").replace(/\s+/g, " ").slice(0, 100) };
+  return { decision: o?.decision === "auto" ? "auto" : "ask", reason: String(o?.reason ?? "no answer").replace(/\s+/g, " ").slice(0, LIMITS.reason) };
 }
 
 type Runner = (prompt: string) => Promise<unknown>;
