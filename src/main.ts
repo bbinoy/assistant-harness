@@ -23,7 +23,7 @@ import { summarizeWithHaiku } from "./summarize.ts";
 import { Mailbird } from "./mailbird.ts";
 import { createProposer } from "./propose.ts";
 import { preparePicture } from "./image.ts";
-import { prepareDocument } from "./document.ts";
+import { prepareFile, type AudioTools } from "./document.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { unsupportedForVoice } from "./lang.ts";
@@ -31,7 +31,7 @@ import { openLog } from "./state.ts";
 import { attachmentPath, ensureSignalDaemon, SignalClient, type IncomingMessage } from "@ted-personal-assistant/signal";
 import { providerReady, stopQwen, synthesizeWith, warmQwen } from "@ted-personal-assistant/signal/tts";
 import { Limiter } from "./limiter.ts";
-import { transcribe, voiceReady } from "@ted-personal-assistant/signal/voice";
+import { probeAudio, transcribe, voiceReady } from "@ted-personal-assistant/signal/voice";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
 
@@ -85,6 +85,12 @@ async function transcript(m: IncomingMessage): Promise<string> {
   return heard;
 }
 
+// An audio file somebody sent: what it really is (ffprobe) and its first minutes in words, in the same queue as voice messages.
+const audioTools: AudioTools = {
+  probe: probeAudio,
+  transcribe: (file, maxSeconds) => transcribing.run(() => transcribe(file, settings.whisperModel, maxSeconds)),
+};
+
 // Group chats (src/group.ts): in any group the owner is a member of. Everything said or reacted there goes
 // into that group's own history; the brain decides when the assistant speaks. No access to anything private.
 const isOwnerId = (number?: string, uuid?: string) => number === config.ownerNumber || (!!config.ownerAci && uuid === config.ownerAci);
@@ -102,7 +108,7 @@ const pipeline: Pipeline = createPipeline({
   account: config.signalAccount,
   runOwner: (prompt, ownerMessage, pictures, hooks, documents) => ask(prompt, approve, say, ownerMessage, pictures, hooks, documents),
   picture: (m) => preparePicture(attachmentPath(m.image!, settings.signalAttachmentsDir)), // a plain file name inside signal-cli's folder
-  document: async (m) => prepareDocument(attachmentPath(m.file!, settings.signalAttachmentsDir), m.file!.name), // the same: only the id, joined to signal-cli's folder
+  document: async (m) => prepareFile(attachmentPath(m.file!, settings.signalAttachmentsDir), m.file!.name, audioTools), // the same: only the id, joined to signal-cli's folder; an audio file is transcribed (queued with voice messages)
   transcript,
   speech: {
     ready: () => settings.voiceReplies && signal.separateAccount && providerReady(settings.tts).ok,

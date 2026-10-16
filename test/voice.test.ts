@@ -41,7 +41,11 @@ const note = (key: string, ts: number, by = "+1", o: { id?: string; file?: boole
   if (o.file !== false) writeFileSync(join(attachments, id), "audio");
   holdVoiceNote(key, { ts, id, size: 5000, by, byName: o.byName, snippet: "use my voice please" }, NOW);
 };
-const asMember = (key: string, author: string, ts: number, owner: boolean, run: () => Promise<void>) => withSend(key, undefined, run, { author, timestamp: ts, owner });
+const asMember = async <T>(key: string, author: string, ts: number, owner: boolean, run: () => Promise<T>): Promise<T> => {
+  let out: T | undefined;
+  await withSend(key, undefined, async () => void (out = await run()), { author, timestamp: ts, owner });
+  return out as T;
+};
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "voice-test-"));

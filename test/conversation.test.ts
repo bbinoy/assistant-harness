@@ -677,11 +677,86 @@ test("private chat: a PDF reaches the run as a document with its note; a text fi
 });
 
 test("private chat: a file that cannot be opened or is not supported gets one sentence and no run", async () => {
-  const sentence = "I can't open that kind of file yet. I can read PDFs, pictures, text files (txt, md, csv, json, log, ics, vcf) and voice messages.";
+  const sentence = "I can't open that kind of file yet. I can read PDFs, pictures, text files (txt, md, csv, json, log, ics, vcf), voice messages and audio files (mp3, m4a, wav, ogg, aac, flac).";
   const { pipeline, r } = rig({ document: async () => { throw new Error(sentence); } });
   await pipeline.handleIncoming(owner(), msg({ text: "see", file: { id: "d1", size: 10, name: "a.docx" } }));
   assert.deepEqual(r.sent.map((s) => s.text), [sentence]);
   assert.equal(r.prompts.length, 0);
+});
+
+const TS = Date.now() - 10_000; // recent: voice sources older than a week are not offered
+const MP3_DOC: Document = { kind: "audio", text: "Hello everyone this is me talking", name: "talk.mp3", seconds: 95, cut: false, speech: true };
+
+async function withQwen<T>(run: () => Promise<T>): Promise<T> {
+  const { settings } = await import("../src/settings.ts");
+  const tts = settings.tts as { provider: string };
+  const was = tts.provider;
+  tts.provider = "qwen";
+  try {
+    return await run();
+  } finally {
+    tts.provider = was;
+  }
+}
+
+test("audio file: in the owner's chat the model gets the fenced file transcript and the file becomes a voice source of this chat (id only)", async () => {
+  const { resetVoiceNotes, voiceNotes } = await import("../src/voicenote.ts");
+  await withQwen(async () => {
+    resetVoiceNotes();
+    const { pipeline, r } = rig({ document: async () => MP3_DOC });
+    await pipeline.handleIncoming(owner(), msg({ text: "use the voice in this file", timestamp: TS + 42, file: { id: "att-mp3", size: 900, name: "talk.mp3", audio: true } }));
+    assert.match(r.prompts[0]!, /\[Audio FILE from the sender \(not a voice message they recorded for you\), file name "talk.mp3".*\]\n<audio_file_transcript>\nHello everyone this is me talking\n<\/audio_file_transcript>\nuse the voice in this file/);
+    assert.deepEqual(r.records.filter((x) => x.kind === "owner").map((x) => x.text), ["📄 use the voice in this file"]);
+    const src = voiceNotes(owner().key).find((n) => n.ts === TS + 42);
+    assert.deepEqual([src?.id, src?.kind, src?.name, src?.seconds, src?.snippet], ["att-mp3", "file", "talk.mp3", 95, "Hello everyone this is me talking"]);
+    assert.deepEqual(voiceNotes(group(GID).key).filter((n) => n.ts === TS + 42), []); // never in another conversation
+    // an audio file without speech is told to the model and is not offered as a source
+    const music = rig({ document: async () => ({ ...MP3_DOC, text: "", speech: false }) });
+    await music.pipeline.handleIncoming(owner(), msg({ text: "", timestamp: TS + 43, file: { id: "att-song", size: 900, name: "song.mp3", audio: true } }));
+    assert.match(music.r.prompts[0]!, /No recognisable speech in it/);
+    assert.equal(voiceNotes(owner().key).some((n) => n.ts === TS + 43), false);
+    resetVoiceNotes();
+  });
+});
+
+test("audio file: a fake mp3 gets one sentence and no run, and is no source", async () => {
+  const { resetVoiceNotes, voiceNotes } = await import("../src/voicenote.ts");
+  await withQwen(async () => {
+    resetVoiceNotes();
+    const { pipeline, r } = rig({ document: async () => { throw new Error("That file is called .mp3 but is not real audio, so I didn't open it."); } });
+    await pipeline.handleIncoming(owner(), msg({ text: "", timestamp: TS + 44, file: { id: "att-fake", size: 90, name: "x.mp3", audio: true } }));
+    assert.deepEqual(r.sent.map((s) => s.text), ["That file is called .mp3 but is not real audio, so I didn't open it."]);
+    assert.equal(r.prompts.length, 0);
+    assert.equal(voiceNotes(owner().key).some((n) => n.ts === TS + 44), false);
+  });
+});
+
+test("audio file: in a group it is opened even when nobody addressed us (like a voice message), becomes a source of THAT group, and reaches the admission", async () => {
+  const { resetVoiceNotes, voiceNotes } = await import("../src/voicenote.ts");
+  const { settings } = await import("../src/settings.ts");
+  const mutable = settings as { groupParticipation: string };
+  const was = mutable.groupParticipation;
+  mutable.groupParticipation = "tagged";
+  try {
+    await withQwen(async () => {
+      resetVoiceNotes();
+      const got: any[] = [];
+      const { pipeline } = rig({ document: async () => MP3_DOC, admitGroup: async (_c: unknown, m: unknown) => void got.push(m) });
+      await pipeline.handleIncoming(group(GID), gmsg({ text: "", timestamp: TS + 45, file: { id: "att-g", size: 900, name: "talk.mp3", audio: true }, addressedToMe: false }));
+      assert.equal(got[0].document, MP3_DOC);
+      assert.equal(got[0].text, "📄 audio file");
+      assert.equal(voiceNotes(group(GID).key).find((n) => n.ts === TS + 45)?.kind, "file");
+      assert.equal(voiceNotes(owner().key).some((n) => n.ts === TS + 45), false);
+      // another file type that nobody addressed to us is still not opened (as before)
+      let opened = 0;
+      const other = rig({ document: async () => (opened++, MP3_DOC), admitGroup: async () => {} });
+      await other.pipeline.handleIncoming(group(GID), gmsg({ text: "", timestamp: TS + 46, file: { id: "att-h", size: 900, name: "x.bin" }, addressedToMe: false }));
+      assert.equal(opened, 0);
+      resetVoiceNotes();
+    });
+  } finally {
+    mutable.groupParticipation = was;
+  }
 });
 
 test("groups: a document is handled like a picture: opened when it will be used, handed to the admission, a refusal told to someone who spoke to us", async () => {
