@@ -23,6 +23,7 @@ import { summarizeWithHaiku } from "./summarize.ts";
 import { Mailbird } from "./mailbird.ts";
 import { createProposer } from "./propose.ts";
 import { preparePicture } from "./image.ts";
+import { prepareDocument } from "./document.ts";
 import { createOutbound } from "./outbound.ts";
 import { settings } from "./settings.ts";
 import { unsupportedForVoice } from "./lang.ts";
@@ -99,8 +100,9 @@ const pipeline: Pipeline = createPipeline({
   out,
   record,
   account: config.signalAccount,
-  runOwner: (prompt, ownerMessage, pictures, hooks) => ask(prompt, approve, say, ownerMessage, pictures, hooks),
+  runOwner: (prompt, ownerMessage, pictures, hooks, documents) => ask(prompt, approve, say, ownerMessage, pictures, hooks, documents),
   picture: (m) => preparePicture(attachmentPath(m.image!, settings.signalAttachmentsDir)), // a plain file name inside signal-cli's folder
+  document: async (m) => prepareDocument(attachmentPath(m.file!, settings.signalAttachmentsDir), m.file!.name), // the same: only the id, joined to signal-cli's folder
   transcript,
   speech: {
     ready: () => settings.voiceReplies && signal.separateAccount && providerReady(settings.tts).ok,

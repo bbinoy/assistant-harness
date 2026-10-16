@@ -5,6 +5,7 @@ import { cleanIncoming, group, owner, type Batch, type Conversation, type Held, 
 import { findMessage, revisionsOf, type Extra, type Kind } from "./messages.ts";
 import { DELETED_LINE, editNote, isAuthor, sameText } from "./edit.ts";
 import { MAX_PICTURES, PICTURE_NOTE, type Picture } from "./image.ts";
+import { documentNote, takeDocuments, type Document } from "./document.ts";
 import { shouldThread, withQuoteContext } from "./quote.ts";
 import { OWNER_KEY, withSend, type Content, type SendSink } from "./send.ts";
 import { reactionPrompt, splitReaction } from "./reaction.ts";
@@ -261,7 +262,8 @@ export function createPipeline(deps: PipelineDeps) {
 
   // The owner's messages of one burst, as the model sees them: oldest first, each with its own quote and voice marks.
   function ownerPrompt(ms: readonly Held[]): string {
-    const one = (m: Held) => withQuoteContext(m.edit ? editNote(m.text, m.edit.before) : m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.picture ? `${PICTURE_NOTE} ${m.text}`.trim() : m.text, m.quote);
+    const docs = new Set<Document>(takeDocuments(ms.map((x) => x.document))); // the newest few only
+    const one = (m: Held) => withQuoteContext(m.edit ? editNote(m.text, m.edit.before) : m.voice ? `[Voice message, transcribed automatically, so words may be misheard] ${m.text}` : m.picture ? `${PICTURE_NOTE} ${m.text}`.trim() : m.document && docs.has(m.document) ? `${documentNote(m.document)}\n${m.text}`.trim() : m.text, m.quote);
     const text = ms.length === 1 ? one(ms[0]!) : `${ms.length} messages arrived one after another, oldest first. Answer them together, as one reply:\n\n${ms.map(one).join("\n\n")}`;
     return canSpeak() ? `${text}\n\n${voiceOption(true)}` : text;
   }
@@ -299,6 +301,18 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
+  // A PDF or text file -> the message with it attached, or false when it could not be opened or is not a kind we read (the sender
+  // was told, if they should be). Like see(): one step for every conversation; only its size and kind are logged, never the name or the content.
+  async function openFile(conv: Conversation, m: IncomingMessage): Promise<Held | false> {
+    console.log(`📄 file (${m.file!.size} bytes${m.text ? `, caption ${m.text.length} chars` : ""})`);
+    try {
+      return { ...m, file: undefined, document: await deps.document(m) };
+    } catch (e) {
+      await tell(conv, m, (e as Error).message);
+      return false;
+    }
+  }
+
   // Everything a message goes through before its conversation decides what to do with it. The same steps for the owner and
   // every group; the Conversation's flags (vouch, attention, optionalPictures) say where they differ.
   async function intake(conv: Conversation, raw: IncomingMessage): Promise<void> {
@@ -321,13 +335,18 @@ export function createPipeline(deps: PipelineDeps) {
       if (!seen && !conv.optionalPictures) return;
       m = { ...m, image: undefined, picture: seen ? seen.picture : undefined };
     }
-    // The line for the history: searchable, and what the dream learns from (never the picture itself).
-    const line = original.audio ? `🎙️ ${m.text}` : original.image ? `🖼️ ${m.text || "image"}` : m.text;
+    if (m.file) {
+      const seen = !conv.optionalPictures || m.addressedToMe || settings.groupParticipation !== "tagged" ? await openFile(conv, m) : false;
+      if (!seen && !conv.optionalPictures) return;
+      m = { ...m, file: undefined, document: seen ? seen.document : undefined };
+    }
+    // The line for the history: searchable, and what the dream learns from (never the picture or the document itself).
+    const line = original.audio ? `🎙️ ${m.text}` : original.image ? `🖼️ ${m.text || "image"}` : original.file ? `📄 ${m.text || "document"}` : m.text;
     if (!conv.approvals) {
       // A question asked in this group is answered here by ANY member (their message, a quoted reply or a reaction); the model reads it
       // like the owner's. Only this group's approvals can be answered; an edit and a caption never answer.
       if (await approvalAnswer(conv, m, author)) return;
-      return deps.admitGroup(conv, { groupId: conv.groupId!, arrivedAt: arrived, text: line, picture: m.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
+      return deps.admitGroup(conv, { groupId: conv.groupId!, arrivedAt: arrived, text: line, picture: m.picture, document: m.document, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, voice: m.voice });
     }
     return ownerTurn(conv, m, line, arrived);
   }
@@ -349,14 +368,14 @@ export function createPipeline(deps: PipelineDeps) {
     if (!isAuthor(m, waiting ? authorOf(waiting) : past?.root.by, conv.kind === "owner")) return void console.log(`edit by someone other than the author ignored (${conv.kind})`);
     const prior = waiting ? (waiting as { text: string }).text : past?.latest.text;
     const author = m.from || m.fromUuid;
-    const via = { targetTimestamp: targetTs, stamps, prior, pending: !!waiting, picture: (waiting as { picture?: Picture } | undefined)?.picture };
+    const via = { targetTimestamp: targetTs, stamps, prior, pending: !!waiting, picture: (waiting as { picture?: Picture } | undefined)?.picture, document: (waiting as { document?: Document } | undefined)?.document };
     if (conv.kind === "group") {
       if (author && m.addressedToMe) void signal.markRead(m.timestamp, author);
-      return deps.admitGroup(conv, { groupId: conv.groupId!, arrivedAt: arrived, text: m.text, picture: via.picture, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, edit: via });
+      return deps.admitGroup(conv, { groupId: conv.groupId!, arrivedAt: arrived, text: m.text, picture: via.picture, document: via.document, timestamp: m.timestamp, isOwner: deps.isOwner(m), fromName: m.fromName, addressedToMe: !!m.addressedToMe, author, quote: m.quote, edit: via });
     }
     if (prior !== undefined && sameText(prior, m.text)) return void console.log("edit changes nothing, ignored");
     if (waiting) dropPending(conv, stamps);
-    const held: Held = { ...m, picture: via.picture, ...(waiting ? {} : { edit: { before: prior } }) };
+    const held: Held = { ...m, picture: via.picture, document: via.document, ...(waiting ? {} : { edit: { before: prior } }) };
     return ownerTurn(conv, held, m.text, arrived, { of: targetTs });
   }
 
@@ -395,7 +414,7 @@ export function createPipeline(deps: PipelineDeps) {
           }
           const prompt = ownerPrompt(ms);
           await runTurn(conv, {
-            run: (hooks) => deps.runOwner(prompt, ms.map((x) => x.text).join("\n"), ms.flatMap((x) => x.picture ?? []).slice(-MAX_PICTURES), hooks),
+            run: (hooks) => deps.runOwner(prompt, ms.map((x) => x.text).join("\n"), ms.flatMap((x) => x.picture ?? []).slice(-MAX_PICTURES), hooks, takeDocuments(ms.map((x) => x.document))),
             target: { author: last.from, timestamp: last.timestamp },
             threadUnder: { text: last.text.slice(0, 200), author: last.from, timestamp: last.timestamp },
             hadQuote: ms.some((x) => x.quote),

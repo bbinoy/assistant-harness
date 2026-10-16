@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MAX_IMAGE_BYTES } from "@ted-personal-assistant/signal";
+import type { Document } from "./document.ts";
 
 // Pictures people send, made ready for the model: checked by their bytes (not the name or the claimed type), shrunk,
 // and wrapped as image content next to the text. The bytes live only in memory for the one turn: never in a log or a note.
@@ -73,9 +74,11 @@ export async function preparePicture(file: string, maxPixels: number = MAX_PIXEL
   }
 }
 
-// The prompt as the SDK takes it: plain text, or (with pictures) one user message of image blocks followed by the text.
-export function userInput(prompt: string, pictures: readonly Picture[] = []): string | AsyncIterable<SDKUserMessage> {
-  if (!pictures.length) return prompt;
+// The prompt as the SDK takes it: plain text, or (with pictures or PDFs) one user message of image blocks, then document blocks,
+// followed by the text. A text file is already inside the text (document.ts), so it needs no block.
+export function userInput(prompt: string, pictures: readonly Picture[] = [], documents: readonly Document[] = []): string | AsyncIterable<SDKUserMessage> {
+  const pdfs = documents.filter((d) => d.kind === "pdf");
+  if (!pictures.length && !pdfs.length) return prompt;
   const message: SDKUserMessage = {
     type: "user",
     parent_tool_use_id: null,
@@ -83,6 +86,7 @@ export function userInput(prompt: string, pictures: readonly Picture[] = []): st
       role: "user",
       content: [
         ...pictures.map((p) => ({ type: "image" as const, source: { type: "base64" as const, media_type: p.mediaType, data: p.data } })),
+        ...pdfs.map((d) => ({ type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: d.data } })),
         { type: "text" as const, text: prompt },
       ],
     },

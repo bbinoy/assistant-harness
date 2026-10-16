@@ -36,6 +36,7 @@ test("timing: one line per answered turn, owner and group, with every stage and 
       account: "+1",
       runOwner: async (_p, _o, _pics, hooks) => (clock += 700, hooks?.firstOutput(), clock += 300, { text: "ok" }),
       picture: async () => assert.fail("no picture"),
+      document: async () => assert.fail("no document"),
       transcript: async () => "",
       speech: { ready: () => false, synth: async () => "", foreign: async () => undefined },
       approvals: { answer: async () => ({ outcome: "none" as const }), answerReaction: () => "ignored" },

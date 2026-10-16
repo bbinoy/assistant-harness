@@ -54,6 +54,7 @@ function rig(over: { run?: (prompt: string) => Promise<string>; gate?: () => Pro
     account: "+10000000001",
     runOwner: async (prompt) => (prompts.push(prompt), { text: await (over.run ?? (async () => "ok"))(prompt) }),
     picture: async () => assert.fail("no picture"),
+    document: async () => assert.fail("no document"),
     transcript: async () => assert.fail("no voice"),
     speech: { ready: () => false, synth: async () => assert.fail("no speech"), foreign: async () => undefined },
     approvals: { answer: async (text: string) => (answers.push(text), over.answer ? over.answer(text) : { outcome: "none" }), answerReaction: () => "ignored" },

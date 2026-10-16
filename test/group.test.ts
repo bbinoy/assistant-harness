@@ -120,6 +120,7 @@ const rig = (over: object = {}) => {
     account: "+10000000001",
     runOwner: async () => assert.fail("not the owner's chat"),
     picture: (over as any).picture ?? (async () => ({ mediaType: "image/jpeg" as const, data: "QUJD" })),
+    document: (over as any).document ?? (async () => assert.fail("no document")),
     transcript: async () => "voice words",
     speech: (over as any).speech ?? { ready: () => false, synth: async () => assert.fail("no speech"), foreign: async () => undefined },
     approvals: { answer: async () => ({ outcome: "none" as const }), answerReaction: () => "ignored" },

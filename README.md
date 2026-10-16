@@ -22,7 +22,7 @@ Built with [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) o
 - **Its own contact.** Give Ted its own Signal account (a name, a picture) and you chat with a contact instead of with yourself.
 - **Typing, seen, reactions.** It marks your message read, shows "typing..." while it works, and sometimes answers with just an emoji on your message. (Note to Self has no typing indicator, so small icons show the state instead.)
 - **Voice in and out.** A voice note is transcribed on your Mac with whisper.cpp. Ted may answer with a voice message when that fits (a pep talk, a joke; never for times and figures), generated locally with Kokoro. A hosted voice is an opt-in that sends the spoken words away ([REMOTE-TTS.md](docs/REMOTE-TTS.md)).
-- **Photos.** Send a picture (JPEG, PNG, WebP, GIF or iPhone HEIC) and Ted looks at it. Other files and videos are skipped.
+- **Photos and files.** Send a picture (JPEG, PNG, WebP, GIF or iPhone HEIC), a PDF or a text file (txt, md, csv, json, log, ics, vcf) and Ted reads it. Other file types are not opened, and Ted says so.
 - **Groups, where it decides when to speak.** Add Ted to a group and a small model judges each message: Ted always answers when addressed and otherwise joins in only when it fits. Each group has its own notes and history, and Ted brings none of your private data there.
 - **A character, by default Ted Lasso.** Warm, folksy and relentlessly optimistic, with the help coming first. Change it by telling Ted what you want: your style notes override the default.
 

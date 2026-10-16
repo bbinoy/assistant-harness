@@ -146,6 +146,7 @@ function rig(o: { speech?: boolean; foreign?: string; synthFails?: boolean } = {
     account: "+1",
     runOwner: async () => ({ text: "" }),
     picture: async () => assert.fail("no picture"),
+    document: async () => assert.fail("no document"),
     transcript: async () => "",
     speech: {
       ready: () => !!o.speech,
