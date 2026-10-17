@@ -135,6 +135,17 @@ Personal agents are having a moment. Ted sits in the middle: hosted products lik
 
 How to do each: [docs/ADAPTING.md](docs/ADAPTING.md).
 
+## Roadmap
+
+What is built but not switched on yet, and what is planned next. Order and dates can change.
+
+- **Secrets and payments.** A sealed card store (OpenBao), a typed YES in the chat for every payment, spending caps and a ledger. Built, not live yet: it is being tested with fake cards before it is switched on.
+- **Several people.** Give a friend their own Ted, with their own memory, notes and budget, isolated from yours and from each other. A first version exists and is off by default; invites, setting up Google and Notion access, and a one-time-link page for secrets come next.
+- **Mail, calendar and Notion for more than one person.** Sign in once with Google or Notion from a link, no secrets in chat.
+- **A generic messenger layer.** All Signal code moves behind one interface, so other messengers plug in without changes to the assistant. Stubs with setup instructions for WhatsApp and Slack, no full support planned yet.
+- **Telegram, and an even faster setup.** A Telegram bot as the default: create the bot, paste the token, scan a QR code, and finish the setup in the chat. Signal stays supported and remains the more private choice.
+- **Tools and assistant presets.** Tools as small modules and the personal assistant's persona and routines as data, so it is easier to add a tool or make a different kind of assistant. No marketplace of third-party modules, on purpose.
+
 ## Docs
 
 |||
