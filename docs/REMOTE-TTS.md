@@ -2,7 +2,7 @@
 
 By default Ted speaks with Kokoro on your Mac and nothing leaves it. If you want a different voice, `TTS_PROVIDER` can send the words Ted is about to speak to a remote service instead. Everything after that is unchanged: ffmpeg turns the audio into AAC and Signal shows a voice message.
 
-**Read this first.** With a remote provider, the text of each spoken reply (and nothing else: no mail, no notes, no history) is sent over HTTPS to a third party (`elevenlabs`) or to a server you run (`http`). Only use a cloned voice you have the rights and consent for: your own, or one whose owner agreed. This repo contains no cloned voice, no recording and no celebrity voice, and will not. The reference recording of a clone stays on the remote side and is only named by an id.
+**Read this first.** With a remote provider, the text of each spoken reply (and nothing else: no mail, no notes, no history) is sent over HTTPS to a third party (`elevenlabs`) or to a server you run (`http`). Only use a cloned voice you have the rights and consent for: your own, or one whose owner agreed. This repo contains no cloned voice, no recording of a person and no celebrity voice, and will not; its only voice sample is a synthetic one (`assets/voices/`). The reference recording of a clone stays on the remote side and is only named by an id.
 
 | Setting | |
 |---|---|
@@ -62,7 +62,7 @@ Restart the agent, then ask Ted for a voice answer: you should receive a beep as
 
 ## Local cloned voice (`qwen`)
 
-Nothing leaves the Mac. Ted speaks in the voice of a reference recording **you provide** (your own voice, or one whose owner agreed; this repo ships none), with Qwen3-TTS running locally through mlx-audio. Apple Silicon only. English only: keep `TTS_LANGUAGES=en`, other languages still go out as text.
+Nothing leaves the Mac. Ted speaks in the voice of a reference recording. Without settings it uses the **built-in sample voice** (`assets/voices/default.wav`): a synthetic voice with no real person behind it, made with the stock Kokoro voice `am_onyx` (Apache-2.0; see `assets/voices/README.md`). For a voice of your own, provide a recording (your own voice, or one whose owner agreed; this repo ships no recording of anyone) with Qwen3-TTS running locally through mlx-audio. Apple Silicon only. English only: keep `TTS_LANGUAGES=en`, other languages still go out as text.
 
 ```
 npm run setup:tts-qwen        # venv + mlx-audio + model into state/tts-qwen/ (about 2.5 GB; never run by npm install or CI)
@@ -70,11 +70,12 @@ npm run setup:tts-qwen        # venv + mlx-audio + model into state/tts-qwen/ (a
 ```
 # .env
 TTS_PROVIDER=qwen
+# Optional: both unset = the built-in sample voice. Set both to use your own recording instead.
 TTS_REF_AUDIO=state/voice/ref.wav     # 5 to 20 s of clean speech; a path (relative to the harness folder, or absolute)
 TTS_REF_TEXT=state/voice/ref.txt      # exactly what is said in it: the words, or the path of a text file
 # TTS_QWEN_MODEL=mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit   # or ...-1.7B-Base-8bit: better, slower, more memory
 ```
-Keep the reference under `state/` (git-ignored) or elsewhere outside the repo. To change the voice, point these two settings at another recording and restart Ted.
+Keep your own reference under `state/` (git-ignored) or elsewhere outside the repo. To change the voice, point these two settings at another recording and restart Ted. Setting only one of the two counts as your own reference (the sample is never mixed in), so set both. `npm run doctor` says whether the "built-in sample voice" or your own file is in use.
 
 How it runs: the model takes about 4 s to load and 3 to 4 GB of memory, so Ted starts one small server (`packages/signal/scripts/qwen-tts-server.py`) at start-up and keeps it loaded, like the warm Claude processes. It listens on 127.0.0.1 on a free port and wants a random key made at each start. It is stopped after `WARM_IDLE_MINUTES` (default 60) without a spoken reply, which frees the memory; the next reply starts it again (a few seconds slower). `WARM=off` skips the start-up launch (it then starts on the first spoken reply). Owner chat and groups use the same code path.
 

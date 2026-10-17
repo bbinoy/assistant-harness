@@ -118,6 +118,9 @@ export function browseCheck(line: Line, on: boolean, status: BrowseStatus): void
 }
 
 // The skills that must ship with the repo for the configured setup.
+/** Which reference recording the local cloned voice uses, for the doctor. */
+export const qwenReference = (q: { builtIn?: boolean; refAudio: string }): string => (q.builtIn ? "built-in sample voice" : `your own file ${q.refAudio}`);
+
 export const requiredSkills = (mail: boolean, provider: string = settings.mailProvider): string[] => ["daily-brief", ...(mail ? [provider === "gmail" ? "gmail" : "mailbird"] : []), "calendar", "notion-tasks", "meeting-prep", "setup"];
 
 // What the heartbeat line says after "last tick": mail is only mentioned when there is mail.
@@ -204,8 +207,8 @@ export async function doctor() {
   const tts = providerReady(settings.tts);
   const remote = settings.tts.provider === "elevenlabs" || settings.tts.provider === "http";
   const qwen = settings.tts.provider === "qwen" ? qwenReady(settings.tts.qwen) : undefined;
-  const where = settings.tts.provider === "elevenlabs" ? "ElevenLabs (spoken text is sent to elevenlabs.io)" : settings.tts.provider === "http" ? `your own server at ${new URL(settings.tts.http.url).host} (spoken text is sent there)` : settings.tts.provider === "qwen" ? (qwen!.ok ? `local cloned voice (Qwen3-TTS ${settings.tts.qwen.model.split("/").pop()}); fallback: ${settings.tts.fallback}` : `Qwen voice not ready (${qwen!.missing.join(", ")}); ${tts.ok ? "Kokoro speaks instead" : "no fallback"}`) : `local Kokoro, voice ${settings.tts.kokoro.voice}`;
-  line(tts.ok && (!qwen || qwen.ok) || !settings.voiceReplies ? true : "warn", "spoken replies", !settings.voiceReplies ? "off (VOICE_REPLIES=off)" : tts.ok ? `${where}${remote ? `; fallback: ${settings.tts.fallback}` : ""}${process.env.SIGNAL_ACCOUNT ? "" : " (needs the assistant's own Signal account)"}` : `not set up, missing: ${tts.missing.join(", ")} (${remote ? "install ffmpeg" : qwen ? "npm run setup:tts-qwen, then set TTS_REF_AUDIO and TTS_REF_TEXT" : "run scripts/setup-tts.sh"})`);
+  const where = settings.tts.provider === "elevenlabs" ? "ElevenLabs (spoken text is sent to elevenlabs.io)" : settings.tts.provider === "http" ? `your own server at ${new URL(settings.tts.http.url).host} (spoken text is sent there)` : settings.tts.provider === "qwen" ? (qwen!.ok ? `local cloned voice (Qwen3-TTS ${settings.tts.qwen.model.split("/").pop()}; reference: ${qwenReference(settings.tts.qwen)}); fallback: ${settings.tts.fallback}` : `Qwen voice not ready (${qwen!.missing.join(", ")}); ${tts.ok ? "Kokoro speaks instead" : "no fallback"}`) : `local Kokoro, voice ${settings.tts.kokoro.voice}`;
+  line(tts.ok && (!qwen || qwen.ok) || !settings.voiceReplies ? true : "warn", "spoken replies", !settings.voiceReplies ? "off (VOICE_REPLIES=off)" : tts.ok ? `${where}${remote ? `; fallback: ${settings.tts.fallback}` : ""}${process.env.SIGNAL_ACCOUNT ? "" : " (needs the assistant's own Signal account)"}` : `not set up, missing: ${tts.missing.join(", ")} (${remote ? "install ffmpeg" : qwen ? "npm run setup:tts-qwen (optionally set TTS_REF_AUDIO and TTS_REF_TEXT for your own voice)" : "run scripts/setup-tts.sh"})`);
 
   const dream = readJson<{ lastRunAt?: string }>("state/dream.json", {});
   line(true, "nightly dream", settings.dream ? `once a day before the brief; last run ${dream.lastRunAt ? localTime(dream.lastRunAt) : "not yet"}` : "off (DREAM=off)");
