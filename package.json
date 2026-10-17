@@ -6,7 +6,7 @@
     "start": "node --conditions=workspace-source --env-file=.env src/main.ts",
     "daemon": "./run-daemon.sh",
     "typecheck": "tsc",
-    "test": "HARNESS_DATA_DIR=$(mktemp -d) node --conditions=workspace-source --test test/*.test.ts packages/*/test/*.test.ts",
+    "test": "HARNESS_DATA_DIR=$(mktemp -d) node --conditions=workspace-source --import ./test/setup.ts --test test/*.test.ts packages/*/test/*.test.ts",
     "report": "node --conditions=workspace-source --env-file-if-exists=.env src/cli.ts report",
     "restore": "node --conditions=workspace-source --env-file-if-exists=.env src/cli.ts restore",
     "doctor": "node --conditions=workspace-source --env-file-if-exists=.env src/cli.ts doctor",

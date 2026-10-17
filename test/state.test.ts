@@ -4,7 +4,7 @@ import { readdirSync, statSync } from "node:fs";
 import { overBudget, recordCost, spentToday } from "../src/budget.ts";
 import { loadSettings, settings } from "../src/settings.ts";
 import { appendLine, dataPath, readJson, readText, secureDataDirs, writeJson, writeText } from "../src/state.ts";
-import { chmodSync, existsSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 test("tests run against a throwaway data directory, never the real one", () => {
@@ -41,6 +41,7 @@ test("state: all three folders are 700 and their files 600; paths outside them a
   appendLine("logs/t.log", "y");
   writeText("memory/t.md", "x");
   chmodSync(dataPath("memory/t.md"), 0o644);
+  mkdirSync(join(settings.memoryDir, "sub"), { recursive: true }); // a folder inside is left to its owner, only files are tightened
   secureDataDirs();
   for (const d of [settings.stateDir, settings.logsDir, settings.memoryDir]) assert.equal(statSync(d).mode & 0o777, 0o700, d);
   assert.equal(statSync(dataPath("memory/t.md")).mode & 0o777, 0o600);

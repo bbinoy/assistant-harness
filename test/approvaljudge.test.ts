@@ -2,8 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { forTask, runJudge, discardJudge, prepareJudge, SYSTEM, withTimeout } from "../src/approvaljudge.ts";
 import { judgeAnswer } from "../src/approvalmodel.ts";
-import { parseAnswer } from "../src/approvalprompt.ts";
-import { judgeAction, parseVerdict } from "../src/autojudge.ts";
+import { judgeAction } from "../src/autojudge.ts";
 import { settings } from "../src/settings.ts";
 
 const setWarm = (v: boolean) => ((settings as { warm: boolean }).warm = v);
@@ -82,7 +81,7 @@ test("each task states itself first in the prompt", async () => {
 });
 
 test("answer task fails closed: anything but exact ids and enum values is no answer", async () => {
-  for (const out of [undefined, null, {}, { target: "A1", outcome: "APPROVE" }, { target: "A1", outcome: "yes" }, { target: "A1", outcome: ["approve"] }, { target: "A9", outcome: "approve" }, { target: "A1", outcome: "approve " }]) assert.equal(parseAnswer(out, ["A1"]), undefined, JSON.stringify(out));
+  // (the pure parsing of bad values is in approvalflow.test.ts: parseAnswer)
   // no answer at all, a thrown error, a slow answer, an error result
   const was = settings.warm;
   setWarm(false);
@@ -101,8 +100,7 @@ test("answer task fails closed: anything but exact ids and enum values is no ans
 });
 
 test("action task fails closed: anything but an exact auto is ask", async () => {
-  for (const out of [undefined, null, {}, { decision: "AUTO" }, { decision: "auto " }, { decision: true }, { decision: ["auto"] }, { reason: "auto" }]) assert.equal(parseVerdict(out).decision, "ask", JSON.stringify(out));
-  assert.equal(parseVerdict({ decision: "auto", reason: "ok" }).decision, "auto");
+  // (the pure parsing of bad values is in autojudge.test.ts: parseVerdict)
   const was = settings.warm;
   setWarm(false);
   try {

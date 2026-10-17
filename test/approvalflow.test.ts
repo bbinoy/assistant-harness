@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { tick as settle } from "./util.ts";
 import { answer, answerReaction, request, type AnswerDeps } from "../src/approvals.ts";
 import { makeApprove, sameArgs } from "../src/approvalask.ts";
 import { approvalLines } from "../src/approvalreport.ts";
@@ -17,7 +18,6 @@ const CAL = "mcp__claude_ai_Google_Calendar__update_event";
 const MAIL = "mcp__claude_ai_Gmail__send_message";
 const cal: { tool: string; input: Record<string, unknown> } = { tool: CAL, input: { eventId: "e1", summary: "Dentist", startTime: "2026-10-20T10:00:00", endTime: "2026-10-20T11:00:00" } };
 const mail: { tool: string; input: Record<string, unknown> } = { tool: MAIL, input: { to: ["alice@example.com"], bcc: ["carol@example.com"], subject: "Agenda" } };
-const settle = () => new Promise((r) => setTimeout(r, 5));
 
 let nextTs = 50_000;
 function ask(desc: string, call = cal, background = false, question?: string) {
@@ -41,7 +41,7 @@ test("parseAnswer: exact ids and enum values only", () => {
   assert.deepEqual(parseAnswer({ target: "A2", outcome: "approve" }, ids)?.target, "A2");
   assert.equal(parseAnswer({ target: "none", outcome: "unrelated" }, ids)?.outcome, "unrelated");
   assert.equal(parseAnswer({ target: "unclear", outcome: "other", reply: "Which one?" }, ids)?.reply, "Which one?");
-  for (const bad of [undefined, null, {}, { target: "A3", outcome: "approve" }, { target: "a1", outcome: "approve" }, { target: "A1", outcome: "Approve" }, { target: "A1", outcome: "yes" }, { target: "none", outcome: "approve" }, { target: "A1", outcome: "unrelated" }, { target: ["A1"], outcome: "approve" }, { target: "A1" }, "approve"]) {
+  for (const bad of [undefined, null, {}, { target: "A3", outcome: "approve" }, { target: "a1", outcome: "approve" }, { target: "A1", outcome: "Approve" }, { target: "A1", outcome: "yes" }, { target: "none", outcome: "approve" }, { target: "A1", outcome: "unrelated" }, { target: ["A1"], outcome: "approve" }, { target: "A1" }, "approve", { target: "A1", outcome: "APPROVE" }, { target: "A1", outcome: "approve " }, { target: "A1", outcome: ["approve"] }, { target: "A9", outcome: "approve" }]) {
     assert.equal(parseAnswer(bad, ids), undefined, JSON.stringify(bad));
   }
 });

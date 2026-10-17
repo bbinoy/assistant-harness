@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { sleep } from "./util.ts";
 import { pausing, RunTimeout, withCeiling } from "../src/ceiling.ts";
 import { prepareGroupChat, runGroupTurn } from "../src/agent.ts";
 import { runAgent } from "../src/agentrun.ts";
@@ -7,7 +8,6 @@ import { group } from "../src/conversation.ts";
 import { loadSettings, settings } from "../src/settings.ts";
 import { readAudit } from "../src/audit.ts";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const never = () => new Promise<never>(() => {});
 
 // ---- the ceiling ----

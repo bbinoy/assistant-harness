@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { tick } from "./util.ts";
 import { rmSync } from "node:fs";
 import { createPipeline, group, owner, type Incoming } from "../src/conversation.ts";
 import { createOutbound } from "../src/outbound.ts";
@@ -31,7 +32,6 @@ function hold() {
     wait: async () => void (await gate),
   };
 }
-const tick = () => new Promise((r) => setTimeout(r, 5));
 
 function rig(over: { run?: (prompt: string) => Promise<string>; gate?: () => Promise<any>; answer?: (text: string) => Promise<any> } = {}) {
   const prompts: string[] = [];
