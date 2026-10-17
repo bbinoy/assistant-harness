@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { tick } from "./util.ts";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -104,7 +105,6 @@ test("private chat: typing is already showing when the model is asked, and a que
   const seen: number[] = [];
   let n = 0;
   const { r, pipeline } = rig({ run: async () => (seen.push(r.typing.length), ++n === 1 && (await hold), "ok") });
-  const tick = () => new Promise((res) => setTimeout(res, 5));
   const first = pipeline.handleIncoming(owner(), msg());
   await tick();
   const second = pipeline.handleIncoming(owner(), msg({ text: "and also", timestamp: 112 }));
@@ -285,7 +285,6 @@ const hold = () => {
   const gate = new Promise<void>((r) => (release = r));
   return { wait: () => gate, release };
 };
-const tick = () => new Promise((r) => setTimeout(r, 5));
 
 test("private chat: a burst of three messages is ONE run, oldest first, each with its own quote and voice marks", async () => {
   const h = hold();

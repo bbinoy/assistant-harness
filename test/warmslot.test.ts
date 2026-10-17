@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { tick } from "./util.ts";
 import { firstWarm, SpareSlot } from "../src/warmslot.ts";
 import { askGateWith, prepareGate } from "../src/gate.ts";
 import { prepareGroupChat, runGroupTurn } from "../src/agent.ts";
@@ -9,7 +10,6 @@ import { loadSettings, settings } from "../src/settings.ts";
 import { writeJson } from "../src/state.ts";
 
 const T0 = new Date(2026, 9, 14, 9, 0, 0);
-const tick = () => new Promise((res) => setTimeout(res, 5));
 
 // ---- the slot ----
 

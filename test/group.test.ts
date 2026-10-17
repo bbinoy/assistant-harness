@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { defer, tick } from "./util.ts";
 import { createPipeline, group, type Pipeline } from "../src/conversation.ts";
 import { createOutbound } from "../src/outbound.ts";
 import { groupName, createGroupBrain, groupPrompt, groupWakePrompt, ownerInGroup, speaker } from "../src/group.ts";
@@ -486,13 +487,7 @@ test("groups: in tagged-only mode an unaddressed picture is not even opened", as
   }
 });
 
-const defer = <T>() => {
-  let resolve!: (v: T) => void;
-  const promise = new Promise<T>((r) => (resolve = r));
-  return { promise, resolve };
-};
 const verdict = (act: boolean, over: object = {}) => ({ act, task: "task" as const, delaySeconds: 0, nextCheckMinutes: 30, ...over });
-const tick = () => new Promise((res) => setTimeout(res, 5));
 
 test("groups: the gate is asked when an untagged message arrives, while the settling pause is still running", async () => {
   const order: string[] = [];

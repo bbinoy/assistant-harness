@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { sleep } from "./util.ts";
+const tick = () => sleep(10);
 import { startHeartbeat, startJobs, type MailSource } from "../src/heartbeat.ts";
 import { settings } from "../src/settings.ts";
 
 // The heartbeat's mail check and the tick jobs (wake-ups, dream, brief, radar) are independent: a failing or hanging one
 // never keeps another from running.
 
-const tick = () => new Promise((r) => setTimeout(r, 10));
 
 test("startJobs: a job that throws (sync or async) or never finishes does not stop the others", async () => {
   const ran: string[] = [];

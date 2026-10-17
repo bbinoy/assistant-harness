@@ -28,7 +28,7 @@ test("judge modes: shadow never skips the question; chat only in chat; broad eve
 
 test("judge answers: anything but an exact auto is ask; slow or broken runs ask", async () => {
   assert.deepEqual(parseVerdict({ decision: "auto", reason: "matches the request" }), { decision: "auto", reason: "matches the request" });
-  for (const bad of [undefined, null, {}, { decision: "AUTO" }, { decision: "yes" }, "auto"]) assert.equal(parseVerdict(bad).decision, "ask");
+  for (const bad of [undefined, null, {}, { decision: "AUTO" }, { decision: "auto " }, { decision: "yes" }, { decision: true }, { decision: ["auto"] }, { reason: "auto" }, "auto"]) assert.equal(parseVerdict(bad).decision, "ask");
   const input = { source: "chat" as const, description: "📅 Create calendar event" };
   assert.equal((await judgeAction(input, async () => ({ decision: "auto", reason: "ok" }))).decision, "auto");
   assert.equal((await judgeAction(input, async () => { throw new Error("boom"); })).decision, "ask");

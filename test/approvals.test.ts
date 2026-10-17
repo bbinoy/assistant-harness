@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { tick as settle } from "./util.ts";
 import { answer, answerReaction, formatWait, request } from "../src/approvals.ts";
 
 // Background approvals (wake-ups, presets, the handler) must not swallow the owner's chat messages.
@@ -9,7 +10,6 @@ const ask = (background: boolean, ts = 500) => {
   return asked;
 };
 const never = { judge: async () => assert.fail("the judge must not be called"), recent: () => [] };
-const settle = () => new Promise((r) => setTimeout(r, 5));
 
 test("background approval: the only open one takes an exact yes / no without a judge call", async () => {
   const d = ask(true);

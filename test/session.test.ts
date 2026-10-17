@@ -70,10 +70,12 @@ test("session: quiet compaction waits for the conversation to be still; urgent n
 });
 
 test("session: a session the SDK can no longer resume is forgotten, any other error is not", async () => {
-  const { writeFileSync, readFileSync } = await import("node:fs");
+  const { mkdirSync, writeFileSync, readFileSync } = await import("node:fs");
+  const { dirname } = await import("node:path");
   const { forgetUnresumable } = await import("../src/chatsession.ts");
   const file = `state/session-${process.pid}.json`; // state files are relative to the data dir (HARNESS_DATA_DIR in tests)
   const { dataPath } = await import("../src/state.ts");
+  mkdirSync(dirname(dataPath(file)), { recursive: true }); // a fresh data directory has no state/ yet
   writeFileSync(dataPath(file), JSON.stringify({ sessionId: "s1", costUsd: 3, baseTokens: 50_000, lastContextTokens: 80_000, seenAt: "x" }));
   assert.equal(forgetUnresumable(file, new Error("network down"), "chat"), false);
   assert.equal(JSON.parse(readFileSync(dataPath(file), "utf8")).sessionId, "s1");

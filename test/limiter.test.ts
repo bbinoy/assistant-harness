@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { sleep } from "./util.ts";
 import { Limiter } from "../src/limiter.ts";
 import { loadSettings } from "../src/settings.ts";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test("limiter: never more than the limit at once, every job runs, in arrival order", async () => {
   const lim = new Limiter(() => 2);

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { tick as settle } from "./util.ts";
 import { answer, answerReaction, request } from "../src/approvals.ts";
 import { makeApprove } from "../src/approvalask.ts";
 import type { AnswerJudgement } from "../src/approvalprompt.ts";
@@ -10,7 +11,6 @@ import { factsOf, validateQuestion } from "../src/questionfacts.ts";
 
 // The payment approval: the owner's typed yes, and nothing else, approves a card payment. Fake values only.
 const call = { tool: "mcp__browser__browser_type", input: { target: "e8", text: "{{card:number}}" } };
-const settle = () => new Promise((r) => setTimeout(r, 5));
 const jOf = (outcome: AnswerJudgement["outcome"], target = "A1"): typeof import("../src/approvalmodel.ts").judgeAnswer => async () => ({ target, outcome }) as AnswerJudgement;
 const ask = (ts: number, typedYes: boolean) => request(async () => ts, "💳 Card payment approval", call, undefined, { typedYes });
 const never = { judge: async () => assert.fail("the judge must not be called"), recent: () => [] };
