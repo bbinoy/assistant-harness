@@ -12,10 +12,10 @@ import type { Verdict } from "../src/autojudge.ts";
 import { BrowseGuard, resultText } from "../src/browseguard.ts";
 import { cdpFrames, freePort } from "../src/browsecdp.ts";
 import { browserServer } from "../src/browseserver.ts";
-import { CardStore, KillSwitch, openCardAccess } from "../src/card.ts";
+import { KillSwitch, openCardAccess } from "../src/card.ts";
 import { Ledger } from "../src/payments.ts";
 import { makeCanUseTool } from "../src/permissions.ts";
-import { ProfileStore } from "../src/profile.ts";
+import { fakeCardStore } from "./fakebao.ts";
 
 // The card flow against a REAL headless Chromium and the real @playwright/mcp server, on local fake checkouts (test/fixtures/checkout): a shop, a hosted
 // payment page of a "known payment provider" (checkout.stripe.com), and the payment provider's card fields in a cross-origin iframe (js.stripe.com).
@@ -103,11 +103,8 @@ async function start(t: TestContext, o: { ads?: boolean } = {}): Promise<Env | u
   const client = new Client({ name: "cardbrowser-test", version: "1.0.0" });
   await client.connect(new StdioClientTransport({ command: stdio.command, args: [...stdio.args, "--ignore-https-errors"], env: stdio.env }));
 
-  // an in-memory keychain that remembers its key
-  let key: string | undefined;
-  const kc = { get: async () => key, set: async (hex: string) => void (key = hex) };
-  const cards = new CardStore(new ProfileStore(kc, join(dir, "card.enc")));
-  await cards.save({ pan: PAN, expMonth: 12, expYear: 2099, cvc: CVC, label: "Wise", last4: "4242", currency: "CHF" });
+  // the card in an in-process fake of OpenBao
+  const cards = await fakeCardStore({ pan: PAN, expMonth: 12, expYear: 2099, cvc: CVC, label: "Wise", last4: "4242", currency: "CHF" });
   const ledger = new Ledger(`state/payments-test-browser-${process.pid}-${Date.now()}.jsonl`);
   const access = (await openCardAccess({ store: cards, kill: new KillSwitch(`state/card-test-browser-${process.pid}.disabled`), ledger, caps: { purchaseMinor: 5000, dayMinor: 10000 } }))!;
   const g = new BrowseGuard({ mode: "owner", task: "buy the ticket", outDir, resolver: publicDns, card: access, frames: cdpFrames(cdpPort) });

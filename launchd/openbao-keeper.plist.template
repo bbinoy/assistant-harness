@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The keeper: at login and then every minute it unseals OpenBao from this Mac's Keychain if it is sealed (after a reboot or a
+         crash restart) and renews the two tokens before they lapse. It prints nothing when there is nothing to do.
+         The settings it needs are written here by `npm run openbao -- setup` (none is a secret). -->
+    <key>Label</key>
+    <string>__LABEL__</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>__DIR__/scripts/openbao-keep.sh</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+__ENV__
+    </dict>
+    <key>Umask</key>
+    <integer>63</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>__LOGS__/keeper.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOGS__/keeper.log</string>
+</dict>
+</plist>

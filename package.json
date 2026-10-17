@@ -21,6 +21,7 @@
     "postinstall": "node scripts/setup-browse.ts --quiet",
     "profile": "node --conditions=workspace-source --env-file-if-exists=.env scripts/profile.ts",
     "card": "node --conditions=workspace-source --env-file-if-exists=.env scripts/card.ts",
+    "openbao": "node --conditions=workspace-source --env-file-if-exists=.env scripts/openbao.ts",
     "browse:smoke": "node --conditions=workspace-source --env-file-if-exists=.env scripts/browse-smoke.ts"
   },
   "devDependencies": {

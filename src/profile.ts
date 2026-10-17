@@ -1,55 +1,13 @@
-import { execFile } from "node:child_process";
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { normalizeDomain } from "./domains.ts";
-import { settings } from "./settings.ts";
+import { BaoError } from "./openbao.ts";
+import { ownerSecrets, SecretsError, type TenantSecrets } from "./secrets.ts";
 
 // The owner's saved details (name, address, passport number, loyalty numbers...) for the browse worker. NOT secrets in the card-and-password
-// sense (those are never stored, see browserules.ts), but private: they sit in one file under state/ encrypted with AES-256-GCM, and the
-// key lives only in the macOS Keychain (never on disk, never in .env). The values are entered ONLY at a local terminal (profilecli.ts):
-// never through the chat, which is logged and goes to the model. Code reads them to type into a page (browseguard.ts); the model sees key
-// names, never values. Everything fails closed: no Keychain, a wrong key or a changed file means "no profile", never a guess.
-
-// ---- the Keychain (the `security` tool, called with arguments, never through a shell) ----
-
-export interface Keychain {
-  get(): Promise<string | undefined>; // the key as 64 hex characters; undefined: there is none yet. Throws when the Keychain cannot be read
-  set(hex: string): Promise<void>;
-}
-export const KEYCHAIN_SERVICE = "ted-profile-key";
-const KEYCHAIN_ACCOUNT = "ted";
-
-const run = (args: string[], stdin?: string): Promise<{ code: number; out: string }> =>
-  new Promise((resolve, reject) => {
-    const child = execFile("security", args, { timeout: 15_000, encoding: "utf8" }, (err, stdout) => {
-      if (!err) return resolve({ code: 0, out: stdout });
-      const code = (err as { code?: unknown }).code;
-      if (typeof code === "number") return resolve({ code, out: stdout });
-      reject(new Error("the macOS Keychain could not be used (is this a Mac with the `security` tool?)"));
-    });
-    if (stdin !== undefined) child.stdin?.end(stdin);
-  });
-
-export const macKeychain = (service = KEYCHAIN_SERVICE): Keychain => ({
-  async get() {
-    const r = await run(["find-generic-password", "-s", service, "-a", KEYCHAIN_ACCOUNT, "-w"]);
-    if (r.code === 44) return undefined; // errSecItemNotFound
-    if (r.code !== 0) throw new Error(`the Keychain refused to give the key (security exit ${r.code})`);
-    const hex = r.out.trim();
-    if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error("the Keychain item is not a profile key");
-    return hex;
-  },
-  async set(hex) {
-    if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error("not a key");
-    // The key goes in through the tool's own stdin (interactive mode), not as an argument, so it never shows in the process list.
-    const r = await run(["-i"], `add-generic-password -s ${service} -a ${KEYCHAIN_ACCOUNT} -w ${hex} -U\n`);
-    if (r.code !== 0) throw new Error(`the Keychain refused to store the key (security exit ${r.code})`);
-    if ((await this.get()) !== hex) throw new Error("the key was not stored in the Keychain");
-  },
-});
-
-// ---- the encrypted file ----
+// sense (those are never stored, see browserules.ts), but private: they live in OpenBao (secrets.ts, openbao.ts) as one item per key at
+// tenants/<tenant>/profile/<key>, reached with the app's own narrowly scoped token (kept in the macOS Keychain). The values are entered ONLY at
+// a local terminal (profilecli.ts): never through the chat, which is logged and goes to the model. Code reads them to type into a page
+// (browseguard.ts); the model sees key names, never values. Everything fails closed: OpenBao not running, sealed, a refused token or an
+// item that is not a whole entry means "no profile", never a guess.
 
 export type Kind = "name" | "email" | "phone" | "address" | "nationality" | "dob" | "id" | "other";
 export const KINDS: readonly Kind[] = ["name", "email", "phone", "address", "nationality", "dob", "id", "other"];
@@ -61,111 +19,68 @@ export interface Entry {
 }
 export type Entries = Record<string, Entry>;
 
-const AAD = Buffer.from("ted-profile-v1");
 // Sensitive: only on a domain the owner named, and only masked in the approval question. Everything but name, email, phone, address, nationality.
 export const SENSITIVE_KINDS: ReadonlySet<Kind> = new Set<Kind>(["dob", "id", "other"]);
 export const isSensitive = (e: Pick<Entry, "kind">): boolean => SENSITIVE_KINDS.has(e.kind);
 export const KEY_NAME = /^[a-z][a-z0-9._-]{0,39}$/;
 export const MAX_VALUE = 200;
 
-// The card (card.ts) is a second kind of item in the same sealed file: the profile readers below never return it, only readAll/writeAll do.
-export interface Payload {
-  entries: Entries;
-  card?: unknown; // validated by card.ts (cardOf); this file only keeps it sealed
-}
-
-export const seal = (entries: Entries, hexKey: string): string => sealAll({ entries }, hexKey);
-
-export function sealAll(payload: Payload, hexKey: string): string {
-  const iv = randomBytes(12);
-  const c = createCipheriv("aes-256-gcm", Buffer.from(hexKey, "hex"), iv);
-  c.setAAD(AAD);
-  const ct = Buffer.concat([c.update(JSON.stringify({ entries: payload.entries, ...(payload.card !== undefined ? { card: payload.card } : {}) }), "utf8"), c.final()]);
-  return JSON.stringify({ v: 1, iv: iv.toString("base64"), tag: c.getAuthTag().toString("base64"), ct: ct.toString("base64") });
-}
-
-// Throws on a wrong key, a changed file or anything that is not a sealed profile.
-export const unseal = (file: string, hexKey: string): Entries => unsealAll(file, hexKey).entries;
-
-export function unsealAll(file: string, hexKey: string): Payload {
-  const o = JSON.parse(file) as { v?: number; iv?: string; tag?: string; ct?: string };
-  if (o.v !== 1 || typeof o.iv !== "string" || typeof o.tag !== "string" || typeof o.ct !== "string") throw new Error("not a profile file");
-  const d = createDecipheriv("aes-256-gcm", Buffer.from(hexKey, "hex"), Buffer.from(o.iv, "base64"));
-  d.setAAD(AAD);
-  d.setAuthTag(Buffer.from(o.tag, "base64"));
-  const plain = Buffer.concat([d.update(Buffer.from(o.ct, "base64")), d.final()]).toString("utf8");
-  const body = JSON.parse(plain) as { entries?: Entries; card?: unknown };
-  const parsed = body.entries;
-  if (!parsed || typeof parsed !== "object") throw new Error("not a profile");
-  const out: Entries = {};
-  for (const [k, e] of Object.entries(parsed)) {
-    if (!KEY_NAME.test(k) || typeof e?.value !== "string" || !KINDS.includes(e.kind)) continue;
-    out[k] = { value: e.value, kind: e.kind, domains: Array.isArray(e.domains) ? e.domains.filter((x) => typeof x === "string") : [], ...(Array.isArray(e.labels) ? { labels: e.labels.filter((x) => typeof x === "string").slice(0, 8) } : {}) };
-  }
-  return { entries: out, ...(body.card !== undefined ? { card: body.card } : {}) };
-}
-
-export const profilePath = (): string => join(settings.stateDir, "profile.enc");
-
 export class ProfileError extends Error {}
 
-// The store: a file and a Keychain. `read` fails closed (ProfileError with the reason); `write` creates the key on the first save.
+// What OpenBao gave for one key, checked: anything that is not a whole entry is no entry.
+export function entryOf(key: string, raw: unknown): Entry | undefined {
+  const e = raw as Partial<Entry> | null | undefined;
+  if (!KEY_NAME.test(key) || !e || typeof e !== "object" || typeof e.value !== "string" || !KINDS.includes(e.kind as Kind)) return undefined;
+  const strings = (x: unknown): string[] => (Array.isArray(x) ? x.filter((v): v is string => typeof v === "string") : []);
+  return { value: e.value, kind: e.kind as Kind, domains: strings(e.domains), ...(Array.isArray(e.labels) ? { labels: strings(e.labels).slice(0, 8) } : {}) };
+}
+
+// Runs `f` on the holder's tenant secrets. The connection is made on first use (the Keychain and the pinned certificate are read then), and
+// every problem with it or with OpenBao is a ProfileError that says why and never holds a value.
+export async function inTenant<T>(holder: { secrets?: TenantSecrets }, f: (s: TenantSecrets) => Promise<T>): Promise<T> {
+  try {
+    holder.secrets ??= ownerSecrets();
+    return await f(holder.secrets);
+  } catch (e) {
+    if (e instanceof BaoError || e instanceof SecretsError) throw new ProfileError(e.message);
+    throw e;
+  }
+}
+
+// The store: the owner's profile items in OpenBao. Every call fails closed with a ProfileError that says why (never a value).
 export class ProfileStore {
-  private readonly keychain: Keychain;
-  private readonly path: string;
-  constructor(keychain: Keychain = macKeychain(), path: string = profilePath()) {
-    this.keychain = keychain;
-    this.path = path;
+  secrets?: TenantSecrets;
+  constructor(secrets?: TenantSecrets) {
+    this.secrets = secrets;
+  }
+  private call<T>(f: (s: TenantSecrets) => Promise<T>): Promise<T> {
+    return inTenant(this, f);
   }
 
-  exists(): boolean {
-    return existsSync(this.path);
-  }
-
+  // All entries by key. A key that holds something that is not a whole entry is left out.
   async read(): Promise<Entries> {
-    return (await this.readAll()).entries;
-  }
-
-  // The whole sealed file: the profile entries and the card, if there is one. Only card.ts asks for the card.
-  async readAll(): Promise<Payload> {
-    if (!this.exists()) return { entries: {} };
-    if (statSync(this.path).mode & 0o077) throw new ProfileError(`${this.path} is readable by others: run chmod 600 on it`);
-    let key: string | undefined;
-    try {
-      key = await this.keychain.get();
-    } catch (e) {
-      throw new ProfileError((e as Error).message);
-    }
-    if (!key) throw new ProfileError("the profile file exists but the Keychain has no key for it");
-    try {
-      return unsealAll(readFileSync(this.path, "utf8"), key);
-    } catch {
-      throw new ProfileError("the profile file does not open with the Keychain key (changed, damaged or from another key)");
-    }
-  }
-
-  // Saving the profile keeps the card that is in the file (a file that cannot be opened is never overwritten).
-  async write(entries: Entries): Promise<void> {
-    const old = this.exists() ? (await this.readAll()).card : undefined;
-    await this.writeAll({ entries, ...(old !== undefined ? { card: old } : {}) });
-  }
-
-  async writeAll(payload: Payload): Promise<void> {
-    let key: string | undefined;
-    try {
-      key = await this.keychain.get();
-      if (!key) {
-        if (this.exists()) throw new ProfileError("the profile file exists but the Keychain has no key for it; not creating a new key over it");
-        key = randomBytes(32).toString("hex");
-        await this.keychain.set(key);
+    return this.call(async (s) => {
+      const out: Entries = {};
+      const items = await Promise.all((await s.names("profile")).map(async (k) => [k, await s.get("profile", k)] as const));
+      for (const [k, raw] of items) {
+        const e = entryOf(k, raw);
+        if (e) out[k] = e;
       }
-    } catch (e) {
-      throw e instanceof ProfileError ? e : new ProfileError((e as Error).message);
-    }
-    const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, sealAll(payload, key), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.path);
+      return out;
+    });
+  }
+
+  async get(key: string): Promise<Entry | undefined> {
+    return this.call(async (s) => entryOf(key, await s.get("profile", key)));
+  }
+
+  async set(key: string, entry: Entry): Promise<void> {
+    if (!KEY_NAME.test(key)) throw new ProfileError("not a valid key");
+    await this.call((s) => s.put("profile", key, { value: entry.value, kind: entry.kind, domains: entry.domains, ...(entry.labels ? { labels: entry.labels } : {}) }));
+  }
+
+  async delete(key: string): Promise<boolean> {
+    return this.call((s) => s.remove("profile", key));
   }
 }
 
@@ -236,7 +151,6 @@ export interface Profile {
   entries: Entries;
 }
 export async function loadProfile(store: ProfileStore = new ProfileStore(), onProblem: (reason: string) => void = () => {}): Promise<Profile | undefined> {
-  if (!store.exists()) return undefined;
   try {
     const entries = await store.read();
     return Object.keys(entries).length ? { entries } : undefined;

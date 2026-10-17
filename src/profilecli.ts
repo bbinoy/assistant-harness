@@ -51,31 +51,25 @@ export async function profileCli(argv: string[], d: CliDeps): Promise<number> {
       if (problem) return fail(d, `Not saved: ${problem}.`);
       // This is not a vault for card numbers or passwords: those are never typed by the assistant.
       if (looksLikeCardNumber(value) || sensitiveKind(key, value)) return fail(d, "Not saved: that looks like a card number, a password or a bank detail. Those are never stored and never typed by the assistant.");
-      const entries = await d.store.read();
-      const old = entries[key];
+      const old = await d.store.get(key);
       const entry: Entry = { value, kind, domains: domains.length ? domains : old?.domains ?? [], ...(csv(flag(rest, "labels")).length ? { labels: csv(flag(rest, "labels")) } : old?.labels ? { labels: old.labels } : {}) };
-      entries[key] = entry;
-      await d.store.write(entries);
+      await d.store.set(key, entry);
       d.out(`Saved ${key} (${kind}, ${value.length} characters).`);
       if (isSensitive(entry) && !entry.domains.length) d.out(`It will not be filled anywhere until you name the sites: npm run profile -- domains ${key} sbb.ch,trainline.com`);
       return 0;
     }
     if (cmd === "domains" && key) {
-      const entries = await d.store.read();
-      const e = entries[key];
+      const e = await d.store.get(key);
       if (!e) return fail(d, `No key ${key}.`);
       const { domains, bad } = cleanDomains(csv(rest[0]));
       if (bad.length) return fail(d, `Not a domain: ${bad.join(", ")}`);
       e.domains = domains;
-      await d.store.write(entries);
+      await d.store.set(key, e);
       d.out(domains.length ? `${key} may be typed on: ${domains.join(", ")} (and their subdomains).` : isSensitive(e) ? `${key} now has no domain: it will not be filled anywhere.` : `${key} may be typed on any https page.`);
       return 0;
     }
     if (cmd === "delete" && key) {
-      const entries = await d.store.read();
-      if (!entries[key]) return fail(d, `No key ${key}.`);
-      delete entries[key];
-      await d.store.write(entries);
+      if (!(await d.store.delete(key))) return fail(d, `No key ${key}.`);
       d.out(`Deleted ${key}.`);
       return 0;
     }

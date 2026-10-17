@@ -97,19 +97,47 @@ The skills are `daily-brief` (the brief's structure), `mailbird` (triage and dra
 
 On by default (`BROWSE=on`). `npm install` fetches the pinned `@playwright/mcp` and runs `npm run setup:browse`, which downloads a headless Chromium (about 100 MB) into `state/browse/browsers`, not anywhere global; delete that folder to remove it. If the download failed (offline, `BROWSE_SKIP_INSTALL=1`), run `npm run setup:browse` yourself; until then the browse tool answers "not set up" and `npm run doctor` says what is missing. The browser presents itself as the plain desktop Chrome of the same version (not "HeadlessChrome"), with the language `BROWSE_LOCALE` (default `en-GB`) and this machine's time zone; nothing else is disguised, and sites that block automated browsers (SNCF Connect, Rail Europe, bahn.de, Trainline's search) stay blocked. `BROWSE_BROWSER_PATH` points it at a Chromium or Chrome you already have. `BROWSE=off` removes the tool from every run. A real-world check that costs a few cents: `npm run browse:smoke` (example.com, the httpbin pizza form up to but not including its submit button; `-- submit` shows the approval text a commit step produces, declined; `-- big` a large page). See [SAFETY](SAFETY.md) for what it can and cannot do.
 
+## The secret store (OpenBao)
+
+Your saved details, the card and, later, tokens and API keys live in **OpenBao** (an open-source Vault fork) on this Mac, not in a file next to the code. It is a local service: it listens on `127.0.0.1` only, with TLS that Ted pins, keeps its data in `state/openbao/` (0700, not in git) and writes an audit log whose values are hashed. Ted reaches it with its own token (policy: only `tenants/owner/*`), which is kept in the macOS Keychain. See [SAFETY](SAFETY.md) for the whole picture.
+
+**Install and first setup (once).** In a terminal on this Mac, not through the chat:
+
+```
+npm run openbao -- setup
+```
+
+This downloads the pinned OpenBao release (2.7.1, Apple silicon, from github.com, SHA-256 checked; `npm run openbao -- install` does only that step), makes the certificate and the config, starts the server and a keeper job as launchd user agents (`com.<you>.ted-openbao`, `...-keeper`; `OPENBAO_LAUNCHD_LABEL` changes the name), initialises it with Shamir 2 of 3, mounts the key-value store, writes the owner policy and token, and revokes the temporary root token. Then it shows **three recovery shares, once**, and asks you to type the end of share 3 to confirm that you have them. **Record each of the three in a different safe place** (a password manager entry, a paper in a safe), never in this repository, a chat or a note on this Mac; any two unseal OpenBao. The Mac itself keeps shares 1 and 2 in the Keychain (items `ted-openbao-unseal-1` and `-2`) so that it can unseal itself; the screen and its scrollback are cleared afterwards. If you did not manage to record them, stop the jobs (`npm run openbao -- service uninstall`), delete `state/openbao/data` and run setup again: nothing is stored yet.
+
+**After a reboot.** Log in (FileVault needs that anyway). The server starts at login but sealed; the keeper job unseals it from the Keychain within a minute and also renews the tokens. Nothing to do. Check with `npm run openbao -- status` (or `npm run doctor`). If it stays sealed (the Keychain item is gone, or after moving to a new Mac): `npm run openbao -- unseal --recovery` asks for two of your recovery shares at hidden prompts; then `npm run openbao -- setup` again writes the Keychain items and tokens back.
+
+**Move the old profile (once).** If you used the earlier Keychain-sealed profile (`state/profile.enc`):
+
+```
+npm run openbao -- migrate
+```
+
+It reads the old file with its old key, writes every item (and the card) into OpenBao, reads them back and compares, and only then overwrites and deletes `state/profile.enc` and removes the key from the Keychain (item `ted-profile-key`). It prints counts, never values. Check with `npm run profile -- list` and `npm run card -- list`. Afterwards `src/legacyprofile.ts` and the `migrate` command can be deleted.
+
+**Backups.** `npm run openbao -- backup` writes a Raft snapshot into `state/openbao/backup/` (mode 0600). It is encrypted by OpenBao, so it is useless without the unseal shares; keep a copy off this Mac (with your normal backup) and keep the recovery shares apart from it. Restoring needs `bao operator raft snapshot restore` and the shares. The audit log (`state/openbao/audit/audit.log`) grows without limit; truncate it now and then while OpenBao is running (`: > state/openbao/audit/audit.log`).
+
+**Settings** (none is a secret, all optional, see `.env.example`): `OPENBAO_ADDR` (default `https://127.0.0.1:8200`), `OPENBAO_MOUNT` (`ted`), `OPENBAO_HOME` (`state/openbao`), `OPENBAO_ROLE` (`ted-owner`), `OPENBAO_KEYCHAIN_PREFIX` (`ted-openbao`), `OPENBAO_TIMEOUT_SECONDS`, `OPENBAO_CACHE_SECONDS`. The app token is never an environment variable.
+
+**Good to know.** The Mac's Keychain holds enough shares to unseal, so sealing protects the data directory, backups and a stolen disk, not someone logged in as you. Lost recovery sheet while everything works: run setup on a fresh data directory, or change the shares with OpenBao's `operator rekey`, which needs `disable_unauthed_rekey_endpoints = false` in `state/openbao/config.hcl` for the time it takes (setup rewrites the config). The setup tool's own token (`ted-openbao-operator` in the Keychain) can only ask for a root token and take snapshots; if it is lost, OpenBao's recovery mode (`bao server -recovery`) is the way in. Upgrading OpenBao means changing the pinned version and checksum in `src/openbaoadmin.ts` (from the release's `checksums.txt`) and running setup.
+
 ## Saved details for forms (optional)
 
 The browse worker can fill a form with your name, address, date of birth, passport number or loyalty numbers without ever seeing them. You enter them **in a terminal on this Mac, never in the chat** (the chat is logged and goes to the model):
 
 ```
-npm run profile -- set email                 # hidden prompt; the first save creates the encryption key in the macOS Keychain
+npm run profile -- set email                 # hidden prompt; needs the secret store (previous section)
 npm run profile -- set passport --domains sbb.ch,trainline.com
 npm run profile -- list                      # keys, kinds and sites; values masked
 npm run profile -- domains passport sbb.ch   # change the sites
 npm run profile -- delete passport
 ```
 
-Keys are lowercase words (`first_name`, `email`, `address.street`, `loyalty.sbb`); the kind (name, email, phone, address, nationality, dob, id, other) is guessed from the key or set with `--kind`. Name, e-mail, phone, address and nationality may be typed on any https page; date of birth, ID or passport and everything else are typed only on the sites you list, and nowhere until you do. The data is in `state/profile.enc` (encrypted, not in git); the key is only in the Keychain (item `ted-profile-key`), so losing the Keychain item means entering the values again. Card numbers, passwords and bank details are refused here (a payment card has its own command, see the next section). The final submit of a form that used your details always asks you first. See [SAFETY](SAFETY.md).
+Keys are lowercase words (`first_name`, `email`, `address.street`, `loyalty.sbb`); the kind (name, email, phone, address, nationality, dob, id, other) is guessed from the key or set with `--kind`. Name, e-mail, phone, address and nationality may be typed on any https page; date of birth, ID or passport and everything else are typed only on the sites you list, and nowhere until you do. The data is in the secret store (OpenBao, see the next section; `tenants/owner/profile/<key>`), not in a file next to the code. Card numbers, passwords and bank details are refused here (a payment card has its own command, see the next section). The final submit of a form that used your details always asks you first. See [SAFETY](SAFETY.md).
 
 ## Paying with a card (optional)
 
@@ -125,7 +153,7 @@ npm run card -- clear <id>                        # an unconfirmed payment you c
 npm run card -- delete
 ```
 
-The card, including its security code, is stored encrypted in the same file as your saved details (`state/profile.enc`, key in the Keychain); nothing shows more than the last four digits. Every payment asks you first on Signal: the question names the shop, where the card is typed, the total with its currency, the last four digits and an id, and **only a typed YES approves it** (a 👍 does not; 👎 or NO declines). The payment is then confirmed in the card's own app, where you should check the amount. Ted's own caps apply too: `CARD_CAP_PURCHASE` (25) per payment and `CARD_CAP_DAY` (50) per day in the card's currency, and `BROWSE_MAX_PAYMENTS` (1) per task; set a cap to 0 to turn card payments off. Groups and background tasks never get the card. If a shop's payment page cannot be checked (an embedded frame from a site Ted does not know, no clear total), Ted stops and gives you the link to pay yourself. A card run starts the browser with a debugging port on the loopback address. See [SAFETY](SAFETY.md).
+The card, including its security code, is stored in the secret store (`tenants/owner/card/primary`), apart from your saved details; nothing shows more than the last four digits. Every payment asks you first on Signal: the question names the shop, where the card is typed, the total with its currency, the last four digits and an id, and **only a typed YES approves it** (a 👍 does not; 👎 or NO declines). The payment is then confirmed in the card's own app, where you should check the amount. Ted's own caps apply too: `CARD_CAP_PURCHASE` (25) per payment and `CARD_CAP_DAY` (50) per day in the card's currency, and `BROWSE_MAX_PAYMENTS` (1) per task; set a cap to 0 to turn card payments off. Groups and background tasks never get the card. If a shop's payment page cannot be checked (an embedded frame from a site Ted does not know, no clear total), Ted stops and gives you the link to pay yourself. A card run starts the browser with a debugging port on the loopback address. See [SAFETY](SAFETY.md).
 
 ## Daily use
 
