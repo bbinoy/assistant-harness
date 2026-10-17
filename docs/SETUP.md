@@ -111,14 +111,6 @@ This downloads the pinned OpenBao release (2.7.1, Apple silicon, from github.com
 
 **After a reboot.** Log in (FileVault needs that anyway). The server starts at login but sealed; the keeper job unseals it from the Keychain within a minute and also renews the tokens. Nothing to do. Check with `npm run openbao -- status` (or `npm run doctor`). If it stays sealed (the Keychain item is gone, or after moving to a new Mac): `npm run openbao -- unseal --recovery` asks for two of your recovery shares at hidden prompts; then `npm run openbao -- setup` again writes the Keychain items and tokens back.
 
-**Move the old profile (once).** If you used the earlier Keychain-sealed profile (`state/profile.enc`):
-
-```
-npm run openbao -- migrate
-```
-
-It reads the old file with its old key, writes every item (and the card) into OpenBao, reads them back and compares, and only then overwrites and deletes `state/profile.enc` and removes the key from the Keychain (item `ted-profile-key`). It prints counts, never values. Check with `npm run profile -- list` and `npm run card -- list`. Afterwards `src/legacyprofile.ts` and the `migrate` command can be deleted.
-
 **Backups.** `npm run openbao -- backup` writes a Raft snapshot into `state/openbao/backup/` (mode 0600). It is encrypted by OpenBao, so it is useless without the unseal shares; keep a copy off this Mac (with your normal backup) and keep the recovery shares apart from it. Restoring needs `bao operator raft snapshot restore` and the shares. The audit log (`state/openbao/audit/audit.log`) grows without limit; truncate it now and then while OpenBao is running (`: > state/openbao/audit/audit.log`).
 
 **Settings** (none is a secret, all optional, see `.env.example`): `OPENBAO_ADDR` (default `https://127.0.0.1:8200`), `OPENBAO_MOUNT` (`ted`), `OPENBAO_HOME` (`state/openbao`), `OPENBAO_ROLE` (`ted-owner`), `OPENBAO_KEYCHAIN_PREFIX` (`ted-openbao`), `OPENBAO_TIMEOUT_SECONDS`, `OPENBAO_CACHE_SECONDS`. The app token is never an environment variable.

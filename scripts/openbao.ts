@@ -1,15 +1,13 @@
-// npm run openbao -- install|setup|status|unseal|keep|backup|service|migrate: the secret store of the app (docs/SETUP.md, src/openbaoadmin.ts).
+// npm run openbao -- install|setup|status|unseal|keep|backup|service: the secret store of the app (docs/SETUP.md, src/openbaoadmin.ts).
 // Local terminal only. Nothing here prints a secret except `setup`, which shows the three recovery shares once, on the terminal, and nowhere else.
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openbaoCheck } from "../src/doctor.ts";
 import { macKeychain } from "../src/keychain.ts";
-import { migrate } from "../src/legacyprofile.ts";
 import { Admin, installBinary, layoutOf, ensureCert, writeConfig, PIN } from "../src/openbaoadmin.ts";
 import { ensureNodePath, installJob, keeperPlist, removeJob, serverPlist, serviceNames } from "../src/openbaoservice.ts";
 import { readHiddenFromTerminal } from "../src/profilecli.ts";
-import { ownerSecrets } from "../src/secrets.ts";
 import { settings } from "../src/settings.ts";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -28,7 +26,6 @@ const USAGE = [
   "  keep [--quiet]       what the keeper job runs every minute: unseal if sealed, renew the tokens",
   "  backup               a Raft snapshot (encrypted by OpenBao) into " + layout.backups,
   "  service install|uninstall   the launchd jobs only",
-  "  migrate              one-time: move the old profile.enc into OpenBao, check it, then securely delete the file and its Keychain key",
 ];
 
 function line(ok: boolean | "warn", what: string, detail = ""): void {
@@ -76,7 +73,7 @@ async function main(argv: string[]): Promise<number> {
     await installJob(names.server, serverPlist(readFileSync(resolve(repo, "launchd/openbao.plist.template"), "utf8"), layout, names.server), layout).then((r) => out(`launchd ${names.server}: ${r}`));
     const confirmed = await admin.setup({ out, showShares });
     await installServices();
-    out("\nDone. Check: npm run doctor    Saved details: npm run profile -- set <key>    Old profile: npm run openbao -- migrate");
+    out("\nDone. Check: npm run doctor    Saved details: npm run profile -- set <key>");
     if (!confirmed) {
       out("\nWARNING: the recovery shares were NOT confirmed as recorded, and they were not cleared from your terminal. OpenBao works, but if this Mac or its Keychain is lost, only your recorded shares bring the secrets back.");
       out("Record them now from the scrollback above. If you cannot, start over while nothing is saved yet: see docs/SETUP.md (empty data directory).");
@@ -125,7 +122,6 @@ async function main(argv: string[]): Promise<number> {
     else for (const l of [names.keeper, names.server]) out(`${l}: ${(await removeJob(l)) ? "removed" : "was not installed"}`);
     return 0;
   }
-  if (cmd === "migrate") return migrate({ secrets: ownerSecrets(), keychain: macKeychain, out });
   USAGE.forEach(out);
   return cmd ? 1 : 0;
 }
