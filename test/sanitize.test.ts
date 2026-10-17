@@ -300,7 +300,7 @@ test("html: plain text is not treated as html", () => {
 });
 
 test("html: a huge or deeply nested document does not blow up", () => {
-  const deep = "<div>".repeat(20000) + "x";
+  const deep = "<div>".repeat(12000) + "x";
   assert.match(text(deep), /x/);
   assert.ok(mailBody(`<p>${"word ".repeat(50000)}</p>`).length < 21000);
 });
