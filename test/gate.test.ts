@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { group, owner, type Conversation } from "../src/conversation.ts";
-import { askGateWith, GATE_SCHEMA, gatePrompt, gateSystem, logTail, parseGate, styleSummary, tailLine } from "../src/gate.ts";
+import { askGateWith, GATE_SCHEMA, gatePrompt, gateSystem, logTail, parseGate, styleLines, styleSummary, tailLine } from "../src/gate.ts";
 import { clampCheck, lookDue, lookState, wakeText } from "../src/ledger.ts";
 import { compactIfNeeded, findMessage, messagesSince, noticeLines, recordMessage, type Kind, type Sent } from "../src/messages.ts";
 import { groupConversation } from "../src/dream.ts";
@@ -55,6 +55,21 @@ test("gate prompt: a message look sees the latest exchange with long lines cut, 
 
 test("gate prompt: the style the gate is told of is one compact line; no style, no personality section", () => {
   assert.equal(typeof styleSummary(T0), "string");
+  // the owner's style notes (read from the notes folder, other categories left out) are what a group's gate and run are told of
+  const note = join(settings.memoryDir, "notes", "style-gate-test.md");
+  const other = join(settings.memoryDir, "notes", "people-gate-test.md");
+  mkdirSync(dirname(note), { recursive: true });
+  writeFileSync(note, "warm and folksy,\nfew emoji\n");
+  writeFileSync(other, "Anna is the dentist\n");
+  try {
+    assert.match(styleLines(T0), /^- warm and folksy, few emoji$/m);
+    assert.doesNotMatch(styleLines(T0), /dentist/);
+    assert.match(styleSummary(T0), /warm and folksy, few emoji/);
+    assert.doesNotMatch(styleSummary(T0), /dentist/);
+  } finally {
+    rmSync(note, { force: true });
+    rmSync(other, { force: true });
+  }
   assert.doesNotMatch(gateSystem({ kind: "group" }, "message", ""), /personality/);
   assert.match(gateSystem({ kind: "group" }, "message", "warm and folksy; few emoji"), /warm and folksy; few emoji/);
   assert.doesNotMatch(gateSystem({ kind: "owner" }, "clock", "warm and folksy"), /folksy/); // the owner's own chat has no personality section

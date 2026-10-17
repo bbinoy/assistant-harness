@@ -177,10 +177,12 @@ test("fence: the body cannot close, reopen or forge a fence, in any case or spac
     assert.equal(f.startsWith("<data>\n") && f.endsWith("\n</data>"), true);
   }
   assert.equal(defuseTags("<b>bold</b> a < b", "data"), "<b>bold</b> a < b");
+  assert.equal(defuseTags("<SYSTEM>x</ system-reminder> <data>"), "<\\SYSTEM>x<\\/ system-reminder> <data>"); // without a tag of its own: the role tags only
+  assert.equal(defuseTags("<data>y</Data>", "data"), "<\\data>y<\\/Data>");
 });
 
 test("fence: a whole block is capped with a marker", () => {
-  const f = quiet(() => fence("data", "line of text\n".repeat(20000), 1000));
+  const f = quiet(() => fence("data", "line of text\n".repeat(12000), 1000));
   assert.ok(f.length < 1100);
   assert.match(f, /characters cut\]\n<\/data>$/);
 });
