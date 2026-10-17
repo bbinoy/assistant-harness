@@ -4,6 +4,8 @@
 
 <img width="300" alt="Ted answering in Signal: a text reply, a voice message and reactions" src="docs/images/chat.png" />
 
+🔊 [Listen to an example voice message](docs/audio/voice-message.m4a), spoken by the built-in stock voice (Kokoro `am_onyx`, no real person's voice).
+
 ## Why it feels like a person
 
 - **A character, by default Ted Lasso.** Warm, folksy and relentlessly optimistic. Change it by telling Ted what you want.

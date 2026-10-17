@@ -40,3 +40,7 @@ TTS_REF_TEXT=state/voice/ref.txt     # exactly what is said in it
 ```
 
 To change the shipped sample itself, replace `default.wav` and `default.txt` together (they must match word for word), keep it mono, 24 kHz, 16-bit, about 10 s, and update this file. Only use a synthetic voice or one whose owner agreed: never a recording of a real person or a clone of a character. `npm run doctor` shows whether the built-in sample or your own file is in use.
+
+## Example voice message
+
+`docs/audio/voice-message.m4a` (used in the main README) is an original short message in the character's style, spoken by the same stock Kokoro `am_onyx` voice (speed 0.95), converted to AAC mono 24 kHz. It contains no recording of any real person.
