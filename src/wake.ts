@@ -190,6 +190,7 @@ export function createWakeups(deps: WakeDeps) {
 
   // One conversation, one look. Returns what happened (for the log and tests).
   async function look(conv: Conversation, now: Date): Promise<string> {
+    if (conv.kind === "tenant") return "tenant"; // a tenant never acts on her own in this phase: no wake-ups, no gate (and every such run would be on the instance's login)
     const st = stateOf(conv, now);
     const owed = await backstop(conv, st, now);
     if (owed) return owed;

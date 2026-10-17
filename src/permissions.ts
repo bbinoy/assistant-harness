@@ -104,14 +104,14 @@ export interface CallGuard {
   decide: (tool: string, input: Record<string, unknown>) => Promise<GuardDecision>;
 }
 
-export function makeCanUseTool(approve: Approve, source: Source, memoryDir: string | undefined, judgeContext?: string, judge: typeof judgeAction = judgeAction, guard?: CallGuard): CanUseTool {
+export function makeCanUseTool(approve: Approve, source: Source, memoryDir: string | undefined, judgeContext?: string, judge: typeof judgeAction = judgeAction, guard?: CallGuard, tenantTools?: ReadonlySet<string>): CanUseTool {
   return async (tool, input, { signal }) => {
     const g = guard ? await guard.decide(tool, input) : undefined;
     if (g?.kind === "deny") {
       audit(tool, "deny-guard", source);
       return { behavior: "deny", message: g.reason ?? `${tool} is blocked and cannot be used.` };
     }
-    const base = classify(tool, input, source, memoryDir);
+    const base = classify(tool, input, source, memoryDir, tenantTools);
     const verdict = g?.kind === "allow" && base !== "deny" ? "allow" : g?.kind === "ask" && base !== "deny" ? "ask" : base;
     // The call as it must run: what the guard narrowed, or built only now (a card typed by code after the yes), else the model's own.
     const final = async (): Promise<{ input: Record<string, unknown> } | { deny: string }> => {

@@ -155,6 +155,17 @@ npm run card -- delete
 
 The card, including its security code, is stored in the secret store (`tenants/owner/card/primary`), apart from your saved details; nothing shows more than the last four digits. Every payment asks you first on Signal: the question names the shop, where the card is typed, the total with its currency, the last four digits and an id, and **only a typed YES approves it** (a 👍 does not; 👎 or NO declines). The payment is then confirmed in the card's own app, where you should check the amount. Ted's own caps apply too: `CARD_CAP_PURCHASE` (25) per payment and `CARD_CAP_DAY` (50) per day in the card's currency, and `BROWSE_MAX_PAYMENTS` (1) per task; set a cap to 0 to turn card payments off. Groups and background tasks never get the card. If a shop's payment page cannot be checked (an embedded frame from a site Ted does not know, no clear total), Ted stops and gives you the link to pay yourself. A card run starts the browser with a debugging port on the loopback address. See [SAFETY](SAFETY.md).
 
+## More than one person (optional)
+
+Off by default. With `TENANTS=on` friends can use the same instance, each as a **tenant** with a folder, notes, history, limits and Anthropic API key of her own (what she spends is hers; yours is never used for her). It needs the assistant's **own Signal account** ([SIGNAL-ACCOUNT](SIGNAL-ACCOUNT.md); in Note to Self there is nobody else to talk to) and the secret store (previous sections). Read "Host admin trust" in [SAFETY](SAFETY.md) first: you can read your friends' files, and you should tell them.
+
+1. Set `TENANTS=on` in `.env` and run `npm run openbao -- setup` again, which widens the app's token by one item per tenant (`tenants/<id>/anthropic_api_key`) and nothing else.
+2. In your chat ask for an invite ("invite Anna"), or `npm run tenants -- invite "for Anna"`. You get a single-use code that works for `INVITE_TTL_HOURS` (72). Send it to her yourself; she sends it to the assistant in a private Signal message. The assistant never writes to anyone first; anyone else who writes gets one fixed "invite only" reply and no model call.
+3. She is now a tenant, and is told that setup is incomplete. Put her Anthropic API key in **at this Mac's terminal, never in a chat**: `npm run tenants -- set-key <id>` (hidden prompt; the id is in `npm run tenants -- list`). A page for her to do it herself through a one-time link is a later step (`src/intake.ts` is its interface).
+4. Her first reply says she is talking to an AI; before anything else she confirms she is 18 or older and where she lives, once.
+5. Her day's limit is `TENANT_DAILY_BUDGET_USD` (2) on her own key; `tenants/<id>/tenant.json` overrides it and a few more things (language, persona, `browse`/`voice` off, turn limits). If her key hits a limit, runs out of credit or is refused, only she is paused (`npm run doctor` shows it).
+6. Stop or leave: ask the assistant to suspend her (nothing is answered, data stays) or remove her (her folder and her key are deleted; both ask on your phone). Her mail, calendar and the like are not available to tenants in this phase, nor are payments or your saved details.
+
 ## Daily use
 
 - **Chat**: message yourself. Replies are formatted with Signal's native styles (bold, italic, strikethrough, monospace).

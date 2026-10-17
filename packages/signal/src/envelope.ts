@@ -32,8 +32,10 @@ export interface IncomingMessage {
   direct: boolean;
   /** The sender's account id, when Signal gives it. */
   fromUuid?: string;
-  /** The sender's own profile name, when Signal gives it (groups only). */
+  /** The sender's own profile name, when Signal gives it (groups, and one-to-one messages from someone other than the peer). */
   fromName?: string;
+  /** Own-account mode only: a private one-to-one message from someone OTHER than the peer (not a group). `from` is their number (empty if Signal hides it) and `fromUuid` their account id. Who may talk to your bot is still for you to decide. */
+  other?: boolean;
   /** Set when the message was written in a group (own-account mode only). */
   group?: { id: string };
   /** Group messages: it @mentions the bot or replies to one of its messages. */
@@ -74,6 +76,8 @@ export interface IncomingDeletion {
   group?: { id: string };
   fromUuid?: string;
   fromName?: string;
+  /** As {@link IncomingMessage.other}. */
+  other?: boolean;
 }
 
 /** A voice note or audio file signal-cli has downloaded: its id names the file in its attachments folder. */
@@ -266,6 +270,8 @@ export interface IncomingReaction {
   group?: { id: string };
   fromUuid?: string;
   fromName?: string;
+  /** As {@link IncomingMessage.other}. */
+  other?: boolean;
 }
 
 
@@ -306,10 +312,12 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
   let from = number;
   let direct: boolean;
   let body = data;
+  let other = false; // own-account mode: someone other than the peer wrote to us privately
   if (ch.peer !== undefined) {
     const isPeer = !!ch.peer && (number === ch.peer || (!!ch.peerAci && env.sourceUuid === ch.peerAci));
     from = isPeer ? ch.peer : number;
     direct = isPeer && !!data && !data.groupInfo;
+    other = !isPeer && !!data && !data.groupInfo;
   } else {
     const toSelf = !!sent && (sent.destinationNumber ?? sent.destination) === ch.account;
     direct = toSelf;
@@ -320,6 +328,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
   // A group (own-account mode only; in Note to Self every group message is someone else's and ignored).
   const group = ch.peer !== undefined && data?.groupInfo?.groupId ? { id: String(data.groupInfo.groupId) } : undefined;
   if (data?.groupInfo && !group) return {};
+  const who = other ? { other: true as const, fromUuid: env.sourceUuid || undefined, fromName: env.sourceName || undefined } : {}; // a private message from someone else: who she is
 
   // An edit that does not say what it edits is dropped, not taken for a new message; its body is text only.
   const target = Number(edit?.targetSentTimestamp);
@@ -328,7 +337,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
     const d = body.remoteDelete; // `targetTimestamp`; older signal-cli versions called it `timestamp`
     const targetTimestamp = Number(d.targetTimestamp ?? d.timestamp ?? 0);
     if (!(targetTimestamp > 0)) return {};
-    return { deletion: { from, targetTimestamp, direct, ...(group ? { group, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}) } };
+    return { deletion: { from, targetTimestamp, direct, ...who, ...(group ? { group, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}) } };
   }
   if (!edit && body.reaction) {
     const r = body.reaction;
@@ -340,6 +349,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
         isRemove: Boolean(r.isRemove),
         direct,
         targetAuthor: r.targetAuthorNumber ?? r.targetAuthor ?? undefined,
+        ...who,
         ...(group ? { group, fromUuid: env.sourceUuid, fromName: env.sourceName || undefined } : {}),
       },
     };
@@ -357,6 +367,7 @@ export function interpretEnvelope(env: any, ch: Channel): { message?: IncomingMe
       text: withMentions(body.message ?? "", body.mentions),
       timestamp: body.timestamp ?? edit?.dataMessage?.timestamp ?? env.timestamp,
       direct,
+      ...who,
       quote,
       ...(quotedAudio(body.quote) ? { quotedAudio: quotedAudio(body.quote) } : {}),
       audio,

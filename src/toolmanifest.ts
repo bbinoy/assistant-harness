@@ -89,6 +89,9 @@ export const MANIFEST: readonly ToolEntry[] = [
   // The file tools are chat only; WHICH path is code (policy.ts classify), a flag cannot say that.
   ...rows("", "builtin", "note-file", "no", "Read Write Edit", { only: ["chat"] }),
   ...rows("mcp__memory__", "memory", "memory", "no", "forget_note search_logs undo_dream", { only: ["chat"] }),
+  // The owner's tenant administration (tenanttools.ts), only while TENANTS=on: minting an invite and looking are free; stopping a tenant or deleting her and her data asks on the phone.
+  ...rows("mcp__tenants__", "tenants", "tenants-read", "no", "create_invite list_tenants resume_tenant", { only: ["chat"] }),
+  ...rows("mcp__tenants__", "tenants", "tenants-stop", "yes", "suspend_tenant remove_tenant", { only: ["chat"] }),
   // send (send.ts): a message, voice note, picture (a browse screenshot of this run) or reaction in the conversation the run is for, while it continues.
   // Chat and groups only, never an unattended run or a wake-up (a group's rights are in classify).
   ...rows("mcp__send__", "send", "send", "no", "send", { only: ["chat", "group"] }),

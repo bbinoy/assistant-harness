@@ -1,6 +1,10 @@
-import { query, startup } from "@anthropic-ai/claude-agent-sdk";
+import { createHash } from "node:crypto";
+import { query, startup, type WarmQuery } from "@anthropic-ai/claude-agent-sdk";
 import { buildOptions, runAgent, type AgentReply, type RunOptions } from "./agentrun.ts";
-import { groupSpare, runWarmOrCold, spare, warmUp } from "./agentwarm.ts";
+import { groupSpare, newSlot, runWarmOrCold, spare, warmUp } from "./agentwarm.ts";
+import { tenantOverBudget } from "./budget.ts";
+import { readConsent, TENANT_CONSENT_TOOL, toolsFor, type TenantContext } from "./tenants.ts";
+import type { SpareSlot } from "./warmslot.ts";
 import { chatResume } from "./chatsession.ts";
 import { disconnected, readConnectors } from "./connectors.ts";
 import type { Conversation } from "./conversation.ts";
@@ -8,7 +12,7 @@ import { userInput, type Picture } from "./image.ts";
 import type { Document } from "./document.ts";
 import { LAST_BRIEF, memoryFor, missingSetup, NOTES_DIR, readNotes } from "./notes.ts";
 import { approveInGroup, setChatOwnerMessage, type Approve } from "./permissions.ts";
-import { backgroundSystem, briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem } from "./persona.ts";
+import { backgroundSystem, briefSystem, chatSystem, groupSystem, handlerSystem, radarSystem, tenantSystem } from "./persona.ts";
 import { PROFILES, type OwnerProfile } from "./profiles.ts";
 import { recentNotices } from "./messages.ts";
 import { OWNER_SESSION_FILE } from "./session.ts";
@@ -107,3 +111,73 @@ export function runHandlerTurn(prompt: string, approve: Approve, onToolSuccess?:
   });
 }
 
+
+// ---- a tenant's chat ----
+
+// A tenant's turn (tenants.ts): an isolated "group" run in a private chat, on HER OWN API key, with her notes, her session, her ledger. Until she has
+// confirmed her age and region the run has one tool, record_consent. The key comes from OpenBao (tenantrun.ts) and goes only into this run's environment.
+export function tenantRunOptions(ctx: TenantContext, apiKey: string, now = new Date()): RunOptions {
+  const consented = !!readConsent(ctx);
+  const key = `tenant:${ctx.id}`;
+  return {
+    source: PROFILES.group.source,
+    systemPrompt: tenantSystem({ name: ctx.name, consented, language: ctx.language, persona: ctx.persona, now }),
+    sessionFile: ctx.sessionFile,
+    memory: { dir: ctx.notesDir },
+    skills: PROFILES.group.skills,
+    maxTurns: ctx.maxTurns,
+    maxBudgetUsd: ctx.maxBudgetUsdPerRun,
+    tenant: {
+      id: ctx.id,
+      key,
+      apiKey,
+      keyTag: createHash("sha256").update(apiKey).digest("hex").slice(0, 8),
+      costFile: ctx.costFile,
+      logFile: ctx.logFile,
+      consentFile: ctx.consentFile,
+      consented,
+      tools: consented ? new Set([...toolsFor(ctx)].filter((t) => t !== TENANT_CONSENT_TOOL)) : new Set([TENANT_CONSENT_TOOL]),
+      overBudget: () => tenantOverBudget(ctx.costFile, ctx.dailyBudgetUsd),
+    },
+  };
+}
+
+// The few most recently active tenants keep a warm process each (TENANT_WARM_MAX); an older one is closed to make room. WARM=off: none.
+const tenantSlots = new Map<string, SpareSlot<WarmQuery>>();
+const noSlot = newSlot(); // never filled: a run without a warm process still goes through the same path
+function tenantSlot(id: string, create: boolean): SpareSlot<WarmQuery> | undefined {
+  if (!settings.warm || settings.tenantWarmMax <= 0) return undefined;
+  let slot = tenantSlots.get(id);
+  if (slot) tenantSlots.delete(id); // re-inserted last: the oldest entries are the ones to close
+  else if (create) slot = newSlot();
+  if (!slot) return undefined;
+  tenantSlots.set(id, slot);
+  while (tenantSlots.size > settings.tenantWarmMax) {
+    const [oldest, old] = tenantSlots.entries().next().value!;
+    old.drop();
+    tenantSlots.delete(oldest);
+  }
+  return slot;
+}
+export function dropTenantWarm(id: string): void {
+  tenantSlots.get(id)?.drop();
+  tenantSlots.delete(id);
+}
+export const tenantWarmHolders = (): string[] => [...tenantSlots].filter(([, s]) => s.holder).map(([id]) => id); // tests
+
+export async function askTenant(ctx: TenantContext, apiKey: string, prompt: string, pictures: Picture[] = [], hooks?: { firstOutput: () => void }, documents: Document[] = [], io: { query?: typeof query } = {}): Promise<AgentReply> {
+  const r = chatResume(ctx.sessionFile);
+  const o = { ...tenantRunOptions(ctx, apiKey), onFirstOutput: hooks?.firstOutput };
+  const input = userInput(prompt, pictures, documents);
+  const slot = tenantSlot(ctx.id, false);
+  slot?.touch(ctx.id);
+  return runWarmOrCold(slot ?? noSlot, slot ? ctx.id : undefined, o, r, "tenant", input, (abortController) => (io.query ?? query)({ prompt: input, options: { ...buildOptions(approveInGroup(o.tenant!.key), o, r.resume), abortController } }));
+}
+
+// After her turn: keep a process warm for her next message (her session moved on).
+export function prepareTenantChat(ctx: TenantContext, apiKey: string, opts: { start?: typeof startup } = {}): void {
+  const slot = tenantSlot(ctx.id, true);
+  if (!slot) return;
+  const o = tenantRunOptions(ctx, apiKey);
+  warmUp(slot, ctx.id, o, chatResume(ctx.sessionFile), "tenant", approveInGroup(o.tenant!.key), opts.start);
+}

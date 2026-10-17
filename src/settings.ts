@@ -236,6 +236,15 @@ export function loadSettings(env: Env) {
 
     dailyBudgetUsd: num(env, "DAILY_BUDGET_USD", 20, 0, 10_000),
 
+    // Several people on one instance (src/tenants.ts, docs/ARCHITECTURE.md "Tenancy"). Off: nothing changes, an unknown sender is ignored as always.
+    // On: an unknown sender gets a fixed invitation reply (no model call), the owner can mint invite codes, and each friend is a tenant with
+    // her own folder, her own Anthropic API key (OpenBao) and her own limits. The bot never writes first to anybody.
+    tenants: oneOf(env, "TENANTS", "off", ["on", "off"] as const) === "on",
+    tenantDailyBudgetUsd: num(env, "TENANT_DAILY_BUDGET_USD", 2, 0, 10_000), // each tenant's own daily ceiling on her own key (tenant.json may lower or raise it)
+    inviteTtlHours: num(env, "INVITE_TTL_HOURS", 72, 1, 24 * 90), // how long a minted invite code works
+    tenantNoticeMinutes: num(env, "TENANT_NOTICE_MINUTES", 30, 0, 1440), // a fixed setup, limit or invitation reply to one person at most this often
+    tenantWarmMax: num(env, "TENANT_WARM_MAX", 2, 0, 10), // warm model processes kept for tenants (the most recently active ones); 0: none
+
     signalHost: "127.0.0.1", // never anything else: signal-cli's socket is unauthenticated
     signalPort: num(env, "SIGNAL_PORT", 7583, 1024, 65_535),
 
@@ -291,6 +300,7 @@ export function loadSettings(env: Env) {
     stateDir: join(dataDir, "state"), // bookkeeping the model never reads
     logsDir: join(dataDir, "logs"), // agent.log, audit.jsonl, daemon and launchd output
     memoryDir: join(dataDir, "memory"), // what the model reads: notes/ (the SDK auto-memory) and last-brief.md
+    tenantsDir: join(dataDir, "tenants"), // one folder per tenant (notes, history, session, cost, tenant.json): outside logs/, state/ and memory/, so the owner's chat does not read it (policy.ts)
   } as const;
 }
 

@@ -3,6 +3,8 @@ import { audit, type Source } from "./audit.ts";
 import { recordCost } from "./budget.ts";
 import { createSendServer, OWNER_KEY } from "./send.ts";
 import { createVoiceServer } from "./voicetool.ts";
+import { createTenantAdminServer, createTenantServer, tenantEnv, type TenantRun } from "./tenanttools.ts";
+import { tenantKeys } from "./secrets.ts";
 import { browseSystem, createBrowseServer } from "./browse.ts";
 import { resultText, withText, type BrowseGuard, type BrowseMode } from "./browseguard.ts";
 import { browseStatus, browserServer } from "./browseserver.ts";
@@ -51,6 +53,9 @@ export interface RunOptions {
   guard?: BrowseGuard; // the browse run: decides each browser call and remembers the page (browse.ts)
   maxMinutes?: number; // a wall-clock ceiling of its own (the browse run), else the chat or background one
   judgeContext?: string; // an unattended job: the instructions it was given, shown to the approval judge (autojudge.ts)
+  // A tenant's run (tenants.ts): an isolated "group" run on HER OWN Anthropic API key, with her own cost ledger and cooldown. Never absent for a run
+  // made for a tenant, and never given the instance's login: without a key the run does not start.
+  tenant?: TenantRun;
 }
 
 // Context size of one model call: everything it was sent.
@@ -59,7 +64,7 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 
 // The browse sub-run (browse.ts calls this through the entry tool): a fresh run with the browser, under the guard. A group's run is the same
 // as the owner's; only `approve` differs (the group's own approver).
-function browseRunOptions(guard: BrowseGuard): RunOptions {
+export function browseRunOptions(guard: BrowseGuard, tenant?: TenantRun): RunOptions {
   return {
     source: PROFILES.browse.source,
     systemPrompt: browseSystem(undefined, guard.vision, guard.profileKeys(), guard.cardInfo()),
@@ -69,16 +74,18 @@ function browseRunOptions(guard: BrowseGuard): RunOptions {
     outputFormat: PROFILES.browse.outputSchema,
     judgeContext: guard.task,
     guard,
+    tenant, // the browse worker of a tenant's run is hers too: her key, her ledger (it would otherwise be billed to the instance's login)
   };
 }
 
 // The `run` of a browse entry tool (browse.ts BrowseContext): the browse run under its guard, asking `approve` for commit steps.
-export const browseRunner = (approve: Approve) => (prompt: string, guard: BrowseGuard): Promise<AgentReply> => runAgent(prompt, approve, browseRunOptions(guard));
+export const browseRunner = (approve: Approve, tenant?: TenantRun) => (prompt: string, guard: BrowseGuard): Promise<AgentReply> => runAgent(prompt, approve, browseRunOptions(guard, tenant));
 
 // The built-in tools of a run (everything else is an MCP tool): the browse run only searches; a group edits its own notes and searches; the
 // owner's chat adds skills and opening pages; a background run has no notes; the rest only load skills.
 function builtinTools(opts: RunOptions, browsing: boolean, isolated: boolean): string[] {
   if (browsing) return ["WebSearch"];
+  if (opts.tenant && !opts.tenant.consented) return []; // before her age and region are confirmed her run has one tool, record_consent
   if (isolated) return ["Read", "Write", "Edit", "WebSearch"];
   if (opts.memory) return ["Skill", "Read", "Write", "Edit", "WebSearch", "WebFetch"];
   return opts.source === "background" ? ["Skill", "WebSearch", "WebFetch"] : ["Skill"];
@@ -124,22 +131,29 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
   const isolated = opts.source === "group" || browsing;
   // The entry tool (browse.ts) for the runs that may browse: the owner's chat, a wake-up and a group. It starts a separate browse run.
   // send (send.ts): the owner's chat and groups, never an unattended run (a wake-up included).
-  const tellKey = opts.source === "chat" ? OWNER_KEY : opts.source === "group" ? opts.memory?.groupId : undefined;
+  const tenant = browsing ? undefined : opts.tenant; // the browse worker has no tenant tools of its own
+  const tellKey = opts.source === "chat" ? OWNER_KEY : opts.source === "group" ? (tenant?.key ?? opts.memory?.groupId) : undefined;
   const mode: BrowseMode = opts.source === "group" ? "group" : "owner";
+  const askedIn = tenant ? approveInGroup(tenant.key) : mode === "group" && opts.memory?.groupId ? approveInGroup(opts.memory.groupId) : approve; // a tenant's browse run asks HER, in her chat
   const browseTool =
-    settings.browse && (opts.source === "chat" || opts.source === "background" || opts.source === "group")
-      ? createBrowseServer({ mode, groupId: opts.memory?.groupId, key: tellKey, run: browseRunner(mode === "group" && opts.memory?.groupId ? approveInGroup(opts.memory.groupId) : approve) })
+    settings.browse && (opts.source === "chat" || opts.source === "background" || opts.source === "group") && (!tenant || tenant.consented)
+      ? createBrowseServer({ mode, groupId: opts.memory?.groupId, key: tellKey, spent: tenant?.overBudget, run: browseRunner(askedIn, tenant) })
       : undefined;
-  const sendServer = tellKey ? createSendServer(tellKey) : undefined;
+  const sendServer = tellKey && (!tenant || tenant.consented) ? createSendServer(tellKey) : undefined;
   // voice (voicetool.ts): the cloned voice of this conversation, Qwen only; the owner's chat and groups, never an unattended run.
-  const voiceServer = tellKey && settings.tts.provider === "qwen" ? createVoiceServer(tellKey) : undefined;
+  const voiceServer = tellKey && settings.tts.provider === "qwen" && (!tenant || tenant.consented) ? createVoiceServer(tellKey) : undefined;
   const status = browsing ? browseStatus() : undefined;
   if (status && !status.ok) throw new Error(`browsing is not set up: ${status.reason}`);
   const mcpServers: Options["mcpServers"] = browsing && opts.guard && status?.ok
     ? { browser: browserServer(status, opts.guard.outDir, undefined, { mode: opts.guard.vision, cdpPort: opts.guard.cdpPort }) }
-    : opts.memory || browseTool || sendServer
-      ? { ...(sendServer ? { send: sendServer } : {}), ...(voiceServer ? { voice: voiceServer } : {}), ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}) }
-      : undefined;
+    : tenant && !tenant.consented
+      ? { tenant: createTenantServer(tenant) }
+      : opts.memory || browseTool || sendServer
+        ? { ...(sendServer ? { send: sendServer } : {}), ...(voiceServer ? { voice: voiceServer } : {}), ...(opts.memory ? { memory: createMemoryServer({ notesDir: opts.memory.dir, groupId: opts.memory.groupId, tenantLog: tenant?.logFile, record: opts.memory.notify ? recordMemoryChange : () => {} }) } : {}), ...(browseTool ? { browse: browseTool } : {}), ...(opts.source === "chat" && settings.tenants ? { tenants: createTenantAdminServer({ keys: tenantKeys }) } : {}) } // the owner's tenant administration exists only with TENANTS=on
+        : undefined;
+  // A tenant's run is on her own key or it does not run: the instance's login is never a fallback (tenanttools.ts tenantEnv).
+  const baseEnv = { ...process.env, MCP_CONNECTION_NONBLOCKING: "false", ...(browsing ? { MAX_MCP_OUTPUT_TOKENS: "60000" } : {}) };
+  const env = opts.tenant ? tenantEnv(baseEnv, opts.tenant.apiKey) : baseEnv;
   return {
     model: settings.model,
     outputFormat: opts.outputFormat,
@@ -147,7 +161,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     // background, and a slow one (seen: ~30s) means the first call runs without its tools,
     // then the tool list changes mid-session, which also throws away the prompt cache. With
     // chat's warm process (below) this wait happens before the message arrives.
-    env: { ...process.env, MCP_CONNECTION_NONBLOCKING: "false", ...(browsing ? { MAX_MCP_OUTPUT_TOKENS: "60000" } : {}) }, // a browse page view is cut by code (browse.ts) well below this, so the SDK never writes one to a file the run cannot read
+    env, // (the owner's: the process environment) a browse page view is cut by code (browse.ts) well below this, so the SDK never writes one to a file the run cannot read
     // Rendered fresh on every request (not recorded once per session): the prompt carries
     // today's date and the last brief, and a change must apply to the very next message.
     // Chat uses Claude Code's preset prompt because that is where the SDK's auto-memory
@@ -176,7 +190,7 @@ export function buildOptions(approve: Approve, opts: RunOptions, resume: string 
     skills: isolated ? undefined : (opts.skills ? [...opts.skills] : OFFERED_SKILLS),
     disallowedTools: browsing ? hiddenBrowserTools(opts.guard?.vision) : isolated ? undefined : hiddenTools(toolsSeen()), // out of the model's view entirely, see policy.ts
     permissionMode: "default", // never the ambient mode (user settings or an auto mode could skip canUseTool, and with it every guard and approval)
-    canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir, opts.judgeContext, undefined, opts.guard),
+    canUseTool: makeCanUseTool(approve, opts.source, opts.memory?.dir, opts.judgeContext, undefined, opts.guard, tenant?.tools),
     hooks,
     maxTurns: opts.maxTurns,
     maxBudgetUsd: opts.maxBudgetUsd,
@@ -190,7 +204,7 @@ export async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOption
   let first = false;
   let lastContext: number | undefined; // the last model call of the main loop shows how big the context is
   for await (const message of stream) {
-    observeRateLimit(message);
+    observeRateLimit(message, opts.tenant?.id);
     if (message.type === "system" && message.subtype === "init" && opts.source !== "group" && opts.source !== "browse") { // a group run has no connectors: its tool list says nothing about them
       recordToolsSeen(message.tools);
       recordConnectors(message.tools, message.mcp_servers);
@@ -209,12 +223,12 @@ export async function consume(stream: AsyncIterable<SDKMessage>, opts: RunOption
       const next: ChatSession = { sessionId: message.session_id, costUsd: message.total_cost_usd, lastTurnAt: new Date().toISOString(), lastContextTokens: lastContext, ...(baseTokens !== undefined ? { baseTokens } : {}), ...(opts.seenAt ? { seenAt: opts.seenAt } : {}) };
       writeJson(opts.sessionFile, next);
     }
-    recordCost(message.total_cost_usd - previousCost); // failures cost money too
+    recordCost(message.total_cost_usd - previousCost, opts.tenant?.costFile); // failures cost money too (a tenant's goes to her own ledger)
     if (message.subtype === "success" && !message.is_error) {
-      noteSuccess();
+      noteSuccess(opts.tenant?.id);
       return { text: message.result, costUsd: message.total_cost_usd - previousCost, structured: message.structured_output };
     }
-    throw failure(lastError, message.subtype);
+    throw failure(lastError, message.subtype, opts.tenant?.id);
   }
   throw new Error("agent stream ended without a result");
 }

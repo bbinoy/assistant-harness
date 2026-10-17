@@ -4,6 +4,7 @@ import { recordCost } from "./budget.ts";
 import { withCeiling } from "./ceiling.ts";
 import { OWNER_SESSION_FILE, planSession, type ChatSession, type CompactMode } from "./session.ts";
 import { settings } from "./settings.ts";
+import { tenantEnv } from "./tenanttools.ts";
 import { readJson, writeJson } from "./state.ts";
 
 // Every conversation (the owner's chat, each group) persists across restarts, with the hygiene rules in
@@ -30,10 +31,12 @@ export function chatResume(file: string = OWNER_SESSION_FILE): Resume {
 // The options of the /compact run. A group's session was built under the group's isolation (buildOptions: no user settings,
 // no connectors, no skills or plugins, auto-memory = its own notes folder), and its compaction must load nothing more than
 // that: it is the same session, resumed. The owner's compaction is unchanged.
-export function compactOptions(sessionId: string | undefined, source: Source, notesDir?: string): Options {
+export function compactOptions(sessionId: string | undefined, source: Source, notesDir?: string, tenant?: { apiKey: string }): Options {
   const isolated = source === "group";
   return {
     model: settings.model,
+    ...(tenant ? { env: tenantEnv({ ...process.env }, tenant.apiKey) } : {}), // a tenant's compaction is on her own key, like her turns'
+
     resume: sessionId,
     tools: [],
     settingSources: [],
@@ -53,7 +56,7 @@ export function compactDue(file: string = OWNER_SESSION_FILE, now: Date = new Da
 // session.ts says so for this `mode`: "urgent" right after a reply that left the context far past the limit (the caller waits),
 // "quiet" from the heartbeat once the conversation has been still for COMPACT_QUIET_MINUTES. Always called from the conversation's
 // serial queue, so a message that arrives meanwhile waits behind it and nothing else touches the file. Never throws.
-export async function compactChatIfNeeded(file: string = OWNER_SESSION_FILE, source: Source = "chat", notesDir?: string, mode: "quiet" | "urgent" = "urgent"): Promise<void> {
+export async function compactChatIfNeeded(file: string = OWNER_SESSION_FILE, source: Source = "chat", notesDir?: string, mode: "quiet" | "urgent" = "urgent", tenant?: { apiKey: string; costFile: string }): Promise<void> {
   try {
     const saved = readJson<ChatSession>(file, { costUsd: 0 });
     if (planSession(saved, new Date(), chatPlanOpts(mode)) !== "resume then compact") return;
@@ -61,10 +64,10 @@ export async function compactChatIfNeeded(file: string = OWNER_SESSION_FILE, sou
     // Bounded in time like every run (ceiling.ts): it runs inside the conversation's queue, and a hung one would block it.
     await withCeiling(settings.compactMaxMinutes * 60_000, async (c) => {
       let boundary: { pre_tokens: number; post_tokens?: number } | undefined;
-      for await (const message of query({ prompt: "/compact", options: { ...compactOptions(saved.sessionId, source, notesDir), abortController: c.controller } })) {
+      for await (const message of query({ prompt: "/compact", options: { ...compactOptions(saved.sessionId, source, notesDir, tenant), abortController: c.controller } })) {
         if (message.type === "system" && message.subtype === "compact_boundary") boundary = message.compact_metadata;
         if (message.type !== "result") continue;
-        recordCost(message.total_cost_usd - saved.costUsd);
+        recordCost(message.total_cost_usd - saved.costUsd, tenant?.costFile);
         if (!boundary) throw new Error(`/compact produced no compact_boundary (${message.subtype})`);
         const { compactFailedAt: _cleared, ...rest } = saved;
         writeJson(file, { ...rest, sessionId: message.session_id, costUsd: message.total_cost_usd, lastContextTokens: boundary.post_tokens });

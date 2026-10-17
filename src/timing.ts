@@ -9,7 +9,7 @@
 //   run       the model run itself
 //   total     message arrived -> reply sent
 export interface Timing {
-  readonly kind: "owner" | "group";
+  readonly kind: "owner" | "group" | "tenant";
   mark(name: string): void; // ms since the message arrived; the first call per name wins
   set(name: string, ms: number): void; // a duration; the first call per name wins
   report(log?: (line: string) => void): void; // logs the line once

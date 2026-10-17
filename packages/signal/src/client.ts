@@ -47,9 +47,16 @@ export interface SendOptions {
   quote?: Quote;
   /** Absolute paths of files signal-cli can read. An audio file is shown as a voice message. */
   attachments?: string[];
-  /** Send to this group instead of the default conversation (own-account mode). */
+  /** Send to this group instead of the default conversation (own-account mode). A target made by {@link toPerson} sends to that one person instead. */
   groupId?: string;
 }
+
+/** A conversation target for one person other than the peer (own-account mode): pass it wherever a `groupId` is taken. Group ids never contain a colon. */
+export const toPerson = (id: string): string => `to:${id}`;
+/** The person (number or account id) a target made by {@link toPerson} names, or undefined for a group id. */
+export const personOf = (target?: string): string | undefined => (target?.startsWith("to:") ? target.slice(3) : undefined);
+// signal-cli's address of a conversation: a group, a person, or (neither) the default one.
+const addressOf = (target: string | undefined, dflt: () => object): object => (personOf(target) ? { recipient: [personOf(target)] } : target ? { groupId: target } : dflt());
 
 /** A group the account is a member of. */
 export interface SignalGroup {
@@ -154,7 +161,7 @@ export class SignalClient {
   async typing(stop = false, groupId?: string): Promise<void> {
     if (!this.peer) return;
     try {
-      await this.call("sendTyping", { ...(groupId ? { groupId } : { recipient: [this.peer] }), ...(stop ? { stop: true } : {}) });
+      await this.call("sendTyping", { ...addressOf(groupId, () => ({ recipient: [this.peer] })), ...(stop ? { stop: true } : {}) });
     } catch {
       /* best effort */
     }
@@ -300,7 +307,7 @@ export class SignalClient {
     this.ownReactions.set(`${target.timestamp}:${emoji}`, Date.now() + this.ownReactionMs);
     try {
       await this.call("sendReaction", {
-        ...(groupId ? { groupId } : this.to()),
+        ...addressOf(groupId, () => this.to()),
         emoji,
         targetAuthor: target.author,
         targetTimestamp: target.timestamp,
@@ -318,7 +325,7 @@ export class SignalClient {
   async send(text: string, opts: SendOptions = {}): Promise<number> {
     const { style: textStyle = [], quote } = opts;
     const result = await this.call<{ timestamp: number }>("send", {
-      ...(opts.groupId ? { groupId: opts.groupId } : this.to()),
+      ...addressOf(opts.groupId, () => this.to()),
       ...(text ? { message: text } : {}),
       ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(textStyle.length ? { textStyle } : {}),
