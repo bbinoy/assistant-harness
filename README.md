@@ -37,7 +37,7 @@ Just ask Claude Code to set up the repo and install dependencies. Then start Ted
 
 By default it uses the "Note to self" chat on Signal, but for a better experience consider creating a dedicated Signal account for Ted so you can chat to him as its own user and add him to groups.
 
-Voice: out of the box Ted speaks with a stock local voice (Kokoro `am_onyx`; this repo ships no recordings of anyone). To let him adopt voices you send him, set `TTS_PROVIDER=qwen` (see [docs/REMOTE-TTS.md](docs/REMOTE-TTS.md)). Use your own voice, or one whose owner agreed: a clip from a film, a show or a public figure is someone else's voice.
+To customize the voice, just send Ted a voice note or a short clip. Use your own voice, or one whose owner agreed: a clip from a film, a show or a public figure is someone else's voice.
 
 Step by step: [docs/SETUP.md](docs/SETUP.md).
 

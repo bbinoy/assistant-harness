@@ -2,6 +2,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { settings } from "../src/settings.ts";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildOptions } from "../src/agentrun.ts";
@@ -242,12 +243,14 @@ test("tool: manifest and policy: chat and group without approval, never an unatt
     assert.equal(flagFor(TOOL, source), undefined, source);
     assert.equal(classify(TOOL, { action: "list" }, source), "deny", source);
   }
-  // the test settings use Kokoro, so no run is offered the tool
+  // the default provider is Qwen: chat and group are offered the tool, an unattended run is not
   const servers = (source: "chat" | "group" | "brief") => Object.keys(buildOptions(async () => ({ approved: true }), { systemPrompt: "x", maxTurns: 1, maxBudgetUsd: 1, source, ...(source === "chat" ? { memory: { dir: "/tmp/n" } } : source === "group" ? { memory: { dir: "/tmp/n", groupId: "g" } } : {}) }, undefined).mcpServers ?? {});
-  for (const s of ["chat", "group", "brief"] as const) assert.equal(servers(s).includes("voice"), false, s);
+  for (const s of ["chat", "group", "brief"] as const) assert.equal(servers(s).includes("voice"), s !== "brief", s);
 });
 
-test("provider: the speech request names the conversation's active voice, read per reply (no restart)", async () => {
+const hasFfmpeg = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0;
+
+test("provider: the speech request names the conversation's active voice, read per reply (no restart)", { skip: !hasFfmpeg && "ffmpeg is not installed" }, async () => {
   const bodies: unknown[] = [];
   const voiceRoot = join(tmp, "voice");
   const fakeServer = join(tmp, "fake.mjs");

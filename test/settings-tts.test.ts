@@ -7,10 +7,11 @@ import { join } from "node:path";
 import { loadSettings } from "../src/settings.ts";
 import { qwenReference } from "../src/doctor.ts";
 
-test("settings: Kokoro is the default speech provider, with no fallback", () => {
+test("settings: Qwen is the default speech provider, with Kokoro standing in; Kokoro alone has no fallback", () => {
   const s = loadSettings({});
-  assert.equal(s.tts.provider, "kokoro");
-  assert.equal(s.tts.fallback, "none");
+  assert.equal(s.tts.provider, "qwen");
+  assert.equal(s.tts.fallback, "kokoro");
+  assert.equal(loadSettings({ TTS_PROVIDER: "kokoro" }).tts.fallback, "none");
 });
 
 test("settings: remote speech needs its keys and a safe address, or the agent does not start", () => {

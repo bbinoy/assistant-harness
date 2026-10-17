@@ -1,12 +1,12 @@
 # Remote speech (optional)
 
-By default Ted speaks with Kokoro on your Mac and nothing leaves it. If you want a different voice, `TTS_PROVIDER` can send the words Ted is about to speak to a remote service instead. Everything after that is unchanged: ffmpeg turns the audio into AAC and Signal shows a voice message.
+By default Ted speaks with the local Qwen3-TTS voice on your Mac (Kokoro stands in until `npm run setup:tts-qwen` has been run) and nothing leaves it. If you want a different voice, `TTS_PROVIDER` can send the words Ted is about to speak to a remote service instead. Everything after that is unchanged: ffmpeg turns the audio into AAC and Signal shows a voice message.
 
 **Read this first.** With a remote provider, the text of each spoken reply (and nothing else: no mail, no notes, no history) is sent over HTTPS to a third party (`elevenlabs`) or to a server you run (`http`). Only use a cloned voice you have the rights and consent for: your own, or one whose owner agreed. This repo contains no cloned voice, no recording of a person and no celebrity voice, and will not; its only voice sample is a synthetic one (`assets/voices/`). The reference recording of a clone stays on the remote side and is only named by an id.
 
 | Setting | |
 |---|---|
-| `TTS_PROVIDER` | `kokoro` (default), `elevenlabs`, `http` or `qwen` (local cloned voice, below) |
+| `TTS_PROVIDER` | `qwen` (default; local cloned voice, below), `kokoro`, `elevenlabs` or `http` |
 | `TTS_FALLBACK` | `none` (default): a failed remote request is sent as text with the usual note. `kokoro`: speak the same words locally instead (needs `scripts/setup-tts.sh`). Never switches unless you set it. |
 | `TTS_TIMEOUT_SECONDS` | per request, 5 to 300, default 60 |
 
@@ -79,7 +79,7 @@ Keep your own reference under `state/` (git-ignored) or elsewhere outside the re
 
 How it runs: the model takes about 4 s to load and 3 to 4 GB of memory, so Ted starts one small server (`packages/signal/scripts/qwen-tts-server.py`) at start-up and keeps it loaded, like the warm Claude processes. It listens on 127.0.0.1 on a free port and wants a random key made at each start. It is stopped after `WARM_IDLE_MINUTES` (default 60) without a spoken reply, which frees the memory; the next reply starts it again (a few seconds slower). `WARM=off` skips the start-up launch (it then starts on the first spoken reply). Owner chat and groups use the same code path.
 
-If the server is not set up, not ready, fails or exceeds `TTS_TIMEOUT_SECONDS`, Ted logs it and speaks the same words with Kokoro when that is installed (`TTS_FALLBACK` defaults to `kokoro` for this provider; `none` sends text instead). `TTS_SPEED` does not apply to this voice. `npm run doctor` shows whether the voice is ready. Switch back any time with `TTS_PROVIDER=kokoro`.
+If the server is not set up, not ready, fails or exceeds `TTS_TIMEOUT_SECONDS`, Ted logs it and speaks the same words with Kokoro when that is installed (`TTS_FALLBACK` defaults to `kokoro` for this provider; `none` sends text instead). `TTS_SPEED` does not apply to this voice. `npm run doctor` shows whether the voice is ready. Use Kokoro alone with `TTS_PROVIDER=kokoro`.
 
 Back to the [README](../README.md) · [Safety](SAFETY.md) · [Setup](SETUP.md)
 

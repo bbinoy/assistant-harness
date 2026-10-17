@@ -35,10 +35,10 @@ function list(env: Env, name: string, fallback: readonly string[], valid: RegExp
   return items;
 }
 
-// The speech engine (TTS_PROVIDER): Kokoro here, or an optional remote one. Remote settings are checked at start-up:
+// The speech engine (TTS_PROVIDER): the local Qwen voice (Kokoro stands in when it is not set up), or an optional remote one. Remote settings are checked at start-up:
 // a missing key or a plain-http address to another machine stops the agent instead of leaking text or failing later.
 function ttsProvider(env: Env, kokoro: { dir: string; voice: string; speed: number }, dataDir: string): TtsProviderConfig {
-  const provider = oneOf(env, "TTS_PROVIDER", "kokoro", ["kokoro", "elevenlabs", "http", "qwen"] as const);
+  const provider = oneOf(env, "TTS_PROVIDER", "qwen", ["kokoro", "elevenlabs", "http", "qwen"] as const);
   // The local cloned voice falls back to the local Kokoro by default (nothing leaves the Mac); a remote one never switches unless asked.
   const fallback = oneOf(env, "TTS_FALLBACK", provider === "qwen" ? "kokoro" : "none", ["none", "kokoro"] as const);
   const timeoutMs = num(env, "TTS_TIMEOUT_SECONDS", 60, 5, 300) * 1000;
