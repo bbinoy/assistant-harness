@@ -15,22 +15,27 @@ interface Cost {
   notifiedDay?: string;
 }
 
-function today(): Cost {
+// `file`: another ledger of the same shape. A tenant has her own (tenants.ts), so what she spends on her own API key never counts against the
+// instance's guard, and the instance's never against hers.
+function today(file: string = FILE): Cost {
   const day = localDay(new Date());
-  const c = readJson<Cost | undefined>(FILE, undefined);
+  const c = readJson<Cost | undefined>(file, undefined);
   return c?.day === day ? c : { day, usd: 0 };
 }
 
-export function recordCost(usd: number): void {
+export function recordCost(usd: number, file: string = FILE): void {
   if (!(usd > 0)) return;
-  const c = today();
+  const c = today(file);
   c.usd += usd;
-  writeJson(FILE, c);
+  writeJson(file, c);
 }
 
-export function spentToday(): number {
-  return today().usd;
+export function spentToday(file: string = FILE): number {
+  return today(file).usd;
 }
+
+// A tenant's day: spent so far against her own ceiling (0: no spending allowed at all).
+export const tenantOverBudget = (file: string, limitUsd: number): boolean => today(file).usd >= limitUsd;
 
 // `firstTime` is true once per day, so the caller can tell the owner exactly once.
 export function overBudget(): { over: boolean; firstTime: boolean; usd: number } {

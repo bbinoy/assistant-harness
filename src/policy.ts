@@ -1,10 +1,11 @@
 import type { Source } from "./audit.ts";
 import { realpathSync } from "node:fs";
-import { resolve, sep } from "node:path";
-import { isInside } from "./contain.ts";
+import { join, resolve, sep } from "node:path";
+import { isInside, realish } from "./contain.ts";
 import { gmailVerdict, GMAIL_PREFIX } from "./gmailrules.ts";
 import { isNotePath } from "./notes.ts";
 import { settings } from "./settings.ts";
+import { TENANT_CONSENT_TOOL } from "./tenants.ts";
 import { entryFor, flagFor, isReadTool } from "./toolmanifest.ts";
 
 // Permissions as code. Every tool call any agent run wants to make passes classify():
@@ -40,10 +41,18 @@ const NOTE_FILE_TOOLS = new Set(["Read", "Write", "Edit"]);
 // voice message said, what happened to a mail, or what the assistant knows: logs/, state/ and
 // memory/ (the notes, the last brief, recent pings). Symlinks are resolved first, so a link cannot
 // lead out of them. The repo, .env and the rest of the disk stay out of reach.
+// Not even for the owner's chat: the tenants' folders (their notes, history, sessions: the owner reads none of them through the assistant, which is
+// what keeps one person's chat from becoming another's, tenants.ts), the secret store's folder (config, TLS key, audit log) and the files that hold
+// invitation and intake tickets. The tenants' folders are outside the three above anyway; this is the second lock. The host's admin is not blind:
+// these are files on the owner's Mac (docs/SAFETY.md), the lock is for the assistant, not against the machine's owner.
+const hiddenData = (): string[] => [settings.tenantsDir, join(settings.stateDir, "openbao"), join(settings.stateDir, "invites.json"), join(settings.stateDir, "intake.json")];
+const inside = (real: string, dir: string): boolean => real === dir || real.startsWith(dir + sep);
+
 export function isReadableData(path: unknown, dirs: readonly string[] = [settings.logsDir, settings.stateDir, settings.memoryDir]): path is string {
-  if (typeof path !== "string" || path === "") return false;
+  if (typeof path !== "string" || path === "" || path.includes("\0")) return false;
   try {
     const real = realpathSync(resolve(path));
+    if (hiddenData().some((h) => inside(real, resolve(h)) || inside(real, realish(h)))) return false;
     return dirs.some((d) => real.startsWith(realpathSync(d) + sep));
   } catch {
     return false; // missing file or folder
@@ -89,14 +98,18 @@ const WEB_SEARCH = "WebSearch";
 
 // groupNotesDir: for a group run, THE one folder its file tools may touch (its own notes). Without it a group
 // gets no file access at all.
-export function classify(tool: string, input: Record<string, unknown>, source: Source, groupNotesDir?: string): Verdict {
+// tenantTools: a tenant's run (tenants.ts) is a "group" run in every respect of isolation, with her own notes folder in `groupNotesDir`; only the
+// tools in this set exist for her (toolsFor), whatever else the group rules below would allow. Undefined for a real group.
+export function classify(tool: string, input: Record<string, unknown>, source: Source, groupNotesDir?: string, tenantTools?: ReadonlySet<string>): Verdict {
   // A group chat holds other people: no private data, no pages. Web search, the file tools inside that one
   // group's own notes folder, and the memory tools (scoped to that group by the server, memory-tools.ts).
   if (source === "group") {
+    if (tenantTools && !tenantTools.has(tool)) return "deny";
     if (NOTE_FILE_TOOLS.has(tool)) return groupNotesDir && isInside(input.file_path, groupNotesDir) ? "allow" : "deny";
     // The browse tool starts a separate run with no owner data (browse.ts); in a group the run asks in that group like the owner's chat does.
     if (tool === "mcp__browse__browse") return settings.browse ? "allow" : "deny";
     if (tool === "mcp__send__send" || tool === "mcp__voice__voice") return "allow";
+    if (tenantTools && tool === TENANT_CONSENT_TOOL) return "allow"; // a tenant's one-time age and region confirmation (tenanttools.ts)
     return tool === WEB_SEARCH || tool === FORGET_NOTE || tool === SEARCH_LOGS || tool === UNDO_DREAM ? "allow" : "deny";
   }
   if (DENY.some((re) => re.test(tool))) return "deny";

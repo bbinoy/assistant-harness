@@ -22,6 +22,8 @@ const idleMs = () => settings.warmIdleMinutes * 60_000;
 const slotOptions = { maxAgeMs: idleMs(), idleMs }; // fresh while not idle-expired: a process that died meanwhile is detected on use (firstWarm) and replaced
 export const spare = new SpareSlot<WarmQuery>(slotOptions);
 export const groupSpare = new SpareSlot<WarmQuery>(slotOptions);
+// One more slot per recently active tenant (agent.ts keeps the few most recent): a tenant's process is built from her own options and her own API key only.
+export const newSlot = (): SpareSlot<WarmQuery> => new SpareSlot<WarmQuery>(slotOptions);
 
 const memoryIndex = (dir: string) => {
   try {
@@ -30,7 +32,7 @@ const memoryIndex = (dir: string) => {
     return "";
   }
 };
-const spareKey = (id: string, o: RunOptions, r: Resume) => JSON.stringify([id, r.resume ?? "", o.systemPrompt, o.memory?.dir ?? "", memoryIndex(o.memory?.dir ?? NOTES_DIR)]);
+const spareKey = (id: string, o: RunOptions, r: Resume) => JSON.stringify([id, r.resume ?? "", o.systemPrompt, o.memory?.dir ?? "", memoryIndex(o.memory?.dir ?? NOTES_DIR), ...(o.tenant ? [o.tenant.keyTag, o.tenant.consented] : [])]); // a tenant's process is also tied to her key (changed: not reused) and to her consent
 
 // Starts the next process for a conversation and keeps it as the slot's spare (replacing, and closing, the previous one).
 export function warmUp(slot: SpareSlot<WarmQuery>, id: string, o: RunOptions, r: Resume, label: string, approve: Approve, start: typeof startup = startup, refresh = false): void {

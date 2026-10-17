@@ -26,8 +26,10 @@ test("exports: core entry", () => {
     "parseImage",
     "parseLongText",
     "parseQuote",
+    "personOf",
     "readLongText",
     "silentLogger",
+    "toPerson",
     "withMentions",
   ]);
 });

@@ -106,6 +106,7 @@ export const resultMessage = (r: BrowseResult): string =>
 export interface BrowseContext {
   mode: BrowseMode;
   groupId?: string;
+  spent?: () => boolean; // a tenant's run: her own ledger against her own ceiling, instead of the instance's daily guard (she pays for her own key)
   key?: string; // the conversation the run is for (the owner's chat or a group): its screenshots are kept for that turn only. None for a wake-up
   // Runs the browse profile under this guard and gives back its structured output and cost. (agent.ts passes the run; no import cycle.)
   run: (prompt: string, guard: BrowseGuard) => Promise<{ text: string; costUsd?: number; structured?: unknown }>;
@@ -114,11 +115,11 @@ export interface BrowseContext {
 let busy = false;
 
 // Why a browse run may not start now, or undefined. Code only: pause, the daily spend limit, set-up, one run at a time.
-export function startRefusal(_ctx: Pick<BrowseContext, "mode">, now = Date.now(), status: BrowseStatus = browseStatus()): string | undefined {
+export function startRefusal(ctx: Pick<BrowseContext, "mode" | "spent">, now = Date.now(), status: BrowseStatus = browseStatus()): string | undefined {
   if (!settings.browse) return "Browsing is switched off (BROWSE=off).";
   if (!status.ok) return `Browsing is not set up: ${status.reason}.`;
   if (isPaused(new Date(now))) return "Paused: no browsing now.";
-  if (budgetSpent()) return "The daily spend limit is reached: no browsing until tomorrow.";
+  if ((ctx.spent ?? budgetSpent)()) return "The daily spend limit is reached: no browsing until tomorrow.";
   if (busy) return "Another browser run is in progress. Try again in a minute.";
   return undefined;
 }

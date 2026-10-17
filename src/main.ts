@@ -1,6 +1,6 @@
 import "./log.ts"; // first: timestamps, redaction and owner-only files for everything below
-import { createPipeline, group, owner, type Pipeline } from "./conversation.ts";
-import { ask, runProfile, prepareChat } from "./agent.ts";
+import { createPipeline, group, owner, tenant, type Pipeline } from "./conversation.ts";
+import { ask, dropTenantWarm, runProfile, prepareChat } from "./agent.ts";
 import { compactChatIfNeeded, compactDue } from "./chatsession.ts";
 import { gmailReaders } from "./gmail.ts";
 import { setDraftReader, setGmailReaders, setGroupApprover, type Approve } from "./permissions.ts";
@@ -29,9 +29,14 @@ import { Ledger } from "./payments.ts";
 import { settings } from "./settings.ts";
 import { unsupportedForVoice } from "./lang.ts";
 import { openLog } from "./state.ts";
-import { attachmentPath, ensureSignalDaemon, readLongText, SignalClient, type IncomingMessage } from "@ted-personal-assistant/signal";
+import { attachmentPath, ensureSignalDaemon, personOf, readLongText, SignalClient, toPerson, type IncomingMessage } from "@ted-personal-assistant/signal";
 import { providerReady, stopQwen, synthesizeWith, warmQwen } from "@ted-personal-assistant/signal/tts";
 import { Limiter } from "./limiter.ts";
+import { activeTenant, routeSender } from "./tenantroute.ts";
+import { createTenantRunner } from "./tenantrun.ts";
+import { tenantHooks } from "./tenanttools.ts";
+import { markDisclosed, plainSummary, tenantByAci, tenantById, tenantContext, targetOf } from "./tenants.ts";
+import { tenantKeys } from "./secrets.ts";
 import { probeAudio, transcribe, voiceReady } from "@ted-personal-assistant/signal/voice";
 
 ensureNotesDir(); // first run: memory/notes/, where the chat agent keeps its notes
@@ -45,7 +50,17 @@ const signal = new SignalClient({
   logger: console, // the app's console is the timestamped, redacting one from log.ts
 });
 // What was said goes into that conversation's own log: the owner's chat, or the group's (made on first use).
-function record(groupId: string | undefined, kind: Kind, ts: number, text: string, extra?: Extra) {
+function record(target: string | undefined, kind: Kind, ts: number, text: string, extra?: Extra) {
+  // A tenant's own history (tenants.ts), in her folder, bounded by size and never summarised by a model (that call would run on the instance's login).
+  const person = personOf(target);
+  if (person) {
+    const rec = tenantByAci(person); // a stranger's fixed reply, or a tenant deleted meanwhile, is logged nowhere
+    if (!rec) return;
+    const { logFile } = tenantContext(rec);
+    recordMessage(kind, ts, text, new Date(), logFile, extra);
+    return void compactIfNeeded(plainSummary, settings.groupLogMb * 1_000_000, logFile).catch((e) => console.error("tenant log: compaction failed:", e.message));
+  }
+  const groupId = target;
   if (groupId) return void (groupDir(groupId, groupName(groupId)), recordGroup(groupId, kind, ts, text, extra));
   recordMessage(kind, ts, text, new Date(), undefined, extra);
   void compactIfNeeded(summarizeWithHaiku).catch((e) => console.error("messages: compaction failed:", e.message));
@@ -55,7 +70,8 @@ const approve: Approve = makeApprove((t) => out.replyPlain(t, "approval"));
 // Unattended runs (wake-ups, the brief, the radar, the mail handler) ask the same way, but only an explicit yes / no or a reply
 // to the question answers it: whatever else the owner types meanwhile is a chat message (approvals.ts).
 // A group asks in the group itself; any member may answer there (approvals.ts scopes every question to its conversation).
-setGroupApprover((groupId) => makeApprove((t) => out.reply(t, { plain: true, kind: "approval", groupId }), { scope: groupId }));
+// (A tenant's questions, from her browse run, are asked in her own chat: her scope key is "tenant:<id>".)
+setGroupApprover((scope) => makeApprove((t) => out.reply(t, { plain: true, kind: "approval", groupId: scope.startsWith("tenant:") ? targetOf(scope.slice(7)) : scope }), { scope }));
 const approveBackground: Approve = makeApprove((t) => out.replyPlain(t, "approval"), { background: true });
 // `say` is a plain message to the owner. `notify` is what the assistant sends on its own (mail
 // alerts, handled mail, setup problems) and is also remembered, so the chat knows what a reply
@@ -103,12 +119,18 @@ const vouch = (groupId: string) => ownerInGroup(groupId, () => signal.groups(), 
 // Both kinds of conversation run through one pipeline (src/conversation.ts). Spoken replies need the
 // assistant's own chat (in Note to Self our own voice message would echo back as if the owner had sent
 // it) and the local speech setup.
+// Several people on one instance (TENANTS=on, src/tenants.ts): each friend is a tenant with her own folder, API key (OpenBao), limits and cooldown.
+// Needs the assistant's own Signal account: in Note to Self there is nobody else to talk to.
+if (settings.tenants && !signal.separateAccount) throw new Error("TENANTS=on needs the assistant's own Signal account (SIGNAL_ACCOUNT, docs/SIGNAL-ACCOUNT.md)");
+const tenantRunner = createTenantRunner({ keys: tenantKeys });
+tenantHooks.drop = dropTenantWarm;
 const pipeline: Pipeline = createPipeline({
   signal,
   out,
   record,
   account: config.signalAccount,
   runOwner: (prompt, ownerMessage, pictures, hooks, documents) => ask(prompt, approve, say, ownerMessage, pictures, hooks, documents),
+  runTenant: (conv, prompt, pictures, hooks, documents) => tenantRunner.run(conv, prompt, pictures, hooks, documents),
   picture: (m) => preparePicture(attachmentPath(m.image!, settings.signalAttachmentsDir)), // a plain file name inside signal-cli's folder
   document: async (m) => prepareFile(attachmentPath(m.file!, settings.signalAttachmentsDir), m.file!.name, audioTools), // the same: only the id, joined to signal-cli's folder; an audio file is transcribed (queued with voice messages)
   longText: (m) => readLongText(m.longText!, settings.signalAttachmentsDir), // the same: only the id, joined to signal-cli's folder
@@ -122,9 +144,14 @@ const pipeline: Pipeline = createPipeline({
   vouch,
   isOwner: fromOwner,
   admitGroup: (_conv, m) => groupBrain(m),
-  compact: (conv, mode) => compactChatIfNeeded(conv.sessionFile, conv.source, conv.notesDir, mode), // every conversation, after the reply is out and only when it grew far past the limit (urgent); the next message waits for it
+  compact: async (conv, mode) => {
+    if (conv.kind !== "tenant") return compactChatIfNeeded(conv.sessionFile, conv.source, conv.notesDir, mode);
+    const rec = tenantById(conv.tenantId!); // hers runs on her own key
+    const apiKey = rec && (await tenantKeys().get(rec.id).catch(() => undefined));
+    if (rec && apiKey) await compactChatIfNeeded(conv.sessionFile, conv.source, conv.notesDir, mode, { apiKey, costFile: tenantContext(rec).costFile });
+  }, // every conversation, after the reply is out and only when it grew far past the limit (urgent); the next message waits for it
   // The owner's chat is kept warm after each turn; the group that spoke last has its own warm process (group.ts).
-  afterTurn: (conv) => void (conv.kind === "owner" && warmChat()),
+  afterTurn: (conv) => void (conv.kind === "owner" ? warmChat() : conv.kind === "tenant" && tenantRunner.warm(conv)),
 });
 const groupBrain = createGroupBrain({ pipeline, recent: (groupId) => logTail(group(groupId)) });
 
@@ -133,9 +160,23 @@ const groupBrain = createGroupBrain({ pipeline, recent: (groupId) => logTail(gro
 // A group's event goes to the group; anything else must be the owner's own chat (the caller has checked).
 const route = (w: { group?: { id: string } }, ev: Parameters<Pipeline["handleIncoming"]>[1]) =>
   void pipeline.handleIncoming(w.group ? group(w.group.id) : owner(), ev).catch((e) => console.error(`${ev.type} error:`, e.message));
+// With TENANTS=on a private message from someone else is decided by tenantroute.ts: a tenant's goes to her conversation, anybody else gets a fixed
+// reply with no model call (an invitation, a welcome); the assistant answers only what was written to it. Off: ignored, exactly as before.
+function fromStranger(m: IncomingMessage): void {
+  const decided = routeSender({ aci: m.fromUuid, name: m.fromName, text: m.text });
+  if (decided.kind === "ignore") return void console.log(`ignored a message from someone else (${decided.why})`);
+  if (decided.kind === "reply") {
+    if (decided.welcome) markDisclosed(tenantContext(decided.welcome)); // the welcome carries the disclosure
+    return void out.reply(decided.text, { plain: true, kind: "other", groupId: toPerson(m.fromUuid!) }).catch((e) => console.error("invitation reply failed:", e.message));
+  }
+  void pipeline.handleIncoming(tenant(decided.tenant.id), { type: "message", m }).catch((e) => console.error(`tenant message error:`, e.message));
+}
 signal.onMessage((m) => {
   if (!m.group) {
-    if (!acceptOwner(m, config.ownerNumber)) return void console.log(`ignored a message from ${mask(m.from)}`);
+    if (!acceptOwner(m, config.ownerNumber)) {
+      if (settings.tenants && m.other) return fromStranger(m);
+      return void console.log(`ignored a message from ${mask(m.from)}`);
+    }
     if (!m.edited && out.isOwnEcho(m)) return; // one of our own replies coming back (an edit is the owner's, never an echo)
   }
   route(m, { type: "message", m });
@@ -144,6 +185,7 @@ signal.onMessage((m) => {
 // A message deleted for everyone: the same door as a message.
 signal.onDelete((d) => {
   if (d.group || acceptOwner(d, config.ownerNumber)) route(d, { type: "deletion", d });
+  else if (settings.tenants && d.other && activeTenant(d.fromUuid)) void pipeline.handleIncoming(tenant(activeTenant(d.fromUuid)!.id), { type: "deletion", d }).catch((e) => console.error("tenant deletion error:", e.message));
 });
 
 // The owner's Mailbird connection for reply drafts: the handler's drafts are shown on Signal
@@ -159,6 +201,7 @@ if (settings.mailProvider === "gmail") setGmailReaders(gmailReaders());
 signal.onReaction((r) => {
   if (r.isRemove || signal.isOwnReaction(r)) return;
   if (r.group || acceptOwner(r, config.ownerNumber)) route(r, { type: "reaction", r });
+  else if (settings.tenants && r.other && activeTenant(r.fromUuid)) void pipeline.handleIncoming(tenant(activeTenant(r.fromUuid)!.id), { type: "reaction", r }).catch((e) => console.error("tenant reaction error:", e.message));
 });
 
 // Policy of this app, not of the signal package: if Signal goes away we exit, and launchd restarts the whole agent

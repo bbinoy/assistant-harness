@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve, isAbsolute, sep } from "node:path";
 
 // Real location of a path that may not exist yet: resolve ".." first, then follow symlinks on the
 // longest existing part and append the rest.
-function realish(path: string): string {
+export function realish(path: string): string {
   const rest: string[] = [];
   let p = resolve(path);
   for (;;) {
