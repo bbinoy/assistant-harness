@@ -2,7 +2,7 @@
 
 **Proactive personal assistant with a character, who organises your calendar, emails, tasks and meetings, and can do research on the web for you.**
 
-<img width="300" alt="Ted" src="https://github.com/user-attachments/assets/f8e33196-7333-4305-948e-9b6d4451cbb3" />
+<img width="300" alt="Ted answering in Signal: a text reply, a voice message and reactions" src="docs/images/chat.png" />
 
 ## Why it feels like a person
 
