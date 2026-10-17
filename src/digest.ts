@@ -36,7 +36,7 @@ export function buildDigest(entries: TriageEntry[], sinceIso: string | undefined
     if (rows.length === 0) return;
     lines.push(`\n${title} (${rows.length}):`);
     for (const e of rows.slice(0, LIST_CAP)) {
-      const kind = withKind ? ` [${e.meta.kind}]` : "";
+      const kind = withKind && e.meta.kind ? ` [${clip(e.meta.kind, 40)}]` : ""; // a row without a kind has no brackets
       const id = e.meta.messageId ? ` {msg ${e.meta.messageId}}` : "";
       const why = withKind && e.meta.reason ? ` - why: ${clip(e.meta.reason, 80)}` : "";
       lines.push(`- ${clip(e.meta.from, 40)}: ${clip(e.meta.subject, 90)}${kind}${why}${id}`);

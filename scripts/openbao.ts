@@ -35,7 +35,7 @@ function line(ok: boolean | "warn", what: string, detail = ""): void {
   console.log(`${ok === true ? "ok  " : ok === "warn" ? "warn" : "FAIL"}  ${what}${detail ? `: ${detail}` : ""}`);
 }
 
-async function showShares(shares: string[]): Promise<void> {
+async function showShares(shares: string[]): Promise<boolean> {
   if (!process.stdout.isTTY) throw new Error("the recovery shares are shown on a terminal only");
   console.log("\n=== RECOVERY SHARES: shown ONCE, never stored by this tool beyond what the Mac keeps for unsealing ===");
   console.log("Any TWO of these three unseal OpenBao. Record each in a different safe place (a password manager, a paper in a safe),");
@@ -45,11 +45,12 @@ async function showShares(shares: string[]): Promise<void> {
   for (let i = 0; ; i++) {
     const typed = (await readHiddenFromTerminal("\nWhen all three are recorded, type the last 6 characters of share 3 (hidden): ")).trim();
     if (typed === tail) break;
-    if (i >= 2) throw new Error("not confirmed. OpenBao is set up and works, but nothing proves the shares were recorded; see docs/SETUP.md (start over with an empty data directory)");
+    if (i >= 2) return false; // the shares stay on the screen: setup goes on and says so at the end
     console.log("That is not the end of share 3. Look again.");
   }
   process.stdout.write("\x1b[2J\x1b[3J\x1b[H"); // clear the screen and its scrollback
   console.log("Recovery shares cleared from the screen.");
+  return true;
 }
 
 async function installServices(): Promise<void> {
@@ -73,9 +74,14 @@ async function main(argv: string[]): Promise<number> {
     out(`certificate: ${await ensureCert(layout)} (${layout.cert})`);
     writeConfig(layout, cfg.addr);
     await installJob(names.server, serverPlist(readFileSync(resolve(repo, "launchd/openbao.plist.template"), "utf8"), layout, names.server), layout).then((r) => out(`launchd ${names.server}: ${r}`));
-    await admin.setup({ out, showShares });
+    const confirmed = await admin.setup({ out, showShares });
     await installServices();
     out("\nDone. Check: npm run doctor    Saved details: npm run profile -- set <key>    Old profile: npm run openbao -- migrate");
+    if (!confirmed) {
+      out("\nWARNING: the recovery shares were NOT confirmed as recorded, and they were not cleared from your terminal. OpenBao works, but if this Mac or its Keychain is lost, only your recorded shares bring the secrets back.");
+      out("Record them now from the scrollback above. If you cannot, start over while nothing is saved yet: see docs/SETUP.md (empty data directory).");
+      return 1;
+    }
     return 0;
   }
   if (cmd === "status") {

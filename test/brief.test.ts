@@ -43,6 +43,14 @@ test("digest: no log-only warning once it really acts", () => {
   assert.doesNotMatch(d, /LOG-ONLY/);
 });
 
+test("digest: a row without a kind has no empty brackets", () => {
+  const e = entry("archive", "A", "B", "newsletter", "archived");
+  delete e.meta.kind;
+  const d = buildDigest([e], undefined);
+  assert.match(d, /A: B \{msg 7\}/);
+  assert.doesNotMatch(d, /undefined/);
+});
+
 test("digest: caps very long lists", () => {
   const many = Array.from({ length: 55 }, (_, i) => entry("archive", `S${i}`, "n", "notification"));
   assert.match(buildDigest(many, undefined), /\.\.\.and 15 more/);

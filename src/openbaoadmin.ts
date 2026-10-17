@@ -201,8 +201,9 @@ export interface AdminOptions {
 
 export interface SetupIo {
   out: (line: string) => void;
-  // Shows the three recovery shares once and returns after the owner confirmed having recorded them. They never go anywhere else.
-  showShares: (shares: string[]) => Promise<void>;
+  // Shows the three recovery shares once; true when the owner confirmed having recorded them (false: they did not manage to, and setup
+  // finishes anyway, so a mistyped confirmation never leaves OpenBao half set up). They never go anywhere else.
+  showShares: (shares: string[]) => Promise<boolean | void>;
 }
 
 // the authenticated endpoints wrap their answer in "data"
@@ -352,8 +353,10 @@ export class Admin {
 
   // First run: init, keep shares 1 and 2 in the Keychain, show all three once, unseal, configure, drop the root token.
   // Later runs: unseal from the Keychain if needed, regenerate a root from the Keychain shares, configure again (repair), drop the root.
-  async setup(io: SetupIo): Promise<void> {
+  // Returns false when the owner did not confirm the recovery shares (OpenBao is set up and works all the same).
+  async setup(io: SetupIo): Promise<boolean> {
     await this.waitUp();
+    let confirmed = true;
     const h = await this.health();
     let root: string;
     if (!h.initialized) {
@@ -363,7 +366,7 @@ export class Admin {
       const keys = shares as string[];
       await this.saveShares(keys); // before they are shown: if this fails, nothing was lost that the server cannot be re-initialised from (it is empty)
       io.out("OpenBao is initialised. The Mac keeps two of the three unseal shares in its Keychain (for the automatic unseal).");
-      await io.showShares(keys);
+      confirmed = (await io.showShares(keys)) !== false;
       if (!(await this.unsealWith(keys.slice(0, THRESHOLD)))) throw new Error("OpenBao did not unseal after init");
       root = r.root_token as string;
     } else {
@@ -378,6 +381,7 @@ export class Admin {
       await this.revoke(root);
     }
     io.out("The root token was revoked; it was never written anywhere.");
+    return confirmed;
   }
 
   // A Raft snapshot (encrypted by OpenBao itself; useless without the unseal shares), written 0600, with the operator token.

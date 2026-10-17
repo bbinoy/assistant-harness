@@ -71,14 +71,15 @@ test("real OpenBao (throwaway): setup, store and read fake items, narrow token, 
   const cfg = { ...settings.openbao, addr, mount: "ted", caCert: layout.cert, keychainPrefix: prefix, timeoutMs: 10_000, cacheMs: 0 };
   let shown: string[] = [];
   const lines: string[] = [];
-  const io = { out: (l: string) => lines.push(l), showShares: async (s: string[]) => void (shown = s) };
+  const io = { out: (l: string) => lines.push(l), showShares: async (s: string[]) => (shown = s, false) }; // false: the owner did not confirm the shares
 
   try {
     start();
-    await admin.setup(io);
+    assert.equal(await admin.setup(io), false, "an unconfirmed recovery share does not stop setup half way, it is reported");
     // init: 3 shares shown once; the Keychain has exactly two of them, and the token
     assert.equal(shown.length, 3);
     const names = keychainNames(prefix);
+    assert.ok(keychain.items.get(names.token) && keychain.items.get(names.operator), "the tokens were made although the confirmation failed");
     assert.equal(keychain.items.get(names.share(1)), shown[0]);
     assert.equal(keychain.items.get(names.share(2)), shown[1]);
     assert.ok(!keychain.items.has(names.share(3)), "the third share is not kept on the Mac");
