@@ -58,7 +58,8 @@ export class TenantSecrets {
 
 // Service names of this Mac's Keychain items, from OPENBAO_KEYCHAIN_PREFIX.
 export const keychainNames = (prefix: string = settings.openbao.keychainPrefix) => ({
-  token: `${prefix}-token`,
+  token: `${prefix}-token`, // the app's own token (policy: tenants/owner/ only)
+  operator: `${prefix}-operator`, // the setup tool's token (policy: root generation, rekey, snapshot; no secrets)
   share: (n: number) => `${prefix}-unseal-${n}`,
 });
 

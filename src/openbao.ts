@@ -8,9 +8,11 @@ import { Agent, fetch as undiciFetch } from "undici";
 
 export class BaoError extends Error {
   readonly status?: number;
-  constructor(message: string, status?: number) {
+  readonly detail?: string; // the server's own words for a refusal, for the setup tool's terminal only; never in `message`, never logged by the app
+  constructor(message: string, status?: number, detail?: string) {
     super(message);
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -34,6 +36,15 @@ export const checkPath = (path: string): string[] => {
   const parts = path.split("/").filter((p) => p !== "");
   if (!parts.length || parts.length > 6 || !parts.every((p) => SEGMENT.test(p))) throw new BaoError("not a valid secret path");
   return parts;
+};
+
+const serverWords = (text: string): string | undefined => {
+  try {
+    const e = (JSON.parse(text) as { errors?: unknown }).errors;
+    return Array.isArray(e) ? e.filter((x) => typeof x === "string").join("; ").slice(0, 200) : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 export class OpenBao {
@@ -61,7 +72,7 @@ export class OpenBao {
 
   // One call. `auth: false` for the few calls that need no token (health). Returns the parsed JSON, or undefined for an empty answer.
   private async call(method: string, path: string, body?: unknown, o: { auth?: boolean; notFound?: boolean } = {}): Promise<{ json: any } | undefined> {
-    const headers: Record<string, string> = { Accept: "application/json" };
+    const headers: Record<string, string> = { Accept: "application/json", "X-Vault-Request": "true" };
     if (o.auth !== false) {
       let token: string;
       try {
@@ -83,7 +94,7 @@ export class OpenBao {
     if (res.status === 404 && o.notFound) return undefined;
     if (res.status === 503) throw new BaoError("OpenBao is sealed or not ready (npm run openbao -- unseal)", 503);
     if (res.status === 403) throw new BaoError("OpenBao refused the request (the token is wrong, expired, or its policy does not allow this)", 403);
-    if (res.status < 200 || res.status >= 300) throw new BaoError(`OpenBao answered with an error (status ${res.status})`, res.status);
+    if (res.status < 200 || res.status >= 300) throw new BaoError(`OpenBao answered with an error (status ${res.status})`, res.status, serverWords(text));
     if (!text) return { json: undefined };
     try {
       return { json: JSON.parse(text) };
@@ -149,6 +160,12 @@ export class OpenBao {
     const out = ((keys as unknown[] | undefined) ?? []).filter((k): k is string => typeof k === "string");
     this.remember(key, out, o.cache !== false);
     return out;
+  }
+
+  // ---- the setup tool's calls (any API path under /v1/; `auth: false` for the few that need no token, like sys/init) ----
+
+  async raw(method: string, path: string, body?: unknown, o: { auth?: boolean; notFound?: boolean } = {}): Promise<any> {
+    return (await this.call(method, path, body, o))?.json;
   }
 
   // ---- state, for the doctor and the setup ----

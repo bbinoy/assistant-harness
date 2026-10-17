@@ -50,11 +50,12 @@ export function gmailChecks(line: Line, o: { self: string | undefined; connector
 export async function openbaoCheck(line: Line, o: { bao?: () => OpenBao; keychain?: Keychain; cfg?: typeof settings.openbao } = {}): Promise<void> {
   const cfg = o.cfg ?? settings.openbao;
   const what = "OpenBao (secret store)";
-  const hasToken = await (o.keychain ?? macKeychain).get(keychainNames(cfg.keychainPrefix).token).then((t) => !!t, () => false);
+  const keychain = o.keychain ?? macKeychain;
+  const hasToken = await keychain.get(keychainNames(cfg.keychainPrefix).token).then((t) => !!t, () => false);
   const down = (detail: string) => line(hasToken ? false : "warn", what, hasToken ? detail : `not set up (${detail}); saved details and card payments need it: npm run openbao -- setup`);
   let bao: OpenBao;
   try {
-    bao = (o.bao ?? appBao)();
+    bao = (o.bao ?? (() => appBao({ keychain, cfg })))();
   } catch (e) {
     return down((e as Error).message.slice(0, LIMITS.reason));
   }
