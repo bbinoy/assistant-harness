@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadSettings } from "../src/settings.ts";
+import { qwenReference } from "../src/doctor.ts";
 
 test("settings: Kokoro is the default speech provider, with no fallback", () => {
   const s = loadSettings({});
@@ -53,4 +54,50 @@ test("settings: the local cloned voice (qwen) takes its reference from paths, fa
   assert.ok(inline.provider === "qwen" && inline.qwen.refText === "Just these words." && inline.qwen.refAudio === "");
   assert.ok(loadSettings({ TTS_PROVIDER: "qwen", TTS_FALLBACK: "none" }).tts.fallback === "none");
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("settings: with TTS_PROVIDER=qwen and no reference set, the built-in sample voice from assets/voices/ is used", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ref-"));
+  const q = loadSettings({ TTS_PROVIDER: "qwen", HARNESS_DATA_DIR: dir }).tts;
+  assert.ok(q.provider === "qwen");
+  assert.equal(q.qwen.builtIn, true);
+  const repoVoices = join(import.meta.dirname, "../assets/voices");
+  assert.equal(q.qwen.refAudio, join(repoVoices, "default.wav")); // resolved from the repo, not the data dir
+  assert.equal(q.qwen.refText, readFileSync(join(repoVoices, "default.txt"), "utf8").trim());
+  assert.ok(q.qwen.refText.length > 50);
+  assert.equal(qwenReference(q.qwen), "built-in sample voice");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("settings: an explicit TTS_REF_AUDIO / TTS_REF_TEXT wins over the built-in sample, and the doctor says so", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ref-"));
+  const q = loadSettings({ TTS_PROVIDER: "qwen", HARNESS_DATA_DIR: dir, TTS_REF_AUDIO: "mine.wav", TTS_REF_TEXT: "My own words." }).tts;
+  assert.ok(q.provider === "qwen");
+  assert.equal(q.qwen.builtIn, false);
+  assert.equal(q.qwen.refAudio, join(dir, "mine.wav"));
+  assert.equal(q.qwen.refText, "My own words.");
+  assert.match(qwenReference(q.qwen), /^your own file .*mine\.wav$/);
+  // one of the two set: still your own (the sample is never mixed with your text or audio)
+  const half = loadSettings({ TTS_PROVIDER: "qwen", HARNESS_DATA_DIR: dir, TTS_REF_AUDIO: "mine.wav" }).tts;
+  assert.ok(half.provider === "qwen" && half.qwen.builtIn === false && half.qwen.refText === "");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("assets/voices: the shipped sample is a mono 24 kHz 16-bit PCM WAV of about 10 s, small, with its text", () => {
+  const dir = join(import.meta.dirname, "../assets/voices");
+  const wav = readFileSync(join(dir, "default.wav"));
+  assert.equal(wav.toString("latin1", 0, 4), "RIFF");
+  assert.equal(wav.toString("latin1", 8, 12), "WAVE");
+  const fmt = wav.indexOf("fmt ");
+  assert.equal(wav.readUInt16LE(fmt + 8), 1); // PCM
+  assert.equal(wav.readUInt16LE(fmt + 10), 1); // mono
+  assert.equal(wav.readUInt32LE(fmt + 12), 24000);
+  assert.equal(wav.readUInt16LE(fmt + 22), 16);
+  const data = wav.indexOf("data");
+  const seconds = wav.readUInt32LE(data + 4) / (24000 * 2);
+  assert.ok(seconds >= 8 && seconds <= 15, `duration ${seconds}`);
+  assert.ok(wav.length < 1_000_000);
+  const text = readFileSync(join(dir, "default.txt"), "utf8").trim();
+  assert.ok(text.length > 100 && text.length < 400);
+  assert.ok(readFileSync(join(dir, "README.md"), "utf8").includes("Apache-2.0"));
 });

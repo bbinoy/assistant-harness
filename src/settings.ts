@@ -63,13 +63,18 @@ function ttsProvider(env: Env, kokoro: { dir: string; voice: string; speed: numb
     const textFile = textRaw && !textRaw.includes("\n") ? path(textRaw) : "";
     const isFile = textFile !== "" && (() => { try { return statSync(textFile).isFile(); } catch { return false; } })();
     const idleMs = num(env, "WARM_IDLE_MINUTES", 60, 1, 1440) * 60_000;
+    // With neither set, the synthetic sample that ships in the repo (assets/voices/, no real person behind it) is the reference.
+    // It is resolved from the repo, not the data dir. Setting either one means your own recording: no mixing with the sample.
+    const builtIn = !env.TTS_REF_AUDIO?.trim() && !textRaw;
+    const sampleDir = fileURLToPath(new URL("../assets/voices/", import.meta.url));
     return {
       provider, fallback, kokoro,
       qwen: {
         dir: path(env.TTS_QWEN_DIR) || join(dataDir, "state/tts-qwen"),
         model: env.TTS_QWEN_MODEL?.trim() || "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
-        refAudio: path(env.TTS_REF_AUDIO),
-        refText: isFile ? readFileSync(textFile, "utf8").trim() : textRaw,
+        refAudio: builtIn ? join(sampleDir, "default.wav") : path(env.TTS_REF_AUDIO),
+        refText: builtIn ? (() => { try { return readFileSync(join(sampleDir, "default.txt"), "utf8").trim(); } catch { return ""; } })() : isFile ? readFileSync(textFile, "utf8").trim() : textRaw,
+        builtIn,
         voiceRoot: join(dataDir, "state/voice"), // the voice library (a cloned voice per conversation, voices.ts); the reference above is its default voice
         timeoutMs,
         idleMs,
