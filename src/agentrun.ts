@@ -64,7 +64,7 @@ const contextTokens = (u: { input_tokens?: number; cache_read_input_tokens?: num
 
 // The browse sub-run (browse.ts calls this through the entry tool): a fresh run with the browser, under the guard. A group's run is the same
 // as the owner's; only `approve` differs (the group's own approver).
-function browseRunOptions(guard: BrowseGuard, tenant?: TenantRun): RunOptions {
+export function browseRunOptions(guard: BrowseGuard, tenant?: TenantRun): RunOptions {
   return {
     source: PROFILES.browse.source,
     systemPrompt: browseSystem(undefined, guard.vision, guard.profileKeys(), guard.cardInfo()),

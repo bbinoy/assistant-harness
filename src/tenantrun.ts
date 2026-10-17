@@ -5,7 +5,8 @@ import type { Conversation, RunHooks } from "./conversationmodel.ts";
 import type { Picture } from "./image.ts";
 import type { Document } from "./document.ts";
 import type { KeyStore } from "./secrets.ts";
-import { mayNotice, markDisclosed, tenantById, tenantContext, wasDisclosed, type TenantContext } from "./tenants.ts";
+import { TenantKeyError } from "./errors.ts";
+import { mayNotice, markDisclosed, setPaused, tenantById, tenantContext, wasDisclosed, type TenantContext } from "./tenants.ts";
 import { DISCLOSURE, setupIncompleteReply } from "./tenantroute.ts";
 
 // A tenant's turn, around the run itself (agent.ts askTenant): the gates that need no model, in code, in this order:
@@ -55,7 +56,14 @@ export function createTenantRunner(deps: TenantRunnerDeps) {
       return notice(ctx, "store", "I can't reach my secret store right now, so I can't start. Please try again in a while.");
     }
     if (!apiKey) return notice(ctx, "setup", setupIncompleteReply());
-    const r = await ask(ctx, apiKey, prompt, pictures, hooks, documents);
+    let r: Awaited<ReturnType<typeof ask>>;
+    try {
+      r = await ask(ctx, apiKey, prompt, pictures, hooks, documents);
+    } catch (e) {
+      if (e instanceof TenantKeyError) setPaused(ctx, cooldownUntil(ctx.id, now())); // for doctor, which is another process
+      throw e;
+    }
+    setPaused(ctx, undefined);
     return { text: disclose(ctx, r.text), costUsd: r.costUsd };
   }
 

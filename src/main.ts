@@ -29,10 +29,10 @@ import { Ledger } from "./payments.ts";
 import { settings } from "./settings.ts";
 import { unsupportedForVoice } from "./lang.ts";
 import { openLog } from "./state.ts";
-import { attachmentPath, ensureSignalDaemon, personOf, readLongText, SignalClient, toPerson, type IncomingMessage } from "@ted-personal-assistant/signal";
+import { attachmentPath, ensureSignalDaemon, personOf, readLongText, SignalClient, type IncomingMessage } from "@ted-personal-assistant/signal";
 import { providerReady, stopQwen, synthesizeWith, warmQwen } from "@ted-personal-assistant/signal/tts";
 import { Limiter } from "./limiter.ts";
-import { activeTenant, routeSender } from "./tenantroute.ts";
+import { activeTenant, admitStranger } from "./tenantroute.ts";
 import { createTenantRunner } from "./tenantrun.ts";
 import { tenantHooks } from "./tenanttools.ts";
 import { markDisclosed, plainSummary, tenantByAci, tenantById, tenantContext, targetOf } from "./tenants.ts";
@@ -163,13 +163,12 @@ const route = (w: { group?: { id: string } }, ev: Parameters<Pipeline["handleInc
 // With TENANTS=on a private message from someone else is decided by tenantroute.ts: a tenant's goes to her conversation, anybody else gets a fixed
 // reply with no model call (an invitation, a welcome); the assistant answers only what was written to it. Off: ignored, exactly as before.
 function fromStranger(m: IncomingMessage): void {
-  const decided = routeSender({ aci: m.fromUuid, name: m.fromName, text: m.text });
-  if (decided.kind === "ignore") return void console.log(`ignored a message from someone else (${decided.why})`);
-  if (decided.kind === "reply") {
-    if (decided.welcome) markDisclosed(tenantContext(decided.welcome)); // the welcome carries the disclosure
-    return void out.reply(decided.text, { plain: true, kind: "other", groupId: toPerson(m.fromUuid!) }).catch((e) => console.error("invitation reply failed:", e.message));
-  }
-  void pipeline.handleIncoming(tenant(decided.tenant.id), { type: "message", m }).catch((e) => console.error(`tenant message error:`, e.message));
+  const decided = admitStranger({ fromUuid: m.fromUuid, name: m.fromName, text: m.text }, {
+    reply: (to, text) => out.reply(text, { plain: true, kind: "other", groupId: to }),
+    deliver: (t) => void pipeline.handleIncoming(tenant(t.id), { type: "message", m }).catch((e) => console.error("tenant message error:", e.message)),
+    welcomed: (t) => markDisclosed(tenantContext(t)),
+  });
+  if (decided.kind === "ignore") console.log(`ignored a message from someone else (${decided.why})`);
 }
 signal.onMessage((m) => {
   if (!m.group) {

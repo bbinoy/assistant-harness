@@ -1,6 +1,7 @@
 import { CODE_PATTERN } from "./onetime.ts";
 import { ACI, redeemInvite, tenantByAci, type TenantRecord } from "./tenants.ts";
 import { ASSISTANT, OWNER, settings } from "./settings.ts";
+import { toPerson } from "@ted-personal-assistant/signal";
 
 // Who is this sender? The door for everybody who is not the owner (main.ts), with TENANTS=on. Pure of Signal: a sender and her text in, a decision out.
 //   a tenant (invited or active)  -> her conversation
@@ -13,8 +14,8 @@ import { ASSISTANT, OWNER, settings } from "./settings.ts";
 export const DISCLOSURE = "You're talking to an AI, and its answers may be wrong.";
 export const invitationReply = (): string => `Hi, I'm ${ASSISTANT}, an AI assistant that works for ${OWNER}. I only chat with people ${OWNER} has invited. If you have an invitation code, send it to me here; otherwise I can't help, sorry.`;
 export const badCodeReply = (): string => `That code isn't valid (it may have been used already, or it has expired). Please ask ${OWNER} for a new one.`;
-export const welcomeReply = (name: string): string => `${DISCLOSURE}\n\nWelcome${name ? `, ${name}` : ""}! Your invitation worked. Before we can talk I need two things: your own Anthropic API key (so the AI runs on your account and the cost is yours; ${OWNER} never sees it), and a quick confirmation of your age and region. ${OWNER} will send you a private link for the key. Never type a key or any password into this chat.`;
-export const setupIncompleteReply = (): string => `Setup isn't finished yet: I still need your own Anthropic API key before I can reply. ${OWNER} can send you a private link for it. Please never type the key into this chat.`;
+export const welcomeReply = (name: string): string => `${DISCLOSURE}\n\nWelcome${name ? `, ${name}` : ""}! Your invitation worked. Before we can talk I need two things: your own Anthropic API key (so the AI runs on your account and the cost is yours; ${OWNER} never sees it), and a quick confirmation of your age and region. ${OWNER} will give you a private way to add the key. Never type a key or any password into this chat.`;
+export const setupIncompleteReply = (): string => `Setup isn't finished yet: I still need your own Anthropic API key before I can reply. ${OWNER} can give you a private way to add it. Please never type the key into this chat.`;
 
 export type Route =
   | { kind: "tenant"; tenant: TenantRecord }
@@ -83,4 +84,22 @@ export function routeSender(who: Sender, now = Date.now()): Route {
   repliedAt.set(aci, now);
   trim(repliedAt);
   return { kind: "reply", text: code ? badCodeReply() : invitationReply() };
+}
+
+export interface StrangerIo {
+  reply(to: string, text: string): Promise<unknown>; // a fixed message to one person (a conversation target, packages/signal toPerson)
+  deliver(tenant: TenantRecord): void; // her message goes to her conversation
+  welcomed?(tenant: TenantRecord): void; // she just joined; the welcome carries the AI disclosure
+}
+
+// A private message from someone other than the owner, end to end: the decision above, then what it asks for. A fixed reply is the only thing that
+// can be sent from here, and it needs no model. Returns the decision (for the log and tests).
+export function admitStranger(m: Pick<Sender, "name" | "text"> & { fromUuid?: string }, io: StrangerIo, now = Date.now()): Route {
+  const decided = routeSender({ aci: m.fromUuid, name: m.name, text: m.text }, now);
+  if (decided.kind === "tenant") io.deliver(decided.tenant);
+  else if (decided.kind === "reply") {
+    if (decided.welcome) io.welcomed?.(decided.welcome);
+    void io.reply(toPerson(m.fromUuid!), decided.text).catch((e) => console.error("invitation reply failed:", (e as Error).message));
+  }
+  return decided;
 }

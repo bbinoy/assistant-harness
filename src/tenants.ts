@@ -324,10 +324,19 @@ export function recordConsent(ctx: Pick<TenantContext, "consentFile" | "id">, re
 interface Meta {
   disclosedAt?: string;
   noticeAt?: Record<string, string>;
+  pausedUntil?: number; // her key's cooldown (cooldown.ts keeps it in memory; this is for `npm run doctor`, a separate process)
 }
 const meta = (ctx: Pick<TenantContext, "metaFile">): Meta => readJson<Meta>(ctx.metaFile, {});
 export const wasDisclosed = (ctx: Pick<TenantContext, "metaFile">): boolean => !!meta(ctx).disclosedAt;
 export const markDisclosed = (ctx: Pick<TenantContext, "metaFile">): void => writeJson(ctx.metaFile, { ...meta(ctx), disclosedAt: new Date().toISOString() });
+export const pausedUntil = (ctx: Pick<TenantContext, "metaFile">, now = Date.now()): number | undefined => {
+  const u = meta(ctx).pausedUntil;
+  return typeof u === "number" && u > now ? u : undefined;
+};
+export function setPaused(ctx: Pick<TenantContext, "metaFile">, until: number | undefined): void {
+  const { pausedUntil: _old, ...rest } = meta(ctx);
+  if (until !== undefined || _old !== undefined) writeJson(ctx.metaFile, until !== undefined ? { ...rest, pausedUntil: until } : rest);
+}
 // A fixed notice (setup incomplete, budget, cooldown) at most every TENANT_NOTICE_MINUTES: true when it may be sent now (and is marked).
 export function mayNotice(ctx: Pick<TenantContext, "metaFile">, kind: string, now = Date.now()): boolean {
   const m = meta(ctx);
