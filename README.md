@@ -111,18 +111,20 @@ Full details: [docs/SAFETY.md](docs/SAFETY.md).
 
 ## How it compares
 
-Personal agents are having a moment. Ted is deliberately narrow: one person, your own Mac, Signal as the front door, and a question on your phone before anything leaves it. The cells for other products come from public descriptions, not from using them.
+Personal agents are having a moment. Ted sits in the middle: hosted products like Instinct are opaque and cannot be changed, and OpenClaw is open and extensible but technical to set up. Ted comes with what a powerful personal assistant needs out of the box, with strong safety defaults, and you run it yourself and can change it. The cells for other products come from public descriptions, not from using them.
 
 | | **Ted** | **[OpenClaw](https://en.wikipedia.org/wiki/OpenClaw)** | **[Grok Bot](https://www.vellum.ai/blog/official-grok-bot-breakdown)** | **[Instinct](https://www.vellum.ai/blog/official-instinct-breakdown)** |
 |---|---|---|---|---|
 | **What it is** | A personable assistant in your Signal chats, with heartbeat, memory, browsing and mail, calendar and task skills out of the box | A general-purpose agent platform | A general agent on a cloud computer | A general assistant you text or call |
 | **Before it acts** | Code-enforced policy: reads run, outward actions ask on your phone (in chat, a send you asked for exactly may go through on a small model's judgement), deletes are denied | Per-agent tool permissions; sandboxed or full system access, your choice | Allow once / always / deny, plus auto-review rules | Reported by Vellum: no approval step required for actions. Corrections welcome |
+| **Setup** | Ask Claude Code to install it, then message it in Signal: the rest of the setup happens in the chat | A command-line onboarding wizard (`openclaw onboard`) for model, gateway and channels; some steps in a masked terminal | Sign in to the app | Invite-only; you message it and connect accounts |
+| **Secrets and payments** | Secrets never go through chat or the model: entered at a local CLI or a one-time link. Card payments need your typed YES in the chat, with caps and a ledger | Community skills are a reported risk: a Snyk scan found about 7% of ClawHub skills pass keys or card numbers through the model | Not documented in what I found | Not documented in what I found |
 | **Source** | Open (MIT)| Open, large | Proprietary | Proprietary |
 | **Cost** | Your Claude plan. Measured in October 2026 with Sonnet: about $0.01 for a simple warm reply, $0.03 to $0.08 for a calendar question | Free software plus your model costs | $200/month, or bundled with SuperGrok Heavy and Cursor plans | Free in invite-only beta, pricing not published |
 | **Runs on** | Your Mac | Your machine or server | xAI's cloud | The vendor's cloud |
-| **Where you talk to it** | Signal (swappable for Telegram, Slack...) | WhatsApp, Telegram, Signal, Slack, iMessage and more | Desktop and iPhone app | iMessage, WhatsApp, phone calls |
+| **Where you talk to it** | Signal (Telegram next; other messengers plug into a generic interface) | WhatsApp, Telegram, Signal, Slack, iMessage and more | Desktop and iPhone app | iMessage, WhatsApp, phone calls |
 
-**Ted may suit you** if you want a small, readable assistant for one person that comes with personality and personal assistant skills out of the box. **OpenClaw** fits a broad, self-hosted agent that needs a lot more technical setup. **Grok Bot or Instinct** fit if you would rather have a hosted product than run anything yourself.
+**Ted may suit you** if you want a readable assistant for one person that comes with personality and personal assistant skills out of the box, that you set up by chatting, and that you can run and change yourself. **OpenClaw** fits a broad, self-hosted agent platform with many channels and community skills, and more technical setup. **Grok Bot or Instinct** fit if you would rather have a hosted product than run anything yourself.
 
 ## Make it yours
 
