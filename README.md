@@ -8,7 +8,7 @@
 
 - **A character, by default Ted Lasso.** Warm, folksy and relentlessly optimistic. Change it by telling Ted what you want.
 - **Typing, seen, reactions.** It marks your message read, shows "typing..." while it works, and sometimes answers with just an emoji on your message. 
-- **Voice in and out.** A voice note is transcribed on your Mac. Ted may answer with a voice message when that fits, generated locally. If you give it a 10s sample of the voice of your character it starts talking in that voice (by just sending it a voice message in the chat and ask to use it)
+- **Voice in and out.** A voice note is transcribed on your Mac. Ted may answer with a voice message when that fits, generated locally. Out of the box it speaks with a stock local voice (Kokoro, `am_onyx`; this repo ships no recordings of anyone). To give Ted a voice of your own, send a voice message of about 10 seconds in the chat and ask it to use that voice; it speaks in it from then on, per conversation (needs `TTS_PROVIDER=qwen`, see docs/REMOTE-TTS.md). Use your own voice, or one whose owner agreed: a clip taken from a film, a show or a public figure is someone else's voice and someone else's recording.
 - **Pictures, PDFs and text files.** Send a picture, a PDF or a text file and Ted reads it. When browsing the web it can send you screenshots of what it sees.
 - **Browse the web.** It has a browser it can use to research for you online, and tells you what it is up to before a long errand.
 - **Groups, where it decides when to speak.** Add Ted to a group and a small model judges each message: Ted always answers when addressed and otherwise joins in only when it fits. Each group has its own notes and history, and Ted brings none of your private data there.
