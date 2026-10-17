@@ -154,6 +154,18 @@ export function loadSettings(env: Env) {
     cardCapPurchase: num(env, "CARD_CAP_PURCHASE", 25, 0, 10_000), // the most one payment may be
     cardCapDay: num(env, "CARD_CAP_DAY", 50, 0, 100_000), // the most paid in one local day (clicked, confirmed and unconfirmed payments count)
     browseMaxPayments: num(env, "BROWSE_MAX_PAYMENTS", 1, 0, 3), // card payments one browse run may start
+    // OpenBao, the secret store (src/openbao.ts, docs/SETUP.md): the saved profile, the card and later tokens and keys. None of these is a secret;
+    // the app's token is in the macOS Keychain, never in .env.
+    openbao: {
+      addr: env.OPENBAO_ADDR?.trim() || "https://127.0.0.1:8200", // loopback only (checked by the client)
+      mount: env.OPENBAO_MOUNT?.trim() || "ted", // the KV v2 mount; items are at <mount>/tenants/<id>/...
+      dir: resolve(dataDir, env.OPENBAO_HOME?.trim() || "state/openbao"), // binary, config, data, audit log and certificate (0700, ignored by git)
+      caCert: resolve(dataDir, env.OPENBAO_CACERT?.trim() || join(env.OPENBAO_HOME?.trim() || "state/openbao", "tls/cert.pem")), // the pinned certificate
+      role: env.OPENBAO_ROLE?.trim() || "ted-owner", // the policy and token role of the owner's tenant
+      keychainPrefix: env.OPENBAO_KEYCHAIN_PREFIX?.trim() || "ted-openbao", // names of this Mac's Keychain items for the token and the unseal shares
+      timeoutMs: num(env, "OPENBAO_TIMEOUT_SECONDS", 5, 1, 60) * 1000,
+      cacheMs: num(env, "OPENBAO_CACHE_SECONDS", 30, 0, 300) * 1000, // how long profile reads may be served from memory (the card is never cached)
+    },
     // Screenshot vision for the browse worker (src/browsevision.ts), an experiment, off by default. read: screenshots reach the model, clicks stay by ref.
     // click: also clicks by coordinates, which the guard resolves to the element under the point itself (a debugging port on loopback, browsecdp.ts).
     browseVision: oneOf(env, "BROWSE_VISION", "off", ["off", "read", "click"] as const),

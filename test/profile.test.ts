@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readAudit } from "../src/audit.ts";
@@ -10,23 +9,17 @@ import { BrowseGuard } from "../src/browseguard.ts";
 import { findTotal, parseSnapshot } from "../src/browserules.ts";
 import { hostMatches, normalizeDomain, registeredDomain } from "../src/domains.ts";
 import { makeCanUseTool } from "../src/permissions.ts";
-import { loadProfile, ProfileError, ProfileStore, seal, unseal, fieldFitsKey, kindOfKey, type Entries, type Keychain } from "../src/profile.ts";
+import { loadProfile, ProfileStore, fieldFitsKey, kindOfKey, type Entries } from "../src/profile.ts";
 import { profileCli } from "../src/profilecli.ts";
 import { factsOf, validateQuestion } from "../src/questionfacts.ts";
 import { OWNER_KEY } from "../src/send.ts";
+import { TenantSecrets } from "../src/secrets.ts";
+import { startFakeBao } from "./fakebao.ts";
 
-// Obviously fake values only. No test touches the real Keychain: it is a function the store is given.
-const KEY = "ab".repeat(32);
-const OTHER_KEY = "cd".repeat(32);
+// Obviously fake values only. No test touches the real OpenBao or Keychain: the store talks to an in-process fake of OpenBao's HTTP API (fakebao.ts).
 const NAME = "Annabelle Fakename";
 const EMAIL = "annabelle.fake@example.com";
 const PASSPORT = "ZZ9999999FAKE";
-const memoryKeychain = (initial?: string): Keychain & { stored?: string } => {
-  const k: Keychain & { stored?: string } = { stored: initial, get: async () => k.stored, set: async (hex) => void (k.stored = hex) };
-  return k;
-};
-const brokenKeychain: Keychain = { get: async () => { throw new Error("the macOS Keychain could not be used"); }, set: async () => { throw new Error("no"); } };
-const tmp = () => join(mkdtempSync(join(tmpdir(), "profile-")), "profile.enc");
 
 const ENTRIES: Entries = {
   full_name: { value: NAME, kind: "name", domains: [] },
@@ -37,59 +30,78 @@ const ENTRIES: Entries = {
   loyalty_sbb: { value: "LOYALTY-FAKE-1234", kind: "other", domains: ["sbb.ch"] },
 };
 
-// ---- the encrypted file ----
+// ---- the store ----
 
-test("encryption: AES-256-GCM round trip; the file holds no plaintext; a wrong key, a changed byte and a changed tag all fail", () => {
-  const file = seal(ENTRIES, KEY);
-  assert.ok(!file.includes(PASSPORT) && !file.includes(EMAIL) && !file.includes("passport"));
-  assert.deepEqual(unseal(file, KEY).email, ENTRIES.email);
-  assert.throws(() => unseal(file, OTHER_KEY));
-  const o = JSON.parse(file) as { ct: string; tag: string; iv: string };
-  const flip = (b64: string) => { const b = Buffer.from(b64, "base64"); b[0] = b[0]! ^ 1; return b.toString("base64"); };
-  assert.throws(() => unseal(JSON.stringify({ ...o, ct: flip(o.ct) }), KEY), "a changed ciphertext");
-  assert.throws(() => unseal(JSON.stringify({ ...o, tag: flip(o.tag) }), KEY), "a changed tag");
-  assert.throws(() => unseal(JSON.stringify({ ...o, iv: flip(o.iv) }), KEY), "a changed nonce");
-  assert.throws(() => unseal("not json", KEY));
-  assert.notEqual(seal(ENTRIES, KEY), file, "a fresh nonce every time");
+type Fake = Awaited<ReturnType<typeof startFakeBao>>;
+const withBao = async (f: (fake: Fake) => Promise<void>) => {
+  const fake = await startFakeBao();
+  try {
+    await f(fake);
+  } finally {
+    await fake.close();
+  }
+};
+const filled = async (fake: Fake, o: { cacheMs?: number } = {}) => {
+  const store = new ProfileStore(fake.secrets("owner", o));
+  for (const [k, e] of Object.entries(ENTRIES)) await store.set(k, e);
+  return store;
+};
+
+test("the store: items live at tenants/owner/profile/<key> in OpenBao; read gives the entries back; values never travel in a URL", async () => {
+  await withBao(async (fake) => {
+    const store = new ProfileStore(fake.secrets());
+    assert.deepEqual(await store.read(), {});
+    await filled(fake);
+    assert.deepEqual([...fake.store.keys()].sort(), Object.keys(ENTRIES).map((k) => `tenants/owner/profile/${k}`).sort());
+    assert.deepEqual((await store.read()).passport, ENTRIES.passport);
+    assert.deepEqual(await store.get("email"), ENTRIES.email);
+    assert.equal(await store.get("nope"), undefined);
+    assert.ok(fake.requests.every((r) => !r.path.includes(EMAIL) && !r.path.includes(PASSPORT)));
+    assert.equal(await store.delete("passport"), true);
+    assert.equal(await store.delete("passport"), false);
+    assert.ok(!(await store.read()).passport);
+  });
 });
 
-test("the store: first write creates the key in the keychain and a 0600 file; read gives the entries back", async () => {
-  const kc = memoryKeychain();
-  const path = tmp();
-  const store = new ProfileStore(kc, path);
-  assert.equal(store.exists(), false);
-  assert.deepEqual(await store.read(), {});
-  await store.write(ENTRIES);
-  assert.match(kc.stored!, /^[0-9a-f]{64}$/);
-  assert.equal(statSync(path).mode & 0o777, 0o600);
-  assert.ok(!readFileSync(path, "utf8").includes(EMAIL));
-  assert.deepEqual((await store.read()).passport, ENTRIES.passport);
+test("fail closed: an item that is not a whole entry is left out, not guessed; a problem with the store means no profile, with a reason that holds no value", async () => {
+  await withBao(async (fake) => {
+    await filled(fake);
+    fake.store.set("tenants/owner/profile/broken", { value: 5 });
+    fake.store.set("tenants/owner/profile/nokind", { value: "x", kind: "bogus" });
+    assert.deepEqual(Object.keys(await new ProfileStore(fake.secrets()).read()).sort(), Object.keys(ENTRIES).sort());
+    for (const m of [{ down: true }, { sealed: true }, { garbage: true }]) {
+      Object.assign(fake.mode, { down: false, sealed: false, garbage: false }, m);
+      const problems: string[] = [];
+      assert.equal(await loadProfile(new ProfileStore(fake.secrets()), (r) => problems.push(r)), undefined);
+      assert.equal(problems.length, 1);
+      assert.ok(![EMAIL, PASSPORT, NAME, fake.token].some((v) => problems[0]!.includes(v)));
+    }
+  });
 });
 
-test("fail closed: no keychain, no key for an existing file, a changed file and a loose file mode all mean no profile", async () => {
-  const path = tmp();
-  await new ProfileStore(memoryKeychain(KEY), path).write(ENTRIES);
-  const problems: string[] = [];
-  // the keychain cannot be read
-  await assert.rejects(new ProfileStore(brokenKeychain, path).read(), ProfileError);
-  assert.equal(await loadProfile(new ProfileStore(brokenKeychain, path), (r) => problems.push(r)), undefined);
-  assert.match(problems[0]!, /Keychain/);
-  // the keychain has no key (or another one)
-  await assert.rejects(new ProfileStore(memoryKeychain(), path).read(), /no key/);
-  await assert.rejects(new ProfileStore(memoryKeychain(OTHER_KEY), path).read(), /does not open/);
-  // a write must not mint a new key over an existing file
-  const empty = memoryKeychain();
-  await assert.rejects(new ProfileStore(empty, path).write({}), ProfileError);
-  assert.equal(empty.stored, undefined);
-  // a changed file
-  const o = JSON.parse(readFileSync(path, "utf8")) as { ct: string };
-  writeFileSync(path, JSON.stringify({ ...o, ct: Buffer.from("xx").toString("base64") }), { mode: 0o600 });
-  assert.equal(await loadProfile(new ProfileStore(memoryKeychain(KEY), path)), undefined);
-  // a file others can read
-  const loose = tmp();
-  await new ProfileStore(memoryKeychain(KEY), loose).write(ENTRIES);
-  (await import("node:fs")).chmodSync(loose, 0o644);
-  await assert.rejects(new ProfileStore(memoryKeychain(KEY), loose).read(), /readable by others/);
+test("the cache: reads are served from memory for a moment, and a write or delete empties it", async () => {
+  await withBao(async (fake) => {
+    const store = await filled(fake, { cacheMs: 60_000 });
+    await store.read();
+    const n = fake.requests.length;
+    await store.read();
+    assert.equal(fake.requests.length, n, "a second read made no request");
+    await store.set("email", { ...ENTRIES.email!, value: "other.fake@example.com" });
+    assert.equal((await store.read()).email!.value, "other.fake@example.com", "a write emptied the cache");
+    await store.delete("email");
+    assert.ok(!(await store.read()).email);
+  });
+});
+
+test("tenants: a friend's token cannot read or write the owner's folder, and the owner's cannot reach a friend's (the policy rule, in the fake as in OpenBao)", async () => {
+  await withBao(async (fake) => {
+    await filled(fake);
+    assert.deepEqual(await new ProfileStore(fake.secrets("friend")).read(), {}, "the friend's own folder is empty");
+    const sneaky = new TenantSecrets(fake.bao({ token: fake.tokenFor("friend") }), "owner");
+    await assert.rejects(sneaky.get("profile", "email"), /refused/);
+    await assert.rejects(sneaky.put("profile", "email", { value: "x" }), /refused/);
+    await assert.rejects(new TenantSecrets(fake.bao(), "friend").get("profile", "email"), /refused/);
+  });
 });
 
 // ---- the owner's command ----
@@ -102,7 +114,8 @@ const cli = async (argv: string[], store: ProfileStore, value = "") => {
 };
 
 test("the command: set reads a hidden value, list masks it, domains and delete work; values never appear in the output", async () => {
-  const store = new ProfileStore(memoryKeychain(), tmp());
+  await withBao(async (fake) => {
+  const store = new ProfileStore(fake.secrets());
   let r = await cli(["set", "passport"], store, PASSPORT);
   assert.equal(r.code, 0);
   assert.match(r.prompts[0]!, /hidden/);
@@ -119,18 +132,26 @@ test("the command: set reads a hidden value, list masks it, domains and delete w
   r = await cli(["delete", "passport"], store);
   assert.equal(r.code, 0);
   assert.equal(Object.keys(await store.read()).join(), "email");
+  assert.equal((await cli(["delete", "passport"], store)).code, 1, "no such key");
+  assert.ok(fake.requests.every((q) => !q.path.includes(PASSPORT)));
+  });
 });
 
 test("the command refuses a card number, a password field name, a bad key and an empty value; no value as an argument is ever used", async () => {
-  const store = new ProfileStore(memoryKeychain(), tmp());
-  assert.equal((await cli(["set", "visa"], store, "4111 1111 1111 1111")).code, 1);
-  assert.equal((await cli(["set", "bank_password"], store, "hunter2hunter2")).code, 1);
-  assert.equal((await cli(["set", "Bad Key"], store, "x")).code, 1);
-  assert.equal((await cli(["set", "email"], store, "  ")).code, 1);
-  assert.equal(store.exists(), false, "nothing was written");
-  assert.equal((await cli(["set", "passport", "--domains", "not a domain"], store, PASSPORT)).code, 1);
-  assert.equal((await cli(["nonsense"], store)).code, 1);
-  assert.equal((await cli(["list"], new ProfileStore(brokenKeychain, (await (async () => { const p = tmp(); await new ProfileStore(memoryKeychain(KEY), p).write(ENTRIES); return p; })())))).code, 1, "an unreadable keychain is an error, not an empty list");
+  await withBao(async (fake) => {
+    const store = new ProfileStore(fake.secrets());
+    assert.equal((await cli(["set", "visa"], store, "4111 1111 1111 1111")).code, 1);
+    assert.equal((await cli(["set", "bank_password"], store, "hunter2hunter2")).code, 1);
+    assert.equal((await cli(["set", "Bad Key"], store, "x")).code, 1);
+    assert.equal((await cli(["set", "email"], store, "  ")).code, 1);
+    assert.equal(fake.store.size, 0, "nothing was written");
+    assert.equal((await cli(["set", "passport", "--domains", "not a domain"], store, PASSPORT)).code, 1);
+    assert.equal((await cli(["nonsense"], store)).code, 1);
+    fake.mode.sealed = true;
+    const r = await cli(["list"], store);
+    assert.equal(r.code, 1, "a sealed store is an error, not an empty profile");
+    assert.match(r.out, /sealed/);
+  });
 });
 
 // ---- domains ----

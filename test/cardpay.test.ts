@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readAudit } from "../src/audit.ts";
@@ -9,10 +9,10 @@ import type { Verdict } from "../src/autojudge.ts";
 import { browse, browseSystem } from "../src/browse.ts";
 import { BrowseGuard } from "../src/browseguard.ts";
 import type { FrameProbe } from "../src/browsecdp.ts";
-import { CardStore, KillSwitch, openCardAccess, type CardAccess, type CardRecord } from "../src/card.ts";
+import { KillSwitch, openCardAccess, type CardAccess, type CardRecord } from "../src/card.ts";
 import { Ledger } from "../src/payments.ts";
 import { makeCanUseTool } from "../src/permissions.ts";
-import { ProfileStore, type Keychain } from "../src/profile.ts";
+import { fakeCardStore } from "./fakebao.ts";
 import { OWNER_KEY } from "../src/send.ts";
 import { dataPath } from "../src/state.ts";
 
@@ -28,17 +28,11 @@ const opts = { signal: new AbortController().signal } as never;
 const publicDns = async () => ["93.184.216.34"];
 const SHOP = "https://shop.test/checkout";
 const PSP = "https://checkout.stripe.com/c/pay/cs_test_fake";
-const memoryKeychain = (): Keychain => {
-  let stored: string | undefined;
-  return { get: async () => stored, set: async (hex) => void (stored = hex) };
-};
 
 let n = 0;
 const unique = () => `${process.pid}-${++n}`;
 const newStore = async (card: CardRecord = CARD) => {
-  const store = new CardStore(new ProfileStore(memoryKeychain(), join(mkdtempSync(join(tmpdir(), "cardpay-")), "profile.enc")));
-  await store.save(card);
-  return store;
+  return fakeCardStore(card);
 };
 const newAccess = async (o: { card?: CardRecord; caps?: CardAccess["caps"]; kill?: KillSwitch; ledger?: Ledger } = {}) => {
   const kill = o.kill ?? new KillSwitch(`state/card-test-${unique()}.disabled`);

@@ -19,13 +19,13 @@ export interface CardCliDeps {
 
 const USAGE = [
   "usage: npm run card -- <command>",
-  "  set [--currency CHF] [--label Wise]   asks for the card number, expiry and security code at hidden prompts, and saves them encrypted",
+  "  set [--currency CHF] [--label Wise]   asks for the card number, expiry and security code at hidden prompts, and saves them in OpenBao",
   "  list                                  the card by its last four digits, its caps and whether card payments are on",
   "  disable                               the kill switch: no card payment, whatever the chat says (the chat has /card off too)",
   "  enable                                switch card payments on again (only possible here, never from the chat)",
   "  payments                              the last payments (merchant, amount, last four, status)",
   "  clear <id>                            an unconfirmed payment you checked in the card app: stops blocking a retry and no longer counts as spent",
-  "  delete                                remove the card from the encrypted file",
+  "  delete                                remove the card from OpenBao",
 ];
 
 const flag = (args: string[], name: string): string | undefined => {
@@ -90,7 +90,7 @@ export async function cardCli(argv: string[], d: CardCliDeps): Promise<number> {
       return 0;
     }
     if (cmd === "delete") {
-      d.out((await d.store.remove()) ? "The card is deleted from the encrypted file." : "No card was saved.");
+      d.out((await d.store.remove()) ? "The card is deleted from OpenBao." : "No card was saved.");
       return 0;
     }
   } catch (e) {

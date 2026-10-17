@@ -12,6 +12,9 @@ import { Mailbird } from "./mailbird.ts";
 import { isPaused, localTime } from "./pause.ts";
 import { browseStatus, PLAYWRIGHT_MCP_VERSION, type BrowseStatus } from "./browseserver.ts";
 import { killSwitch } from "./card.ts";
+import { macKeychain, type Keychain } from "./keychain.ts";
+import { BaoError, type OpenBao } from "./openbao.ts";
+import { appBao, keychainNames, OWNER } from "./secrets.ts";
 import { Ledger } from "./payments.ts";
 import { settings } from "./settings.ts";
 import { disconnected, NAMES, readConnectors } from "./connectors.ts";
@@ -40,6 +43,44 @@ export function gmailChecks(line: Line, o: { self: string | undefined; connector
 }
 
 // The browse tool (BROWSE=on by default) needs the pinned @playwright/mcp (npm install) and its browser (npm run setup:browse). Off is a valid setup.
+// The OpenBao checks: the store of the saved profile and the card. Reachable, unsealed, and the app's token is the narrow one it should be: it
+// has the owner's policy and no other, may use the owner's folder, and may NOT use another tenant's or the system paths. With no token in the
+// Keychain the store is not set up (a warning: only saved details and card payments need it); once there is a token, a store that does
+// not answer is a failure. `bao` and `keychain` are given by tests.
+export async function openbaoCheck(line: Line, o: { bao?: () => OpenBao; keychain?: Keychain; cfg?: typeof settings.openbao } = {}): Promise<void> {
+  const cfg = o.cfg ?? settings.openbao;
+  const what = "OpenBao (secret store)";
+  const hasToken = await (o.keychain ?? macKeychain).get(keychainNames(cfg.keychainPrefix).token).then((t) => !!t, () => false);
+  const down = (detail: string) => line(hasToken ? false : "warn", what, hasToken ? detail : `not set up (${detail}); saved details and card payments need it: npm run openbao -- setup`);
+  let bao: OpenBao;
+  try {
+    bao = (o.bao ?? appBao)();
+  } catch (e) {
+    return down((e as Error).message.slice(0, LIMITS.reason));
+  }
+  try {
+    const h = await bao.health();
+    if (!h.initialized) return down("the server is running but not initialised");
+    if (h.sealed) return line(false, what, "SEALED: nothing can be read. After a reboot the unseal job does it at login; by hand: npm run openbao -- unseal");
+    if (!hasToken) return line("warn", what, "unsealed, but this Mac's Keychain has no app token: npm run openbao -- setup");
+    const t = await bao.lookupSelf();
+    const mine = `data/tenants/${OWNER}/profile/x`;
+    const caps = await bao.capabilities([mine, `metadata/tenants/${OWNER}/profile`, `data/tenants/${OWNER}-other/profile/x`, "data/tenants/friend/profile/x", "data/other/x"]);
+    const has = (p: string, c: string) => (caps[p] ?? []).includes(c) || (caps[p] ?? []).includes("root");
+    const problems: string[] = [];
+    if (t.policies.includes("root")) problems.push("the token is a ROOT token");
+    if (t.policies.some((p) => p !== "default" && p !== cfg.role)) problems.push(`the token has policies besides ${cfg.role}`);
+    if (!["read", "create", "update"].every((c) => has(mine, c))) problems.push("the token cannot read and write the owner's folder");
+    if (!has(`metadata/tenants/${OWNER}/profile`, "list")) problems.push("the token cannot list the owner's folder");
+    for (const other of [`data/tenants/${OWNER}-other/profile/x`, "data/tenants/friend/profile/x", "data/other/x"]) if ((caps[other] ?? []).some((c) => c !== "deny")) problems.push("the token reaches beyond the owner's folder");
+    if (problems.length) return line(false, what, `${problems.join("; ")}: npm run openbao -- setup repairs it`);
+    const days = t.ttlSeconds / 86_400;
+    line(days < 3 ? "warn" : true, what, `v${h.version ?? "?"} unsealed, token limited to tenants/${OWNER}/ (policy ${cfg.role}), expires in ${days >= 1 ? `${Math.floor(days)} day(s)` : "under a day"}${days < 3 ? "; renew: npm run openbao -- renew" : ""}`);
+  } catch (e) {
+    down(e instanceof BaoError ? e.message.slice(0, LIMITS.reason) : "the check failed");
+  }
+}
+
 export function browseCheck(line: Line, on: boolean, status: BrowseStatus): void {
   if (!on) return line(true, "browse: off", "BROWSE=off");
   line(status.ok, "browse: browser tool ready", status.ok ? `@playwright/mcp ${PLAYWRIGHT_MCP_VERSION}, headless Chromium; the tool is offered but reports "not set up" until this passes` : `${status.reason}; until then the browse tool tells the user it is not set up`);
@@ -139,6 +180,7 @@ export async function doctor() {
   line(true, "nightly dream", settings.dream ? `once a day before the brief; last run ${dream.lastRunAt ? localTime(dream.lastRunAt) : "not yet"}` : "off (DREAM=off)");
 
   browseCheck(line, settings.browse, browseStatus());
+  await openbaoCheck(line);
 
   line(true, "proactive radar", settings.proactive ? `chosen by your chat's gate, about every ${settings.radarMinutes} min (its "[radar] ran" lines are in the log)` : "off (PROACTIVE=off)");
 

@@ -1,25 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { cardCommand, CardStore, KillSwitch, openCardAccess, parseExpiry, type CardRecord } from "../src/card.ts";
 import { cardCli } from "../src/cardcli.ts";
 import { capProblem, Ledger } from "../src/payments.ts";
 import { approvalId, cartHash, cartLines, findPayableTotal, frameVerdict, isTypedYes, kindOfFieldName, expirySplit, parseAmount, parseMoney, paymentOutcome, riskyBoxes } from "../src/paymentrules.ts";
-import { ProfileStore, seal, type Entries, type Keychain } from "../src/profile.ts";
+import { ProfileStore, type Entries } from "../src/profile.ts";
+import { TenantSecrets } from "../src/secrets.ts";
+import { fakeCardStore, startFakeBao } from "./fakebao.ts";
 
 // Obviously fake values only: the public test card number of the card networks (a Luhn-valid number that belongs to nobody), a made-up security code,
-// a local fake checkout. No test touches the real Keychain (it is a function the store is given) or a real merchant.
+// a local fake checkout. No test touches the real OpenBao or Keychain (the store talks to an in-process fake, fakebao.ts) or a real merchant.
 const PAN = "4242424242424242";
 const PAN_SPACED = "4242 4242 4242 4242";
 const CVC = "737";
-const KEY = "ab".repeat(32);
-const memoryKeychain = (initial?: string): Keychain & { stored?: string } => {
-  const k: Keychain & { stored?: string } = { stored: initial, get: async () => k.stored, set: async (hex) => void (k.stored = hex) };
-  return k;
-};
-const dir = () => mkdtempSync(join(tmpdir(), "card-"));
 const CARD: CardRecord = { pan: PAN, expMonth: 12, expYear: 2099, cvc: CVC, label: "Wise", last4: "4242", currency: "CHF" };
 const ENTRIES: Entries = { email: { value: "annabelle.fake@example.com", kind: "email", domains: [] } };
 
@@ -29,7 +24,7 @@ const cli = async (argv: string[], inputs: string[], o: { store?: CardStore; kil
   const lines: string[] = [];
   const asked: string[] = [];
   const queue = [...inputs];
-  const store = o.store ?? new CardStore(new ProfileStore(memoryKeychain(), join(dir(), "profile.enc")));
+  const store = o.store ?? (await fakeCardStore());
   const code = await cardCli(argv, {
     store,
     kill: o.kill ?? new KillSwitch("state/card-test-cli.disabled"),
@@ -41,7 +36,7 @@ const cli = async (argv: string[], inputs: string[], o: { store?: CardStore; kil
   return { code, lines, asked, store, out: lines.join("\n") };
 };
 
-test("card entry: set asks at hidden prompts, saves the card encrypted, and prints nothing beyond the last four digits", async () => {
+test("card entry: set asks at hidden prompts, saves the card in OpenBao, and prints nothing beyond the last four digits", async () => {
   const r = await cli(["set", "--currency", "chf", "--label", "Wise"], [PAN_SPACED, "12/99", CVC, "A Fake"]);
   assert.equal(r.code, 0);
   assert.deepEqual(r.asked.map((p) => /hidden/.test(p)), [true, true, true, true], "every prompt is hidden");
@@ -74,54 +69,76 @@ test("card entry: a bad number, an expired card, a bad security code and a bad e
   assert.deepEqual(parseExpiry("12 / 2031"), { expMonth: 12, expYear: 2031 });
 });
 
-test("card entry: it needs a terminal (a piped value is refused by the prompt) and refuses a store it cannot open", async () => {
+test("card entry: it needs a terminal (a piped value is refused by the prompt) and a store it cannot open is an error", async () => {
   const { readHiddenFromTerminal } = await import("../src/profilecli.ts");
   await assert.rejects(readHiddenFromTerminal("x"), /needs a terminal/);
-  const path = join(dir(), "profile.enc");
-  await new ProfileStore(memoryKeychain(KEY), path).write(ENTRIES);
-  const r = await cli(["list"], [], { store: new CardStore(new ProfileStore(memoryKeychain("cd".repeat(32)), path)) });
-  assert.equal(r.code, 1, "a wrong key is an error, not an empty list");
+  const store = await fakeCardStore(CARD);
+  store.fake.mode.sealed = true;
+  const r = await cli(["list"], [], { store });
+  assert.equal(r.code, 1, "a sealed store is an error, not an empty list");
+  assert.match(r.out, /sealed/);
+  assert.ok(!r.out.includes(PAN) && !r.out.includes(CVC));
 });
 
 // ---- the store ----
 
-test("store: the card is sealed in the same file as the profile, as its own item; the profile readers never return it", async () => {
-  const kc = memoryKeychain();
-  const path = join(dir(), "profile.enc");
-  const profile = new ProfileStore(kc, path);
-  await profile.write(ENTRIES);
-  const store = new CardStore(profile);
+test("store: the card is its own item at tenants/owner/card/primary; the profile readers never return it; nothing about it travels in a URL", async () => {
+  const fake = await startFakeBao();
+  const profile = new ProfileStore(fake.secrets());
+  await profile.set("email", ENTRIES.email!);
+  const store = new CardStore(fake.secrets());
   await store.save(CARD);
-  const file = readFileSync(path, "utf8");
-  for (const secret of [PAN, CVC, "4242", "email", "annabelle"]) assert.ok(!file.includes(secret), `the file holds no plaintext ${secret}`);
-  assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.deepEqual([...fake.store.keys()].sort(), ["tenants/owner/card/primary", "tenants/owner/profile/email"]);
   assert.deepEqual(Object.keys(await profile.read()), ["email"], "the profile sees its own entries only");
   assert.ok(!JSON.stringify(await profile.read()).includes(PAN));
   assert.equal((await store.load())?.pan, PAN);
-  // saving the profile keeps the card; deleting the card keeps the profile
-  await profile.write({ ...ENTRIES, phone: { value: "0790000000", kind: "phone", domains: [] } });
+  assert.ok(fake.requests.every((r) => ![PAN, CVC].some((v) => r.path.includes(v))));
+  // saving a profile key keeps the card; deleting the card keeps the profile
+  await profile.set("phone", { value: "0790000000", kind: "phone", domains: [] });
   assert.equal((await store.load())?.cvc, CVC);
   assert.equal(await store.remove(), true);
+  assert.equal(await store.remove(), false);
   assert.equal(await store.load(), undefined);
   assert.deepEqual(Object.keys(await profile.read()).sort(), ["email", "phone"]);
   // what a run may know: the last four, the label and the currency
   await store.save(CARD);
   assert.deepEqual(await store.peek(), { last4: "4242", label: "Wise", currency: "CHF" });
+  await fake.close();
 });
 
-test("store: a wrong key, a changed file or a damaged card item all mean no card; an old profile file without a card still opens", async () => {
-  const path = join(dir(), "profile.enc");
-  const store = new CardStore(new ProfileStore(memoryKeychain(), path));
+test("store: the card is never served from the client's cache (every payment reads it fresh); a damaged item is no card", async () => {
+  const fake = await startFakeBao();
+  const store = new CardStore(fake.secrets("owner", { cacheMs: 60_000 }));
   await store.save(CARD);
-  await assert.rejects(new CardStore(new ProfileStore(memoryKeychain("cd".repeat(32)), path)).load(), /does not open/);
-  // a profile sealed before the card existed
-  const old = join(dir(), "profile.enc");
-  (await import("node:fs")).writeFileSync(old, seal(ENTRIES, KEY), { mode: 0o600 });
-  assert.equal(await new CardStore(new ProfileStore(memoryKeychain(KEY), old)).load(), undefined);
-  // a card item that is not a card (a number that fails the check) is no card
-  const bad = new ProfileStore(memoryKeychain(), join(dir(), "profile.enc"));
-  await bad.writeAll({ entries: ENTRIES, card: { ...CARD, pan: "4242424242424243" } });
-  assert.equal(await new CardStore(bad).load(), undefined);
+  await store.load();
+  const n = fake.requests.length;
+  await store.load();
+  assert.equal(fake.requests.length, n + 1, "a second load asked OpenBao again");
+  fake.store.set("tenants/owner/card/primary", { ...CARD, pan: "4242424242424243" }); // fails the Luhn check
+  assert.equal(await store.load(), undefined);
+  fake.store.set("tenants/owner/card/primary", { pan: PAN });
+  assert.equal(await store.load(), undefined);
+  await fake.close();
+});
+
+test("a friend's card is refused in code: no card item for any tenant but the owner, however it is asked for", async () => {
+  const fake = await startFakeBao();
+  const friend = fake.secrets("friend");
+  // the tenant layer
+  await assert.rejects(friend.put("card", "primary", { ...CARD }), /never stored/);
+  await assert.rejects(friend.get("card", "primary"), /never stored/);
+  await assert.rejects(friend.names("card"), /never stored/);
+  await assert.rejects(friend.remove("card", "primary"), /never stored/);
+  assert.throws(() => new CardStore(friend), /never stored/);
+  // a made-up tenant name that merely looks like the owner
+  for (const t of ["owner2", "owner-x", "friend", "admin"]) await assert.rejects(fake.secrets(t).put("card", "primary", { ...CARD }), /never stored/, t);
+  // and the card store of the owner writes into the owner's folder only
+  await new CardStore(fake.secrets("owner")).save(CARD);
+  assert.deepEqual([...fake.store.keys()], ["tenants/owner/card/primary"]);
+  // nothing reached OpenBao for the refused tenants (the refusal is before the request)
+  assert.ok(fake.requests.filter((r) => /friend|owner2|owner-x|admin/.test(r.path)).length === 0);
+  void TenantSecrets;
+  await fake.close();
 });
 
 // ---- the kill switch ----
@@ -140,8 +157,7 @@ test("kill switch: /card off from the owner's chat switches card use off, the ch
   assert.match(cardCommand("/card enable", kill)!, /only possible at the terminal/);
   assert.ok(kill.off());
   // an open access is not given while it is off, even if the card is fine
-  const store = new CardStore(new ProfileStore(memoryKeychain(), join(dir(), "profile.enc")));
-  await store.save(CARD);
+  const store = await fakeCardStore(CARD);
   assert.equal(await openCardAccess({ store, kill, ledger: new Ledger("state/payments-test-kill.jsonl") }), undefined);
   const r = await cli(["enable"], [], { kill });
   assert.match(r.out, /on again/);
@@ -152,18 +168,18 @@ test("kill switch: /card off from the owner's chat switches card use off, the ch
   kill.turnOn();
 });
 
-test("kill switch: it works with no card file at all, and a store that cannot be opened is no access", async () => {
+test("kill switch: it works with no card at all, and a store that cannot be opened is no access", async () => {
   const kill = new KillSwitch("state/card-test-kill2.disabled");
   kill.turnOff("test");
   assert.ok(kill.off());
   kill.turnOn();
   const problems: string[] = [];
-  const path = join(dir(), "profile.enc");
-  await new ProfileStore(memoryKeychain(KEY), path).write(ENTRIES);
-  const wrong = new CardStore(new ProfileStore(memoryKeychain("cd".repeat(32)), path));
-  assert.equal(await openCardAccess({ store: wrong, kill, onProblem: (r) => problems.push(r) }), undefined);
+  const sealed = await fakeCardStore(CARD);
+  sealed.fake.mode.sealed = true;
+  assert.equal(await openCardAccess({ store: sealed, kill, onProblem: (r) => problems.push(r) }), undefined);
   assert.equal(problems.length, 1);
-  assert.equal(await openCardAccess({ store: new CardStore(new ProfileStore(memoryKeychain(), join(dir(), "nope.enc"))), kill }), undefined, "no file: no card");
+  assert.match(problems[0]!, /sealed/);
+  assert.equal(await openCardAccess({ store: await fakeCardStore(), kill }), undefined, "no card item: no card");
 });
 
 // ---- the ledger and the caps ----
